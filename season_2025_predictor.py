@@ -167,7 +167,7 @@ class Season2025Predictor:
     def find_betting_opportunities(self, projections_df):
         """Identify potential betting opportunities"""
         
-        print("\n🎯 2024 BETTING OPPORTUNITIES")
+        print("\n2024 BETTING OPPORTUNITIES")
         print("=" * 60)
         
         # Players with significant projected increases
@@ -177,7 +177,7 @@ class Season2025Predictor:
         ].sort_values('rush_change', ascending=False)
         
         if not big_increasers.empty:
-            print("\n📈 PROJECTED BREAKOUT CANDIDATES (Rushing):")
+            print("\nPROJECTED BREAKOUT CANDIDATES (Rushing):")
             for _, player in big_increasers.head(5).iterrows():
                 print(f"  {player['name']} ({player['position']}, {player['team']})")
                 print(f"    2023: {player['2023_rush_yds']} rush yds → 2024 proj: {player['2024_proj_rush']} (+{player['rush_change']})")
@@ -189,14 +189,14 @@ class Season2025Predictor:
         ].sort_values('rush_change', ascending=True)
         
         if not big_decreasers.empty:
-            print("\n📉 PROJECTED REGRESSION CANDIDATES:")
+            print("\nPROJECTED REGRESSION CANDIDATES:")
             for _, player in big_decreasers.head(5).iterrows():
                 print(f"  {player['name']} ({player['position']}, {player['team']})")
                 print(f"    2023: {player['2023_rush_yds']} rush yds → 2024 proj: {player['2024_proj_rush']} ({player['rush_change']})")
         
         # Top total yards projections
         top_producers = projections_df.nlargest(10, '2024_proj_total')
-        print(f"\n🏆 TOP 10 PROJECTED TOTAL YARDS (2024):")
+        print(f"\nTOP 10 PROJECTED TOTAL YARDS (2024):")
         for i, (_, player) in enumerate(top_producers.iterrows(), 1):
             print(f"  {i:2d}. {player['name']:<20} ({player['position']}) - {player['2024_proj_total']} total yards")
     
@@ -204,7 +204,7 @@ class Season2025Predictor:
         """Save predictions to CSV for analysis"""
         filename = "2024_nfl_projections.csv"
         projections_df.to_csv(filename, index=False)
-        print(f"\n💾 Projections saved to {filename}")
+        print(f"\nProjections saved to {filename}")
 
 def main():
     print("2024/2025 NFL Season Predictor")
@@ -213,10 +213,10 @@ def main():
     predictor = Season2025Predictor()
     
     # Generate projections
-    print("\n🔮 Generating 2024 season projections...")
+    print("\nGenerating 2024 season projections...")
     projections = predictor.create_2025_projections()
     
-    print(f"✅ Generated projections for {len(projections)} players")
+    print(f"Generated projections for {len(projections)} players")
     
     # Find betting opportunities
     predictor.find_betting_opportunities(projections)
@@ -226,7 +226,7 @@ def main():
     
     print(f"\n" + "="*60)
     print("2024 SEASON PREDICTIONS COMPLETE")
-    print("🎯 Use these projections to:")
+    print("Use these projections to:")
     print("  1. Compare against sportsbook season totals")
     print("  2. Identify undervalued players in fantasy drafts")
     print("  3. Find betting edges on player props")

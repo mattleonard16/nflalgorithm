@@ -147,8 +147,16 @@ def create_data_summary_charts(df):
         ax4.set_ylabel('Number of Players')
         
         plt.tight_layout()
-        plt.savefig('nfl_data_analysis.png', dpi=150, bbox_inches='tight')
-        print(f"\n📊 Data visualization saved as 'nfl_data_analysis.png'")
+        plt.savefig('nfl_data_analysis.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"\nData visualization saved as 'nfl_data_analysis.png'")
+        
+        # Final assessment
+        print(f"\n" + "="*60)
+        print("DATA QUALITY ASSESSMENT COMPLETE")
+        print("="*60)
+        print("Dataset appears ready for machine learning training")
         
     except Exception as e:
         print(f"Could not create charts: {e}")

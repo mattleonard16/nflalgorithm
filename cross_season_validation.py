@@ -320,9 +320,9 @@ def main():
     
     print(f"\n" + "="*60)
     print("CROSS-SEASON VALIDATION COMPLETE")
-    print("✅ Model trained on all historical data")
-    print("🎯 Ready for 2024/2025 season predictions")
-    print("📊 Next: Collect current 2024 stats and make predictions")
+    print("Model trained on all historical data")
+    print("Ready for 2024/2025 season predictions")
+    print("Next: Collect current 2024 stats and make predictions")
 
 if __name__ == "__main__":
     main() 
