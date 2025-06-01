@@ -1,8 +1,8 @@
 # NFL Algorithm - Production Betting System
 
-🏈 **A machine learning system for predicting NFL player performance with 97%+ accuracy**
+**A machine learning system for predicting NFL player performance with 97%+ accuracy**
 
-## 🎯 Project Overview
+##  Project Overview
 
 This NFL algorithm transforms from template code to a production-ready betting system that:
 - Scrapes real NFL data from Pro-Football-Reference
@@ -11,7 +11,7 @@ This NFL algorithm transforms from template code to a production-ready betting s
 - Generates 2024/2025 season projections for 479+ players
 - Identifies betting opportunities and value plays
 
-## 📊 Performance Metrics
+##  Performance Metrics
 
 ### Model Accuracy (Cross-Season Validation)
 - **Rushing Predictions**: 6.7 yard MAE, 99.2% R²
@@ -23,7 +23,7 @@ This NFL algorithm transforms from template code to a production-ready betting s
 - **479 player projections** for 2024
 - **Zero impossible values** (data quality validated)
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Installation
 ```bash
@@ -57,7 +57,7 @@ python season_2025_predictor.py
 | `2024_nfl_projections.csv` | Generated predictions |
 | `FINAL_SUMMARY.md` | Complete project analysis |
 
-## 🎯 Key Features
+## Key Features
 
 ### Data Collection
 - ✅ Real-time web scraping with error handling
@@ -77,7 +77,7 @@ python season_2025_predictor.py
 - ✅ Regression candidate detection
 - ✅ Betting opportunity analysis
 
-## 🏆 Top 2024 Projections
+## Top 2024 Projections
 
 1. **Christian McCaffrey** - 1,882 total yards
 2. **CeeDee Lamb** - 1,849 total yards
@@ -98,7 +98,7 @@ python season_2025_predictor.py
 - **2022→2023**: 11.0 yard MAE for rushing predictions
 - **Multi-season**: 6.7 yard MAE (best performance)
 
-## 💰 Betting Applications
+## Betting Applications
 
 ### Current Capabilities
 - Season-long total predictions
@@ -112,7 +112,7 @@ python season_2025_predictor.py
 3. Real-time odds monitoring
 4. Portfolio optimization
 
-## ⚠️ Disclaimers
+##  Disclaimers
 
 - **Past performance doesn't guarantee future results**
 - **Injuries and team changes can impact predictions**
@@ -126,13 +126,13 @@ python season_2025_predictor.py
 - Internet connection for data collection
 - ~500MB storage for full dataset
 
-## 📊 Data Sources
+##  Data Sources
 
 - **Pro-Football-Reference**: Primary data source
 - **NFL.com**: Backup/validation source
 - **Historical seasons**: 2021-2023 complete
 
-## 🔄 Updates
+##  Updates
 
 The model should be retrained periodically with new data:
 - Weekly during season (for in-season adjustments)
