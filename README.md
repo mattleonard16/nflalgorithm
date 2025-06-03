@@ -45,6 +45,18 @@ python cross_season_validation.py
 python season_2025_predictor.py
 ```
 
+### Betting Tools
+```bash
+# Fetch latest player prop lines
+python sportsbook_integration.py
+
+# Calculate recommended bet size
+python betting_utils.py <probability> <decimal_odds> <bankroll>
+
+# Update database with recent results
+python realtime_updater.py --date YYYY-MM-DD
+```
+
 ## Project Structure
 
 | File | Purpose |
@@ -56,6 +68,10 @@ python season_2025_predictor.py
 | `analyze_collected_data.py` | Data quality analysis |
 | `2024_nfl_projections.csv` | Generated predictions |
 | `FINAL_SUMMARY.md` | Complete project analysis |
+| `sportsbook_integration.py` | Fetch sportsbook odds |
+| `betting_utils.py` | Kelly Criterion calculations |
+| `realtime_updater.py` | Placeholder live data updates |
+| `deep_learning_model.py` | Neural network modeling |
 
 ## Key Features
 
@@ -111,6 +127,12 @@ python season_2025_predictor.py
 2. Implement Kelly Criterion
 3. Real-time odds monitoring
 4. Portfolio optimization
+
+### Latest Improvements
+1. **Sportsbook API integration** via `sportsbook_integration.py`
+2. **Kelly Criterion** betting utility in `betting_utils.py`
+3. **Real-time updates** using `realtime_updater.py`
+4. **Deep learning model** prototype in `deep_learning_model.py`
 
 ## Disclaimers
 
