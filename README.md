@@ -122,9 +122,29 @@ python season_2025_predictor.py
 ## Technical Requirements
 
 - Python 3.8+
+- Node.js 18+ (for Context7 MCP)
 - SQLite3
 - Internet connection for data collection
 - ~500MB storage for full dataset
+
+## Context7 Integration
+
+This project includes [Context7 MCP](https://github.com/upstash/context7) for enhanced AI code assistance:
+
+```bash
+# Install Context7 dependencies
+npm install
+
+# Run Context7 MCP server
+npm run context7
+
+# Test Context7 with MCP Inspector
+npm run test-context7
+```
+
+Context7 provides up-to-date documentation for all project libraries (pandas, scikit-learn, matplotlib) to AI code editors, enabling better code suggestions and debugging help.
+
+See `CONTEXT7_USAGE.md` for detailed setup instructions.
 
 ## Data Sources
 

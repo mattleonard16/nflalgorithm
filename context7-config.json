@@ -1,0 +1,62 @@
+{
+  "description": "Context7 MCP Configuration for NFL Algorithm Project",
+  "configurations": {
+    "cursor": {
+      "mcpServers": {
+        "context7": {
+          "command": "npx",
+          "args": ["-y", "@upstash/context7-mcp@latest"],
+          "disabled": false,
+          "autoApprove": []
+        }
+      }
+    },
+    "cline": {
+      "mcpServers": {
+        "context7": {
+          "command": "npx",
+          "args": ["-y", "@upstash/context7-mcp@latest"]
+        }
+      }
+    },
+    "augment_code": {
+      "augment.advanced": {
+        "mcpServers": [
+          {
+            "name": "context7",
+            "command": "npx",
+            "args": ["-y", "@upstash/context7-mcp"]
+          }
+        ]
+      }
+    },
+    "roo_code_remote": {
+      "mcpServers": {
+        "context7": {
+          "type": "streamable-http",
+          "url": "https://mcp.context7.com/mcp"
+        }
+      }
+    },
+    "roo_code_local": {
+      "mcpServers": {
+        "context7": {
+          "command": "npx",
+          "args": ["-y", "@upstash/context7-mcp"]
+        }
+      }
+    }
+  },
+  "usage_examples": {
+    "resolve_library": "Use resolve-library-id tool to find library documentation",
+    "get_docs": "Use get-library-docs tool with specific library ID and optional topic",
+    "common_libraries": [
+      "pandas",
+      "scikit-learn", 
+      "matplotlib",
+      "numpy",
+      "requests",
+      "beautifulsoup4"
+    ]
+  }
+} 

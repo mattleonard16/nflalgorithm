@@ -1,0 +1,27 @@
+{
+  "name": "nfl-algorithm",
+  "version": "1.0.0",
+  "description": "NFL Player Performance Prediction Algorithm with Machine Learning",
+  "main": "data_collection.py",
+  "scripts": {
+    "context7": "npx @upstash/context7-mcp",
+    "context7-http": "npx @upstash/context7-mcp --transport http --port 3000",
+    "test-context7": "npx @modelcontextprotocol/inspector npx @upstash/context7-mcp"
+  },
+  "keywords": [
+    "nfl",
+    "machine-learning",
+    "sports-analytics",
+    "prediction",
+    "context7",
+    "mcp"
+  ],
+  "author": "Matt Leonard",
+  "license": "MIT",
+  "dependencies": {
+    "@upstash/context7-mcp": "^1.0.14"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
