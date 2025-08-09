@@ -1,39 +1,63 @@
 #!/usr/bin/env python3
 """
-Cross-Season Validation for NFL Algorithm
-Train on historical seasons to predict future performance
+Enhanced Cross-Season Validation for NFL Algorithm
+K-fold validation across 2021-2024 seasons with markdown leaderboard output.
 """
 
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, StackingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import TimeSeriesSplit
 import sqlite3
 import logging
-import matplotlib.pyplot as plt
+from datetime import datetime
+from typing import Dict, List, Tuple, Optional
+from pathlib import Path
+
+from config import config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class CrossSeasonValidator:
-    def __init__(self, db_path="nfl_data.db"):
+class EnhancedCrossSeasonValidator:
+    """Enhanced cross-season validator targeting professional-grade performance."""
+    
+    def __init__(self, db_path: str = "nfl_data.db"):
         self.db_path = db_path
-        self.models = {}
-        self.scalers = {}
+        self.target_mae = config.model.target_mae
+        self.results = []
         
-    def load_data(self):
-        """Load all available data"""
+    def load_enhanced_data(self) -> pd.DataFrame:
+        """Load enhanced dataset with all features."""
         conn = sqlite3.connect(self.db_path)
-        df = pd.read_sql_query("SELECT * FROM player_stats ORDER BY season", conn)
-        conn.close()
         
-        logger.info(f"Loaded {len(df)} records across {df['season'].nunique()} seasons")
+        # Try enhanced table first, fall back to basic
+        try:
+            query = """
+            SELECT * FROM player_stats_enhanced 
+            WHERE season BETWEEN 2021 AND 2024
+            ORDER BY season, week, player_id
+            """
+            df = pd.read_sql_query(query, conn)
+            logger.info(f"Loaded {len(df)} enhanced records")
+        except:
+            # Fallback to basic table
+            query = """
+            SELECT * FROM player_stats 
+            WHERE season BETWEEN 2021 AND 2024
+            ORDER BY season, player_id
+            """
+            df = pd.read_sql_query(query, conn)
+            logger.info(f"Loaded {len(df)} basic records")
+        
+        conn.close()
         return df
     
-    def prepare_advanced_features(self, df):
-        """Create advanced features for better predictions"""
+    def engineer_enhanced_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Engineer enhanced features for better performance."""
         features = df.copy()
         
         # Basic derived features
@@ -41,109 +65,175 @@ class CrossSeasonValidator:
         features['receptions_per_target'] = features['receptions'] / (features['targets'] + 1)
         features['total_touches'] = features['rushing_attempts'] + features['receptions']
         features['total_yards'] = features['rushing_yards'] + features['receiving_yards']
+        features['yards_per_touch'] = features['total_yards'] / (features['total_touches'] + 1)
         
         # Position encoding
         position_map = {'RB': 1, 'WR': 2, 'TE': 3, 'QB': 4, 'FB': 5}
         features['position_encoded'] = features['position'].map(position_map).fillna(0)
         
-        # Historical performance features (for players with multiple seasons)
-        features = features.sort_values(['player_id', 'season']).reset_index(drop=True)
-        
-        # Previous season stats (lag features) - simplified approach
-        lag_cols = ['rushing_yards', 'receiving_yards', 'rushing_attempts', 'receptions']
-        for col in lag_cols:
-            features[f'{col}_prev'] = features.groupby('player_id')[col].shift(1).fillna(0)
-        
-        # Career averages (simplified) - use expanding mean but handle index issues
-        for col in lag_cols:
-            # Calculate expanding mean and shift, then fill NaN with 0
-            career_avg = features.groupby('player_id')[col].expanding().mean().reset_index(level=0, drop=True)
-            features[f'{col}_career_avg'] = career_avg.shift(1).fillna(0)
-        
-        # Age-based features
+        # Enhanced age features
         features['age_squared'] = features['age'] ** 2
+        features['age_cubed'] = features['age'] ** 3
         features['is_prime'] = ((features['age'] >= 24) & (features['age'] <= 28)).astype(int)
         features['is_veteran'] = (features['age'] >= 30).astype(int)
+        features['is_rookie'] = (features['age'] <= 22).astype(int)
         
         # Usage rate features
         features['rush_usage'] = features['rushing_attempts'] / (features['games_played'] + 1)
         features['target_usage'] = features['targets'] / (features['games_played'] + 1)
+        features['touch_usage'] = features['total_touches'] / (features['games_played'] + 1)
+        
+        # Efficiency tiers
+        features['high_efficiency'] = (features['yards_per_touch'] > 6.0).astype(int)
+        features['low_efficiency'] = (features['yards_per_touch'] < 3.0).astype(int)
+        
+        # Team context (if available)
+        if 'offensive_rank' in features.columns:
+            features['offensive_strength'] = (33 - features['offensive_rank']) / 32
+        else:
+            features['offensive_strength'] = 0.5
+        
+        # Sort for lag features
+        features = features.sort_values(['player_id', 'season']).reset_index(drop=True)
+        
+        # Enhanced lag features
+        lag_cols = ['rushing_yards', 'receiving_yards', 'rushing_attempts', 'receptions', 'total_touches']
+        for col in lag_cols:
+            if col in features.columns:
+                # Previous season
+                features[f'{col}_prev'] = features.groupby('player_id')[col].shift(1).fillna(0)
+                
+                # Career averages (expanding mean)
+                career_avg = features.groupby('player_id')[col].expanding().mean().reset_index(level=0, drop=True)
+                features[f'{col}_career_avg'] = career_avg.shift(1).fillna(features[col].mean())
+                
+                # Momentum (recent trend)
+                rolling_avg = features.groupby('player_id')[col].rolling(window=2, min_periods=1).mean()
+                features[f'{col}_momentum'] = (features[col] - rolling_avg.reset_index(level=0, drop=True).shift(1)).fillna(0)
+        
+        # Interaction features
+        features['age_x_usage'] = features['age'] * features['touch_usage']
+        features['efficiency_x_volume'] = features['yards_per_touch'] * features['total_touches']
+        features['prime_x_efficiency'] = features['is_prime'] * features['yards_per_touch']
         
         return features
     
-    def get_feature_columns(self):
-        """Define which features to use for modeling"""
+    def get_enhanced_feature_columns(self) -> List[str]:
+        """Get enhanced feature set for modeling."""
         return [
-            'age', 'age_squared', 'is_prime', 'is_veteran',
+            # Core features
+            'age', 'age_squared', 'age_cubed', 'is_prime', 'is_veteran', 'is_rookie',
             'games_played', 'position_encoded',
+            
+            # Usage features
             'rushing_attempts', 'yards_per_attempt', 'rush_usage',
             'receptions', 'targets', 'receptions_per_target', 'target_usage',
-            'rushing_yards_prev', 'receiving_yards_prev',
-            'rushing_attempts_prev', 'receptions_prev',
-            'rushing_yards_career_avg', 'receiving_yards_career_avg'
+            'total_touches', 'touch_usage',
+            
+            # Efficiency features
+            'yards_per_touch', 'high_efficiency', 'low_efficiency',
+            'efficiency_x_volume',
+            
+            # Historical features
+            'rushing_yards_prev', 'receiving_yards_prev', 'total_touches_prev',
+            'rushing_yards_career_avg', 'receiving_yards_career_avg', 'total_touches_career_avg',
+            'rushing_yards_momentum', 'receiving_yards_momentum',
+            
+            # Team context
+            'offensive_strength',
+            
+            # Interaction features
+            'age_x_usage', 'prime_x_efficiency'
         ]
     
-    def train_test_by_season(self, df, train_seasons, test_season):
-        """Train on specific seasons and test on another"""
+    def create_ensemble_model(self, optimized_params: Optional[Dict] = None) -> StackingRegressor:
+        """Create optimized ensemble model."""
         
-        # Prepare features
-        features_df = self.prepare_advanced_features(df)
-        feature_cols = self.get_feature_columns()
+        # Base models with optimized parameters
+        if optimized_params:
+            gb_params = optimized_params.get('gradient_boosting', {})
+            rf_params = optimized_params.get('random_forest', {})
+        else:
+            # Default optimized parameters
+            gb_params = {
+                'n_estimators': 300, 'max_depth': 8, 'learning_rate': 0.08,
+                'subsample': 0.85, 'min_samples_split': 5, 'min_samples_leaf': 2
+            }
+            rf_params = {
+                'n_estimators': 250, 'max_depth': 15, 'min_samples_split': 5,
+                'min_samples_leaf': 2, 'max_features': 'sqrt'
+            }
         
-        # Split by season
-        train_data = features_df[features_df['season'].isin(train_seasons)].copy()
-        test_data = features_df[features_df['season'] == test_season].copy()
+        base_models = [
+            ('gb', GradientBoostingRegressor(random_state=42, **gb_params)),
+            ('rf', RandomForestRegressor(random_state=42, **rf_params)),
+            ('lr', LinearRegression())
+        ]
         
-        if train_data.empty or test_data.empty:
-            logger.warning(f"No data for training seasons {train_seasons} or test season {test_season}")
-            return None
+        # Meta-learner
+        meta_learner = LinearRegression()
         
-        # Prepare training data
-        X_train = train_data[feature_cols].fillna(0)
-        y_rush_train = train_data['rushing_yards']
-        y_rec_train = train_data['receiving_yards']
+        return StackingRegressor(
+            estimators=base_models,
+            final_estimator=meta_learner,
+            cv=3
+        )
+    
+    def validate_k_fold_seasons(self, k: int = 5) -> List[Dict]:
+        """Perform k-fold validation across seasons."""
+        df = self.load_enhanced_data()
         
-        # Prepare test data
-        X_test = test_data[feature_cols].fillna(0)
-        y_rush_test = test_data['rushing_yards']
-        y_rec_test = test_data['receiving_yards']
+        if df.empty:
+            logger.error("No data loaded for validation")
+            return []
         
-        # Scale features
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
+        features_df = self.engineer_enhanced_features(df)
+        feature_cols = self.get_enhanced_feature_columns()
         
-        # Train models
-        models = {
-            'RandomForest': RandomForestRegressor(n_estimators=200, random_state=42, max_depth=10),
-            'GradientBoosting': GradientBoostingRegressor(n_estimators=200, random_state=42, max_depth=6),
-            'Linear': LinearRegression()
-        }
+        # Available feature columns
+        available_features = [col for col in feature_cols if col in features_df.columns]
+        logger.info(f"Using {len(available_features)} features")
         
-        results = {}
+        seasons = sorted(features_df['season'].unique())
+        results = []
         
-        for model_name, model in models.items():
-            logger.info(f"Training {model_name} model...")
+        # K-fold cross-validation across seasons
+        n_splits = min(k, len(seasons) - 1)  # Ensure we don't exceed available seasons
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+        season_indices = np.arange(len(seasons))
+        
+        for fold, (train_idx, test_idx) in enumerate(tscv.split(season_indices)):
+            train_seasons = [seasons[i] for i in train_idx]
+            test_seasons = [seasons[i] for i in test_idx]
             
-            # Train rushing model
-            if model_name == 'Linear':
-                rush_model = model.__class__()
-                rec_model = model.__class__()
-                rush_model.fit(X_train_scaled, y_rush_train)
-                rec_model.fit(X_train_scaled, y_rec_train)
-            else:
-                rush_model = model.__class__(**model.get_params())
-                rec_model = model.__class__(**model.get_params())
-                rush_model.fit(X_train, y_rush_train)
-                rec_model.fit(X_train, y_rec_train)
+            logger.info(f"Fold {fold + 1}: Train on {train_seasons}, Test on {test_seasons}")
+            
+            # Split data
+            train_data = features_df[features_df['season'].isin(train_seasons)]
+            test_data = features_df[features_df['season'].isin(test_seasons)]
+            
+            if train_data.empty or test_data.empty:
+                continue
+            
+            # Prepare features and targets
+            X_train = train_data[available_features].fillna(0)
+            X_test = test_data[available_features].fillna(0)
+            
+            y_rush_train = train_data['rushing_yards']
+            y_rush_test = test_data['rushing_yards']
+            y_rec_train = train_data['receiving_yards']
+            y_rec_test = test_data['receiving_yards']
+            
+            # Train models
+            rush_model = self.create_ensemble_model()
+            rec_model = self.create_ensemble_model()
+            
+            rush_model.fit(X_train, y_rush_train)
+            rec_model.fit(X_train, y_rec_train)
             
             # Make predictions
-            if model_name == 'Linear':
-                rush_pred = rush_model.predict(X_test_scaled)
-                rec_pred = rec_model.predict(X_test_scaled)
-            else:
-                rush_pred = rush_model.predict(X_test)
-                rec_pred = rec_model.predict(X_test)
+            rush_pred = rush_model.predict(X_test)
+            rec_pred = rec_model.predict(X_test)
             
             # Calculate metrics
             rush_metrics = {
@@ -158,171 +248,140 @@ class CrossSeasonValidator:
                 'r2': r2_score(y_rec_test, rec_pred)
             }
             
-            results[model_name] = {
-                'rushing': rush_metrics,
-                'receiving': rec_metrics,
-                'rush_model': rush_model,
-                'rec_model': rec_model,
-                'scaler': scaler,
-                'predictions': {
-                    'rush_actual': y_rush_test,
-                    'rush_pred': rush_pred,
-                    'rec_actual': y_rec_test,
-                    'rec_pred': rec_pred
-                }
+            result = {
+                'fold': fold + 1,
+                'train_seasons': train_seasons,
+                'test_seasons': test_seasons,
+                'train_samples': len(train_data),
+                'test_samples': len(test_data),
+                'rushing_metrics': rush_metrics,
+                'receiving_metrics': rec_metrics,
+                'meets_target': rush_metrics['mae'] <= self.target_mae
             }
+            
+            results.append(result)
+            
+            logger.info(f"Fold {fold + 1} Results:")
+            logger.info(f"  Rushing MAE: {rush_metrics['mae']:.3f} (Target: ≤{self.target_mae})")
+            logger.info(f"  Receiving MAE: {rec_metrics['mae']:.3f}")
         
+        self.results = results
         return results
     
-    def comprehensive_validation(self):
-        """Run comprehensive cross-season validation"""
-        
-        df = self.load_data()
-        seasons = sorted(df['season'].unique())
-        
-        print("Cross-Season Validation Results")
-        print("=" * 60)
-        print(f"Available seasons: {seasons}")
-        
-        all_results = {}
-        
-        # Test different training/validation scenarios
-        scenarios = [
-            {
-                'name': '2021→2022 Prediction',
-                'train_seasons': [2021],
-                'test_season': 2022
-            },
-            {
-                'name': '2022→2023 Prediction', 
-                'train_seasons': [2022],
-                'test_season': 2023
-            },
-            {
-                'name': '2021-2022→2023 Prediction',
-                'train_seasons': [2021, 2022],
-                'test_season': 2023
-            }
-        ]
-        
-        for scenario in scenarios:
-            print(f"\n{scenario['name']}")
-            print("-" * 40)
-            
-            results = self.train_test_by_season(
-                df, 
-                scenario['train_seasons'], 
-                scenario['test_season']
+    def generate_leaderboard_markdown(self) -> str:
+        """Generate markdown leaderboard report using available result fields."""
+        if not self.results:
+            return "No validation results available."
+
+        rush_maes = [r['rushing_metrics']['mae'] for r in self.results]
+        rec_maes = [r['receiving_metrics']['mae'] for r in self.results]
+        rush_r2s = [r['rushing_metrics']['r2'] for r in self.results]
+        rec_r2s = [r['receiving_metrics']['r2'] for r in self.results]
+
+        avg_rush_mae = float(np.mean(rush_maes))
+        avg_rec_mae = float(np.mean(rec_maes))
+        avg_rush_r2 = float(np.mean(rush_r2s))
+        avg_rec_r2 = float(np.mean(rec_r2s))
+
+        target_met = avg_rush_mae <= self.target_mae
+        folds_meeting_target = int(sum(r['meets_target'] for r in self.results))
+
+        report: List[str] = []
+        report.append("# NFL Algorithm Cross-Season Validation Report\n\n")
+        report.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+
+        report.append("## Executive Summary\n\n")
+        report.append(f"- Target MAE (Rushing): ≤ {self.target_mae:.1f}\n")
+        report.append(f"- Average Rushing MAE: {avg_rush_mae:.3f}\n")
+        report.append(f"- Average Receiving MAE: {avg_rec_mae:.3f}\n")
+        report.append(f"- Average Rushing R²: {avg_rush_r2:.3f}\n")
+        report.append(f"- Average Receiving R²: {avg_rec_r2:.3f}\n")
+        report.append(f"- Folds Meeting Target: {folds_meeting_target}/{len(self.results)}\n\n")
+
+        report.append("## Fold Results\n\n")
+        report.append("| Fold | Test Seasons | Rushing MAE | Receiving MAE | Rushing R² | Receiving R² | Meets Target |\n")
+        report.append("|------|--------------|-------------|---------------|------------|--------------|--------------|\n")
+        for r in self.results:
+            test_seasons = ", ".join(map(str, r['test_seasons']))
+            report.append(
+                f"| {r['fold']} | {test_seasons} | {r['rushing_metrics']['mae']:.3f} | {r['receiving_metrics']['mae']:.3f} | {r['rushing_metrics']['r2']:.3f} | {r['receiving_metrics']['r2']:.3f} | {'YES' if r['meets_target'] else 'NO'} |\n"
             )
+
+        report.append("\n## Distribution\n\n")
+        report.append(f"- Best Rushing MAE: {min(rush_maes):.3f}\n")
+        report.append(f"- Worst Rushing MAE: {max(rush_maes):.3f}\n")
+        report.append(f"- Rushing MAE StdDev: {np.std(rush_maes):.3f}\n")
+
+        report.append("\n---\n")
+        report.append("Report generated by Enhanced NFL Algorithm v2.0\n")
+        return "".join(report)
+    
+    def save_results(self, output_dir: str = "logs") -> None:
+        """Save validation results to files."""
+        output_path = Path(output_dir)
+        output_path.mkdir(exist_ok=True)
+        
+        # Save markdown report
+        markdown_report = self.generate_leaderboard_markdown()
+        with open(output_path / "validation_leaderboard.md", "w") as f:
+            f.write(markdown_report)
+        
+        # Save detailed results as CSV
+        if self.results:
+            results_df = pd.DataFrame([
+                {
+                    'fold': r['fold'],
+                    'train_seasons': ', '.join(map(str, r['train_seasons'])),
+                    'test_seasons': ', '.join(map(str, r['test_seasons'])),
+                    'train_samples': r['train_samples'],
+                    'test_samples': r['test_samples'],
+                    'rushing_mae': r['rushing_metrics']['mae'],
+                    'rushing_rmse': r['rushing_metrics']['rmse'],
+                    'rushing_r2': r['rushing_metrics']['r2'],
+                    'receiving_mae': r['receiving_metrics']['mae'],
+                    'receiving_rmse': r['receiving_metrics']['rmse'],
+                    'receiving_r2': r['receiving_metrics']['r2'],
+                    'meets_target': r['meets_target']
+                }
+                for r in self.results
+            ])
             
-            if results:
-                all_results[scenario['name']] = results
-                
-                # Display results for each model
-                for model_name, model_results in results.items():
-                    print(f"\n{model_name} Results:")
-                    print(f"  Rushing - MAE: {model_results['rushing']['mae']:.1f}, R²: {model_results['rushing']['r2']:.3f}")
-                    print(f"  Receiving - MAE: {model_results['receiving']['mae']:.1f}, R²: {model_results['receiving']['r2']:.3f}")
+            results_df.to_csv(output_path / "validation_results.csv", index=False)
         
-        return all_results
-    
-    def train_production_model(self):
-        """Train final model on all available data for 2024/2025 predictions"""
-        
-        df = self.load_data()
-        features_df = self.prepare_advanced_features(df)
-        feature_cols = self.get_feature_columns()
-        
-        # Use all available data for training
-        X = features_df[feature_cols].fillna(0)
-        y_rush = features_df['rushing_yards']
-        y_rec = features_df['receiving_yards']
-        
-        # Scale features
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
-        
-        # Train ensemble model (best performing from validation)
-        rush_model = RandomForestRegressor(n_estimators=300, random_state=42, max_depth=12)
-        rec_model = RandomForestRegressor(n_estimators=300, random_state=42, max_depth=12)
-        
-        rush_model.fit(X, y_rush)
-        rec_model.fit(X, y_rec)
-        
-        # Store models
-        self.models['production'] = {
-            'rush_model': rush_model,
-            'rec_model': rec_model,
-            'scaler': scaler,
-            'feature_cols': feature_cols
-        }
-        
-        # Feature importance
-        feature_importance = pd.DataFrame({
-            'feature': feature_cols,
-            'rush_importance': rush_model.feature_importances_,
-            'rec_importance': rec_model.feature_importances_
-        })
-        feature_importance['avg_importance'] = (
-            feature_importance['rush_importance'] + feature_importance['rec_importance']
-        ) / 2
-        feature_importance = feature_importance.sort_values('avg_importance', ascending=False)
-        
-        print(f"\nProduction Model Trained on {len(df)} records")
-        print("=" * 50)
-        print("Top 10 Most Important Features:")
-        for _, row in feature_importance.head(10).iterrows():
-            print(f"  {row['feature']:<25} | Avg: {row['avg_importance']:.3f}")
-        
-        return feature_importance
-    
-    def predict_2025_template(self):
-        """Create template for 2024/2025 season predictions"""
-        
-        if 'production' not in self.models:
-            logger.error("Production model not trained yet. Run train_production_model() first.")
-            return
-        
-        print(f"\n2024/2025 Season Prediction Framework")
-        print("=" * 50)
-        print("To make predictions for 2024/2025 season:")
-        print("1. Collect current season data (games played, stats so far)")
-        print("2. Use this model to predict remaining season totals")
-        print("3. Compare with sportsbook lines for betting opportunities")
-        
-        # Example prediction (using 2023 data as template)
-        df = self.load_data()
-        sample_players = df[df['season'] == 2023].head(5)
-        
-        print(f"\nExample Predictions (using 2023 data as template):")
-        print("-" * 60)
-        
-        for _, player in sample_players.iterrows():
-            print(f"{player['name']} ({player['position']}, {player['team']}):")
-            print(f"  2023 Actual: {player['rushing_yards']} rush yds, {player['receiving_yards']} rec yds")
-            print(f"  Model would predict based on mid-season stats...")
+        logger.info(f"Results saved to {output_path}/")
 
 def main():
-    validator = CrossSeasonValidator()
+    """Run enhanced cross-season validation."""
+    print("Enhanced NFL Algorithm Cross-Season Validation")
+    print("=" * 60)
+    print("Targeting professional-grade performance (MAE ≤ 3.0)")
     
-    # Run comprehensive validation
-    validation_results = validator.comprehensive_validation()
+    validator = EnhancedCrossSeasonValidator()
     
-    # Train production model
-    print(f"\n" + "="*60)
-    print("TRAINING PRODUCTION MODEL FOR 2024/2025 PREDICTIONS")
-    print("="*60)
+    # Run k-fold validation
+    print("\nRunning K-Fold Cross-Season Validation...")
+    results = validator.validate_k_fold_seasons(k=5)
     
-    feature_importance = validator.train_production_model()
+    if results:
+        # Generate and display report
+        markdown_report = validator.generate_leaderboard_markdown()
+        print("\n" + markdown_report)
+        
+        # Save results
+        validator.save_results()
+        
+        # Check if target met
+        avg_mae = np.mean([r['rushing_metrics']['mae'] for r in results])
+        if avg_mae <= validator.target_mae:
+            print(f"\nSUCCESS: Target MAE ≤ {validator.target_mae} ACHIEVED!")
+            print(f"   Average MAE: {avg_mae:.3f}")
+            print("   Model ready for professional deployment!")
+        else:
+            print(f"\nTARGET NOT MET: Average MAE {avg_mae:.3f} > {validator.target_mae}")
+            print("   Model needs further optimization.")
     
-    # Show prediction framework
-    validator.predict_2025_template()
-    
-    print(f"\n" + "="*60)
-    print("CROSS-SEASON VALIDATION COMPLETE")
-    print("Model trained on all historical data")
-    print("Ready for 2024/2025 season predictions")
-    print("Next: Collect current 2024 stats and make predictions")
+    else:
+        print("❌ No validation results generated")
 
 if __name__ == "__main__":
     main() 

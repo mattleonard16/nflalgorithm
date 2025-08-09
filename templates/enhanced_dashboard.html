@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>NFL Player Prop Value Dashboard</title>
+  <style>
+    :root {
+      --bg: #0b0d12; --card:#121622; --muted:#98a2b3; --text:#e6e9ef;
+      --green:#12b76a; --green-weak:#3ddc97; --red:#ef4444; --red-weak:#f87171;
+      --amber:#f59e0b; --blue:#60a5fa; --border:#1f2937; --hi:#d1f7c4; --lo:#ffd1d1;
+      --tier-high:#062e0d; --tier-medium:#2b2a06; --tier-low:#1f2430;
+      --pill:#1f2937; --accent:#7c3aed;
+    }
+    [data-theme="light"] {
+      --bg:#ffffff; --card:#f8fafc; --text:#0f172a; --muted:#475569; --border:#e2e8f0;
+      --tier-high:#ecfdf5; --tier-medium:#fffbeb; --tier-low:#f8fafc;
+      --pill:#eef2f7;
+    }
+    * { box-sizing: border-box }
+    body { margin:0; font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; background:var(--bg); color:var(--text) }
+    a { color: var(--blue); text-decoration: none }
+    .container { max-width: 1220px; margin: 24px auto; padding: 0 16px }
+    .banner { display:flex; gap:16px; align-items:center; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px }
+    .kpi { flex:1; background:var(--bg); border:1px dashed var(--border); border-radius:10px; padding:12px 14px }
+    .kpi h3 { margin:0; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em }
+    .kpi .val { margin-top:6px; font-size:22px; font-weight:700 }
+    .kpi .delta { font-size:12px; color:var(--muted) }
+
+    .panel { margin-top:18px; background:var(--card); border:1px solid var(--border); border-radius:12px; overflow: hidden }
+    .panel header { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border); background:linear-gradient(0deg, rgba(0,0,0,0), rgba(0,0,0,.04)) }
+    .panel header h2 { margin:0; font-size:15px }
+    .panel .content { padding:12px 14px }
+
+    .filters { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px }
+    .row { display:flex; gap:8px; flex-wrap:wrap }
+    .pill { background:var(--pill); border:1px solid var(--border); border-radius:20px; padding:8px 12px; cursor:pointer; user-select:none }
+    .pill.active { outline:2px solid var(--accent); }
+    input[type=range] { width:100% }
+    select, input[type=text] {
+      width:100%; padding:8px 10px; border-radius:10px; border:1px solid var(--border); background:var(--bg); color:var(--text)
+    }
+
+    .summarybar {
+      position: sticky; top: 0; z-index: 50; background: rgba(0,0,0,.65);
+      -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+      border-bottom:1px solid var(--border); padding:8px 14px; display:flex; gap:14px; align-items:center
+    }
+    [data-theme="light"] .summarybar { background: rgba(255,255,255,.75) }
+
+    .tablewrap { overflow:auto; border:1px solid var(--border); border-radius:12px }
+    table { width:100%; border-collapse:separate; border-spacing:0; min-width:900px }
+    thead th {
+      position: sticky; top: 46px; background:var(--card); z-index:1;
+      font-size:12px; color:var(--muted); text-align:left; padding:10px; border-bottom:1px solid var(--border)
+    }
+    tbody tr { border-bottom:1px solid var(--border) }
+    td { padding:10px; vertical-align:middle }
+    .tier-high { background: var(--tier-high) }
+    .tier-medium { background: var(--tier-medium) }
+    .tier-low { background: var(--tier-low) }
+    .chip { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; font-size:12px; border:1px solid var(--border) }
+    .chip.high { background:rgba(18,183,106,.18); color:var(--green) }
+    .chip.medium { background:rgba(245,158,11,.18); color:var(--amber) }
+    .chip.low { background:rgba(96,165,250,.18); color:var(--blue) }
+    .edgebar { height:8px; border-radius:6px; background:linear-gradient(90deg, var(--red) 0%, var(--red-weak) 50%, var(--green-weak) 50%, var(--green) 100%) }
+    .mini { font-size:12px; color:var(--muted) }
+
+    .cards { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px }
+    .card {
+      background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px;
+      display:flex; flex-direction:column; gap:6px
+    }
+    .card .title { font-weight:700 }
+    .card .meta { font-size:12px; color:var(--muted) }
+    .card .edge { font-weight:700 }
+    .rowactions { display:flex; gap:8px; flex-wrap:wrap }
+    .btn { padding:6px 10px; border-radius:8px; border:1px solid var(--border); background:var(--pill); cursor:pointer }
+    .btn.primary { background: var(--accent); color:white; border-color: transparent }
+    .btn.ghost { background: transparent }
+
+    @media (max-width: 980px) {
+      .filters { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .cards { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      thead th { top: 88px }
+    }
+    @media (max-width: 560px) {
+      .filters { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: 1fr; }
+      .banner { flex-direction:column }
+      .kpi { width:100% }
+    }
+    @media print {
+      .summarybar, .rowactions, .filters { display:none }
+      body { background:#fff; color:#000 }
+      .panel, .banner, .tablewrap { border-color:#ddd }
+    }
+  </style>
+</head>
+<body>
+  <div class="summarybar">
+    <div id="sumCount">All Bets: 0</div>
+    <div id="sumHigh">High: 0</div>
+    <div id="sumMed">Medium: 0</div>
+    <div id="sumLow">Low: 0</div>
+    <div style="margin-left:auto; display:flex; gap:8px">
+      <button class="btn ghost" id="toggleTheme">Toggle Theme</button>
+      <button class="btn" id="resetFilters">Reset Filters</button>
+      <button class="btn primary" id="printPage">Print</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="banner">
+      <div class="kpi">
+        <h3>Active Opportunities</h3>
+        <div class="val" id="kpiTotal">0</div>
+        <div class="delta">Filtered view</div>
+      </div>
+      <div class="kpi">
+        <h3>High Value</h3>
+        <div class="val" id="kpiHigh">0</div>
+        <div class="delta">≥ 15% edge</div>
+      </div>
+      <div class="kpi">
+        <h3>Avg Edge %</h3>
+        <div class="val" id="kpiAvgEdge">0%</div>
+        <div class="delta">Current filter</div>
+      </div>
+      <div class="kpi">
+        <h3>Top Book</h3>
+        <div class="val" id="kpiTopBook">–</div>
+        <div class="delta">By count</div>
+      </div>
+    </div>
+
+    <div class="panel" id="filtersPanel">
+      <header>
+        <h2>Filters</h2>
+        <div class="row">
+          <div class="pill" data-qf="high">Only High Value</div>
+          <div class="pill" data-qf="myteams">My Teams</div>
+          <div class="pill" data-qf="tonight">Tonight</div>
+        </div>
+      </header>
+      <div class="content">
+        <div class="filters">
+          <div>
+            <div class="mini">Edge threshold (≥ %)</div>
+            <input type="range" min="0" max="30" step="1" id="edgeMin"/>
+            <div class="mini"><span id="edgeMinVal">0</span>%</div>
+          </div>
+          <div>
+            <div class="mini">Position</div>
+            <select id="posSel" multiple></select>
+          </div>
+          <div>
+            <div class="mini">Sportsbooks</div>
+            <select id="bookSel" multiple></select>
+          </div>
+          <div>
+            <div class="mini">Line range</div>
+            <div class="row">
+              <input type="text" id="lineMin" placeholder="Min"/>
+              <input type="text" id="lineMax" placeholder="Max"/>
+            </div>
+          </div>
+          <div>
+            <div class="mini">Sort</div>
+            <select id="sortSel">
+              <option value="best">Best Value First</option>
+              <option value="edgepct">Edge %</option>
+              <option value="edgeyds">Edge Yards</option>
+              <option value="team">Team</option>
+              <option value="pos">Position</option>
+            </select>
+          </div>
+          <div>
+            <div class="mini">Search player/team</div>
+            <input type="text" id="searchBox" placeholder="Type to search..."/>
+          </div>
+          <div>
+            <div class="mini">Saved Presets</div>
+            <select id="presetSel">
+              <option value="">—</option>
+              <option value="conservative">Conservative (≥15%)</option>
+              <option value="volume">Volume (≥5%)</option>
+              <option value="primetime">Primetime</option>
+            </select>
+          </div>
+          <div class="row">
+            <button class="btn" id="savePreset">Save Current as Preset</button>
+            <button class="btn ghost" id="clearPreset">Clear Preset</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="tablePanel">
+      <header>
+        <h2>Main Opportunities</h2>
+        <div class="mini">Color encodes direction and strength (green OVER / red UNDER)</div>
+      </header>
+      <div class="content tablewrap">
+        <table id="oppTable">
+          <thead>
+            <tr>
+              <th>Tier</th>
+              <th>Player</th>
+              <th>Pos</th>
+              <th>Team</th>
+              <th>Stat</th>
+              <th>Line vs Model</th>
+              <th>Edge</th>
+              <th>Book</th>
+              <th>Conf</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="oppBody">
+            {% for r in rows %}
+            <tr class="tier-{{ r.visual_tier }}"
+                data-tier="{{ r.visual_tier }}"
+                data-team="{{ r.team }}"
+                data-pos="{{ r.position }}"
+                data-book="{{ r.book }}"
+                data-edgepct="{{ r.edge_pct_display }}"
+                data-edgeyds="{{ r.edge_yards }}"
+                data-line="{{ r.line }}"
+                data-tags="{{ r.filter_tags|join(',') }}">
+              <td><span class="chip {{ r.visual_tier }}">{{ r.value_rating }}</span></td>
+              <td><div class="title">{{ r.player }}</div><div class="mini">{{ r.correlation_group }}</div></td>
+              <td>{{ r.position }}</td>
+              <td>{{ r.team }}</td>
+              <td>{{ r.stat }}</td>
+              <td>
+                <div class="mini">Line {{ r.line }} vs Model {{ "%.1f"|format(r.model_prediction) }}</div>
+                <div class="edgebar" style="background:
+                  linear-gradient(90deg,
+                    {% if r.edge_yards < 0 %}var(--red){% else %}var(--red-weak){% endif %} 0%,
+                    var(--red-weak) 50%,
+                    var(--green-weak) 50%,
+                    {% if r.edge_yards > 0 %}var(--green){% else %}var(--green-weak){% endif %} 100%)"></div>
+              </td>
+              <td>
+                <div class="edge">{{ r.edge_pct_display|round(1) }}%</div>
+                <div class="mini">{{ r.edge_yards|round(1) }} yds • {{ r.recommendation }}</div>
+              </td>
+              <td>{{ r.book }}</td>
+              <td>
+                <div class="mini">Score</div>
+                <div class="chip">{{ r.confidence_score }}</div>
+              </td>
+              <td class="rowactions">
+                <button class="btn primary" data-copy='{{ r.quick_text }}'>Copy Bet</button>
+                <button class="btn" data-track='{{ r.bet_id|default("") }}'>Track</button>
+                <button class="btn ghost" data-share='{{ r.quick_text }}'>Share</button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <header><h2>Quick Bet Cards</h2><div class="mini">Ultra-compact picks</div></header>
+      <div class="content cards" id="cardsGrid">
+        {% for c in quick_cards %}
+        <div class="card" data-tier="{{ c.visual_tier }}">
+          <div class="title">{{ c.player }} <span class="mini">({{ c.position }}, {{ c.team }})</span></div>
+          <div class="meta">{{ c.stat }} • {{ c.book }}</div>
+          <div class="edge">{{ c.recommendation }} • {{ c.edge_pct_display|round(1) }}%</div>
+          <div class="mini">{{ c.line }} vs {{ "%.1f"|format(c.model_prediction) }} • conf {{ c.confidence_score }}</div>
+          <div class="rowactions">
+            <button class="btn primary" data-copy='{{ c.quick_text }}'>Copy</button>
+            <button class="btn" data-track='{{ c.bet_id|default("") }}'>Track</button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="panel">
+      <header><h2>Performance</h2><div class="mini">Edge distribution</div></header>
+      <div class="content">
+        <div id="plotEdge" style="height:320px"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <script>
+    const stateKey = 'nflviz:v1';
+    const $ = s => document.querySelector(s);
+    const $$ = s => Array.from(document.querySelectorAll(s));
+    const rows = $$('#oppBody tr');
+
+    const data = {{ data_json|safe }};
+    const edgeSeries = data.map(d => d.edge_pct_display);
+
+    function updateKPIs() {
+      const vis = rows.filter(r => r.style.display !== 'none');
+      $('#kpiTotal').textContent = vis.length;
+      $('#sumCount').textContent = 'All Bets: ' + vis.length;
+
+      const high = vis.filter(r => r.dataset.tier==='high').length;
+      const med  = vis.filter(r => r.dataset.tier==='medium').length;
+      const low  = vis.filter(r => r.dataset.tier==='low').length;
+      $('#kpiHigh').textContent = high;
+      $('#sumHigh').textContent = 'High: ' + high;
+      $('#sumMed').textContent = 'Medium: ' + med;
+      $('#sumLow').textContent = 'Low: ' + low;
+
+      const edgeVals = vis.map(r => parseFloat(r.dataset.edgepct)).filter(v => !Number.isNaN(v));
+      const avg = edgeVals.length ? (edgeVals.reduce((a,b)=>a+b,0)/edgeVals.length) : 0;
+      $('#kpiAvgEdge').textContent = avg.toFixed(1) + '%';
+
+      const books = {};
+      vis.forEach(r => { books[r.dataset.book] = (books[r.dataset.book]||0)+1; });
+      const topBook = Object.entries(books).sort((a,b)=>b[1]-a[1])[0];
+      $('#kpiTopBook').textContent = topBook ? topBook[0] : '–';
+    }
+
+    function applyFilters() {
+      const edgeMin = parseFloat($('#edgeMin').value || '0');
+      const posSel = Array.from($('#posSel').selectedOptions).map(o=>o.value);
+      const bookSel = Array.from($('#bookSel').selectedOptions).map(o=>o.value);
+      const lineMin = parseFloat($('#lineMin').value || '-Infinity');
+      const lineMax = parseFloat($('#lineMax').value || 'Infinity');
+      const q = ($('#searchBox').value||'').toLowerCase();
+
+      rows.forEach(r=>{
+        const edge = Math.abs(parseFloat(r.dataset.edgepct));
+        const pos = r.dataset.pos;
+        const book = r.dataset.book;
+        const line = parseFloat(r.dataset.line);
+        const tags = (r.dataset.tags||'').toLowerCase();
+
+        let ok = true;
+        ok = ok && edge >= edgeMin;
+        ok = ok && (!posSel.length || posSel.includes(pos));
+        ok = ok && (!bookSel.length || bookSel.includes(book));
+        ok = ok && (line >= lineMin && line <= lineMax);
+        ok = ok && (!q || r.innerText.toLowerCase().includes(q) || tags.includes(q));
+
+        r.style.display = ok ? '' : 'none';
+      });
+
+      persistState();
+      updateKPIs();
+    }
+
+    function sortRows(mode) {
+      const body = $('#oppBody');
+      const get = (r,k)=>parseFloat(r.dataset[k]) || 0;
+      const key = {
+        best: r => Math.abs(get(r,'edgepct')),
+        edgepct: r => get(r,'edgepct'),
+        edgeyds: r => Math.abs(get(r,'edgeyds')),
+        team: r => r.dataset.team,
+        pos: r => r.dataset.pos
+      }[mode] || (r => Math.abs(get(r,'edgepct')));
+
+      const sorted = rows.slice().sort((a,b)=>{
+        const av = key(a), bv = key(b);
+        if (typeof av === 'number' && typeof bv === 'number') return Math.abs(bv) - Math.abs(av);
+        return (''+av).localeCompare((''+bv));
+      });
+      sorted.forEach(r=>body.appendChild(r));
+      persistState();
+    }
+
+    function populateSelectors() {
+      const pos = new Set(rows.map(r=>r.dataset.pos).filter(Boolean));
+      const book = new Set(rows.map(r=>r.dataset.book).filter(Boolean));
+      $('#posSel').innerHTML = Array.from(pos).sort().map(v=>`<option>${v}</option>`).join('');
+      $('#bookSel').innerHTML = Array.from(book).sort().map(v=>`<option>${v}</option>`).join('');
+    }
+
+    function persistState() {
+      const st = {
+        edgeMin: $('#edgeMin').value, posSel: Array.from($('#posSel').selectedOptions).map(o=>o.value),
+        bookSel: Array.from($('#bookSel').selectedOptions).map(o=>o.value),
+        lineMin: $('#lineMin').value, lineMax: $('#lineMax').value,
+        sortSel: $('#sortSel').value, q: $('#searchBox').value
+      };
+      localStorage.setItem(stateKey, JSON.stringify(st));
+    }
+    function restoreState() {
+      const raw = localStorage.getItem(stateKey);
+      if (!raw) return;
+      const st = JSON.parse(raw);
+      $('#edgeMin').value = st.edgeMin || 0; $('#edgeMinVal').textContent = st.edgeMin || '0';
+      ['posSel','bookSel'].forEach(id=>{
+        const el = $('#'+id);
+        (st[id]||[]).forEach(v=>{
+          const opt = Array.from(el.options).find(o=>o.value===v);
+          if (opt) opt.selected = true;
+        });
+      });
+      $('#lineMin').value = st.lineMin||''; $('#lineMax').value = st.lineMax||'';
+      $('#sortSel').value = st.sortSel||'best';
+      $('#searchBox').value = st.q||'';
+    }
+
+    $$('.pill[data-qf]').forEach(p=>{
+      p.addEventListener('click', ()=>{
+        p.classList.toggle('active');
+        const key = p.dataset.qf;
+        if (key==='high') { $('#edgeMin').value = 15; $('#edgeMinVal').textContent = '15'; }
+        if (key==='myteams') { }
+        if (key==='tonight') { }
+        applyFilters();
+      });
+    });
+    $('#edgeMin').addEventListener('input', e=>{ $('#edgeMinVal').textContent = e.target.value; });
+    ['edgeMin','posSel','bookSel','lineMin','lineMax','searchBox'].forEach(id => $('#'+id).addEventListener('change', applyFilters));
+    $('#sortSel').addEventListener('change', e=> sortRows(e.target.value));
+    $('#resetFilters').addEventListener('click', ()=>{ localStorage.removeItem(stateKey); location.reload(); });
+    $('#printPage').addEventListener('click', ()=> window.print());
+    $('#toggleTheme').addEventListener('click', ()=>{
+      const root = document.documentElement;
+      const cur = root.getAttribute('data-theme');
+      root.setAttribute('data-theme', cur==='light' ? 'dark' : 'light');
+    });
+    $('#savePreset').addEventListener('click', ()=>{ persistState(); alert('Preset saved to your browser'); });
+    $('#clearPreset').addEventListener('click', ()=>{ localStorage.removeItem(stateKey); alert('Preset cleared'); });
+
+    $$('#oppBody .btn.primary, .cards .btn.primary').forEach(b=>{
+      b.addEventListener('click', ()=>{
+        const txt = b.getAttribute('data-copy') || '';
+        navigator.clipboard.writeText(txt);
+        b.textContent = 'Copied'; setTimeout(()=> b.textContent='Copy Bet', 1200);
+      });
+    });
+
+    Plotly.newPlot('plotEdge', [{ x: edgeSeries, type:'histogram', marker:{color:'#60a5fa'} }], {
+      margin:{t:20,r:10,b:40,l:40}, xaxis:{ title:'Edge %' }, yaxis:{ title:'Count' }, paper_bgcolor:'transparent', plot_bgcolor:'transparent'
+    }, {displayModeBar:false});
+
+    populateSelectors();
+    restoreState();
+    applyFilters();
+    sortRows($('#sortSel').value);
+  </script>
+</body>
+</html>
+
+

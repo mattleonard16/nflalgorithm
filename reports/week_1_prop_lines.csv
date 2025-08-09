@@ -1,0 +1,51 @@
+player,team,position,book,stat,line,over_odds,under_odds,game_date,home_team,away_team
+Davante Adams,NYJ,WR,BetMGM,rushing_yards,62.2,-115,105,2025-08-08,NYJ,TBD
+Davante Adams,NYJ,WR,DraftKings,passing_yards,264.5,-120,-120,2025-08-08,NYJ,TBD
+Amon-Ra St. Brown,DET,WR,FanDuel,rushing_yards,75.3,-120,100,2025-08-08,DET,TBD
+Stefon Diggs,HOU,WR,Caesars,passing_yards,246.0,100,-110,2025-08-08,HOU,TBD
+CeeDee Lamb,DAL,WR,Caesars,rushing_yards,67.0,-115,-115,2025-08-08,DAL,TBD
+Bijan Robinson,ATL,RB,DraftKings,rushing_yards,69.0,-110,-110,2025-08-08,ATL,TBD
+Mark Andrews,BAL,TE,Caesars,rushing_yards,76.8,-105,-120,2025-08-08,BAL,TBD
+C.J. Stroud,HOU,QB,BetMGM,receiving_yards,93.9,105,-120,2025-08-08,HOU,TBD
+Tyreek Hill,MIA,WR,FanDuel,passing_yards,273.7,-120,-115,2025-08-08,MIA,TBD
+Davante Adams,NYJ,WR,BetMGM,receiving_yards,87.7,-110,-115,2025-08-08,NYJ,TBD
+Breece Hall,NYJ,RB,FanDuel,receiving_yards,98.5,105,105,2025-08-08,NYJ,TBD
+Amon-Ra St. Brown,DET,WR,FanDuel,passing_yards,261.7,-115,-115,2025-08-08,DET,TBD
+Josh Allen,BUF,QB,BetMGM,receiving_yards,114.5,105,105,2025-08-08,BUF,TBD
+C.J. Stroud,HOU,QB,BetMGM,rushing_yards,92.1,-120,-115,2025-08-08,HOU,TBD
+Tyreek Hill,MIA,WR,Caesars,receiving_yards,78.4,-115,100,2025-08-08,MIA,TBD
+Bijan Robinson,ATL,RB,Caesars,rushing_yards,69.8,105,-105,2025-08-08,ATL,TBD
+Justin Jefferson,MIN,WR,FanDuel,receiving_yards,77.3,100,100,2025-08-08,MIN,TBD
+Mark Andrews,BAL,TE,Caesars,passing_yards,279.9,-105,-110,2025-08-08,BAL,TBD
+Travis Kelce,KC,TE,Caesars,rushing_yards,54.5,-120,-120,2025-08-08,KC,TBD
+Justin Jefferson,MIN,WR,FanDuel,passing_yards,274.6,-105,100,2025-08-08,MIN,TBD
+Amon-Ra St. Brown,DET,WR,Caesars,receiving_yards,94.8,-105,100,2025-08-08,DET,TBD
+Mark Andrews,BAL,TE,DraftKings,passing_yards,269.0,-120,105,2025-08-08,BAL,TBD
+C.J. Stroud,HOU,QB,BetMGM,receiving_yards,70.6,-105,-115,2025-08-08,HOU,TBD
+Josh Allen,BUF,QB,BetMGM,rushing_yards,98.6,-115,100,2025-08-08,BUF,TBD
+Davante Adams,NYJ,WR,BetMGM,passing_yards,277.1,100,100,2025-08-08,NYJ,TBD
+Stefon Diggs,HOU,WR,BetMGM,rushing_yards,88.1,100,100,2025-08-08,HOU,TBD
+CeeDee Lamb,DAL,WR,BetMGM,passing_yards,259.4,-120,-110,2025-08-08,DAL,TBD
+Josh Jacobs,GB,RB,DraftKings,rushing_yards,62.0,100,-120,2025-08-08,GB,TBD
+Amon-Ra St. Brown,DET,WR,Caesars,passing_yards,275.8,100,-115,2025-08-08,DET,TBD
+Justin Jefferson,MIN,WR,Caesars,passing_yards,282.3,-115,-110,2025-08-08,MIN,TBD
+Patrick Mahomes,KC,QB,Caesars,passing_yards,283.2,100,105,2025-08-08,KC,TBD
+Stefon Diggs,HOU,WR,BetMGM,passing_yards,254.9,105,105,2025-08-08,HOU,TBD
+Breece Hall,NYJ,RB,Caesars,receiving_yards,71.1,-115,-120,2025-08-08,NYJ,TBD
+Bijan Robinson,ATL,RB,FanDuel,rushing_yards,79.4,-120,-120,2025-08-08,ATL,TBD
+Tyreek Hill,MIA,WR,DraftKings,rushing_yards,95.3,-110,-120,2025-08-08,MIA,TBD
+Patrick Mahomes,KC,QB,BetMGM,rushing_yards,83.4,-115,100,2025-08-08,KC,TBD
+Justin Jefferson,MIN,WR,Caesars,passing_yards,247.1,-105,-105,2025-08-08,MIN,TBD
+Stefon Diggs,HOU,WR,DraftKings,rushing_yards,82.9,-110,-105,2025-08-08,HOU,TBD
+Saquon Barkley,PHI,RB,DraftKings,receiving_yards,98.7,105,-120,2025-08-08,PHI,TBD
+Tyreek Hill,MIA,WR,BetMGM,receiving_yards,105.0,-120,-115,2025-08-08,MIA,TBD
+Stefon Diggs,HOU,WR,Caesars,rushing_yards,57.0,-115,-110,2025-08-08,HOU,TBD
+Josh Allen,BUF,QB,DraftKings,rushing_yards,72.2,100,-120,2025-08-08,BUF,TBD
+Tyreek Hill,MIA,WR,DraftKings,passing_yards,283.4,-115,-115,2025-08-08,MIA,TBD
+Saquon Barkley,PHI,RB,Caesars,receiving_yards,75.7,-105,-120,2025-08-08,PHI,TBD
+Ja'Marr Chase,CIN,WR,DraftKings,receiving_yards,114.3,-110,-105,2025-08-08,CIN,TBD
+Josh Jacobs,GB,RB,Caesars,receiving_yards,72.7,-110,-115,2025-08-08,GB,TBD
+Tyreek Hill,MIA,WR,DraftKings,passing_yards,272.4,-120,-120,2025-08-08,MIA,TBD
+Lamar Jackson,BAL,QB,FanDuel,passing_yards,237.8,100,-120,2025-08-08,BAL,TBD
+Ja'Marr Chase,CIN,WR,DraftKings,rushing_yards,83.8,-115,-105,2025-08-08,CIN,TBD
+Davante Adams,NYJ,WR,FanDuel,passing_yards,263.9,-120,100,2025-08-08,NYJ,TBD

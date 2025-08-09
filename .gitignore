@@ -4,9 +4,24 @@ __pycache__/
 *$py.class
 *.so
 .Python
+
+# Virtual Environments
 venv/
 env/
 ENV/
+.venv/          # UV virtual environment
+.env
+
+# UV (Python Package Manager) artifacts
+uv.lock
+.uv_cache/
+.uv/
+
+# Migration artifacts
+migration_backup/
+*.pre-uv
+uv_migration_report.json
+validate_migration.py
 
 # Database files
 *.db
@@ -25,6 +40,32 @@ debug_page.html
 .DS_Store
 Thumbs.db
 
+# Development tools
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+*.py,cover
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
 # Temporary files
 *.tmp
-*.temp 
+*.temp
+temp_validation_test.py
+
+# Logs
+*.log
+logs/*.log
+prop_update.log
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# UV workspace
+.uv-workspace/ 

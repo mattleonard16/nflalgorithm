@@ -1,0 +1,8 @@
+player,team,position,book,stat,line,model_prediction,edge_yards,edge_percentage,value_rating,recommendation,edge_pct_display,confidence_score,visual_tier,correlation_group,filter_tags
+CeeDee Lamb,DAL,WR,FanDuel,receiving_yards,1200.5,1742.0,541.5,45.106205747605166,HIGH_VALUE,OVER,45.106205747605166,59,high,DAL:receiving_yards,"['dal', 'wr', 'fanduel', 'receiving_yards']"
+Tyreek Hill,MIA,WR,DraftKings,receiving_yards,1350.5,1675.0,324.5,24.028137726767866,HIGH_VALUE,OVER,24.028137726767866,45,high,MIA:receiving_yards,"['mia', 'wr', 'draftkings', 'receiving_yards']"
+Josh Jacobs,GB,RB,BetMGM,rushing_yards,950.5,862.0,-88.5,-9.310889005786429,MEDIUM_VALUE,UNDER,-9.310889005786429,17,medium,GB:rushing_yards,"['gb', 'rb', 'betmgm', 'rushing_yards']"
+Christian McCaffrey,SF,RB,DraftKings,rushing_yards,1250.5,1337.0,86.5,6.917233106757297,LOW_VALUE,OVER,6.917233106757297,13,low,SF:rushing_yards,"['sf', 'rb', 'draftkings', 'rushing_yards']"
+Derrick Henry,BAL,RB,FanDuel,rushing_yards,1100.5,1164.0,63.5,5.770104497955475,LOW_VALUE,OVER,5.770104497955475,11,low,BAL:rushing_yards,"['bal', 'rb', 'fanduel', 'rushing_yards']"
+Davante Adams,NYJ,WR,Caesars,receiving_yards,1050.5,1078.0,27.5,2.6178010471204187,NO_VALUE,OVER,2.6178010471204187,5,none,NYJ:receiving_yards,"['nyj', 'wr', 'caesars', 'receiving_yards']"
+Travis Kelce,KC,TE,BetMGM,receiving_yards,950.5,970.0,19.5,2.0515518148342977,NO_VALUE,OVER,2.0515518148342977,4,none,KC:receiving_yards,"['kc', 'te', 'betmgm', 'receiving_yards']"
