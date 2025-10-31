@@ -3,10 +3,12 @@
 Integration module to connect prop line scraper with existing NFL prediction system
 """
 
-import pandas as pd
-import sqlite3
-from typing import Dict, List, Optional, Tuple
 import logging
+import sqlite3
+from difflib import SequenceMatcher
+from typing import Dict, List, Optional, Tuple
+
+import pandas as pd
 from datetime import datetime
 from pathlib import Path
 
@@ -14,8 +16,413 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from config import config
+from utils.player_id_utils import (
+    canonicalize_team,
+    normalize_name,
+    normalized_name_from_player_id,
+    team_from_player_id,
+)
 
 logger = logging.getLogger(__name__)
+
+
+_FUZZY_THRESHOLD = 0.87  # Lowered to catch spelling variations and middle name differences
+
+
+def _safe_nunique(series: pd.Series) -> int:
+    return series.dropna().nunique()
+
+
+def normalize_player_name(name: Optional[str]) -> str:
+    return normalize_name(name)
+
+
+def _sequence_ratio(a: str, b: str) -> float:
+    if not a or not b:
+        return 0.0
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def join_odds_projections(season: int, week: int) -> pd.DataFrame:
+    """Join weekly odds snapshots with model projections."""
+
+    with sqlite3.connect(config.database.path) as conn:
+        projections = pd.read_sql_query(
+            """
+            SELECT season, week, player_id, team, opponent, market, mu, sigma, model_version,
+                   featureset_hash, generated_at
+            FROM weekly_projections
+            WHERE season = ? AND week = ?
+            """,
+            conn,
+            params=(season, week)
+        )
+
+        odds = pd.read_sql_query(
+            """
+            SELECT event_id, season, week, player_id, market, sportsbook, line, price, as_of
+            FROM weekly_odds
+            WHERE season = ? AND week = ?
+            """,
+            conn,
+            params=(season, week)
+        )
+
+        players = pd.read_sql_query(
+            """
+            SELECT player_id, name AS player_name, position
+            FROM player_stats_enhanced
+            WHERE season = ? AND week = ?
+            """,
+            conn,
+            params=(season, week)
+        )
+
+        injuries = pd.read_sql_query(
+            """
+            SELECT player_id, status, practice_participation
+            FROM injury_data
+            WHERE season = ? AND week = ?
+            """,
+            conn,
+            params=(season, week)
+        )
+
+        try:
+            player_mappings_df = pd.read_sql_query(
+                """
+                SELECT player_id_canonical, player_id_odds, player_id_projections, match_type, confidence_score
+                FROM player_mappings
+                """,
+                conn,
+            )
+        except Exception:
+            player_mappings_df = pd.DataFrame(
+                columns=[
+                    'player_id_canonical',
+                    'player_id_odds',
+                    'player_id_projections',
+                    'match_type',
+                    'confidence_score',
+                ]
+            )
+
+    if projections.empty or odds.empty:
+        logger.warning(
+            "join_odds_projections: insufficient data for season=%s week=%s (projections=%d, odds=%d)",
+            season,
+            week,
+            len(projections),
+            len(odds),
+        )
+        return pd.DataFrame()
+
+    projections = projections.copy().reset_index(drop=True)
+    odds = odds.copy().reset_index(drop=True)
+
+    projections['__proj_idx'] = projections.index
+    odds['__odds_idx'] = odds.index
+
+    projections['team'] = projections['team'].apply(canonicalize_team)
+
+    player_name_lookup = (
+        players.set_index('player_id')['player_name'].to_dict() if not players.empty else {}
+    )
+
+    odds['player_id_original'] = odds['player_id']
+    odds['__mapped_from_table'] = False
+    odds['mapping_confidence'] = 1.0
+    odds['mapping_type'] = 'player_id'
+
+    if not player_mappings_df.empty:
+        mapping_df = player_mappings_df.dropna(subset=['player_id_odds', 'player_id_canonical'])
+        if not mapping_df.empty:
+            mapping_df = mapping_df.sort_values('confidence_score', ascending=False).drop_duplicates('player_id_odds')
+            odds = odds.merge(
+                mapping_df[['player_id_odds', 'player_id_canonical', 'confidence_score', 'match_type']],
+                left_on='player_id',
+                right_on='player_id_odds',
+                how='left',
+            )
+            odds['__mapped_from_table'] = odds['player_id_canonical'].notna()
+            mapped_mask = odds['__mapped_from_table']
+            odds.loc[mapped_mask, 'player_id'] = odds.loc[mapped_mask, 'player_id_canonical']
+            odds.loc[mapped_mask, 'mapping_confidence'] = odds.loc[mapped_mask, 'confidence_score'].fillna(1.0)
+            odds.loc[mapped_mask, 'mapping_type'] = odds.loc[mapped_mask, 'match_type'].fillna('mapping_table')
+            odds.drop(columns=['player_id_canonical', 'player_id_odds', 'confidence_score', 'match_type'], inplace=True, errors='ignore')
+
+    def _resolve_projection_name(pid: Optional[str]) -> str:
+        if pid in player_name_lookup:
+            resolved = normalize_player_name(player_name_lookup[pid])
+            if resolved:
+                return resolved
+        return normalized_name_from_player_id(pid)
+
+    projections['normalized_name'] = projections['player_id'].apply(_resolve_projection_name)
+    odds['normalized_name'] = odds['player_id'].apply(normalized_name_from_player_id)
+
+    projections['team_token'] = projections['player_id'].apply(team_from_player_id)
+    odds['team_token'] = odds['player_id'].apply(team_from_player_id)
+
+    proj_players = set(projections['player_id'].dropna())
+    odds_players = set(odds['player_id'].dropna())
+    odds_players_original = set(odds['player_id_original'].dropna())
+    proj_markets = set(projections['market'].dropna())
+    odds_markets = set(odds['market'].dropna())
+
+    logger.info(
+        "join_odds_projections: start season=%s week=%s proj_rows=%d proj_players=%d proj_markets=%d odds_rows=%d odds_players=%d odds_markets=%d",
+        season,
+        week,
+        len(projections),
+        _safe_nunique(projections['player_id']),
+        len(proj_markets),
+        len(odds),
+        _safe_nunique(odds['player_id']),
+        len(odds_markets),
+    )
+
+    id_matches = projections.merge(
+        odds,
+        on=['season', 'week', 'player_id', 'market'],
+        how='inner',
+        suffixes=('_proj', '_odds')
+    )
+    if not id_matches.empty:
+        id_matches['match_type'] = 'player_id'
+        id_matches['match_score'] = 1.0
+        if '__mapped_from_table' in id_matches.columns:
+            mapped_mask = id_matches['__mapped_from_table'].fillna(False)
+            if mapped_mask.any():
+                id_matches.loc[mapped_mask, 'match_type'] = id_matches.loc[mapped_mask, 'mapping_type'].fillna('mapping_table')
+                id_matches.loc[mapped_mask, 'match_score'] = id_matches.loc[mapped_mask, 'mapping_confidence'].fillna(1.0)
+
+    matched_proj_idx = set(id_matches['__proj_idx']) if not id_matches.empty else set()
+    matched_odds_idx = set(id_matches['__odds_idx']) if not id_matches.empty else set()
+
+    unmatched_proj = projections[~projections['__proj_idx'].isin(matched_proj_idx)]
+    unmatched_odds = odds[~odds['__odds_idx'].isin(matched_odds_idx)]
+
+    # Match on normalized name + market, ignoring team differences
+    # This handles cases where players changed teams or have outdated team data
+    name_matches = unmatched_proj.merge(
+        unmatched_odds,
+        on=['season', 'week', 'market', 'normalized_name'],
+        how='inner',
+        suffixes=('_proj', '_odds')
+    )
+    if not name_matches.empty:
+        name_matches['match_type'] = 'normalized_name'
+        name_matches['match_score'] = 1.0
+        matched_proj_idx.update(name_matches['__proj_idx'])
+        matched_odds_idx.update(name_matches['__odds_idx'])
+
+    remaining_proj = projections[~projections['__proj_idx'].isin(matched_proj_idx)]
+    remaining_odds = odds[~odds['__odds_idx'].isin(matched_odds_idx)]
+
+    fuzzy_pairs: List[Tuple[int, int, float]] = []
+    used_odds_idx: set[int] = set()
+    proj_candidates = list(zip(remaining_proj['__proj_idx'], remaining_proj['normalized_name']))
+    odds_candidates = list(zip(remaining_odds['__odds_idx'], remaining_odds['normalized_name']))
+    for proj_idx, proj_name in proj_candidates:
+        best_idx: Optional[int] = None
+        best_ratio: float = 0.0
+        for odds_idx, odds_name in odds_candidates:
+            if odds_idx in used_odds_idx:
+                continue
+            ratio = _sequence_ratio(proj_name, odds_name)
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_idx = odds_idx
+        if best_idx is not None and best_ratio >= _FUZZY_THRESHOLD:
+            fuzzy_pairs.append((proj_idx, best_idx, best_ratio))
+            used_odds_idx.add(best_idx)
+
+    fuzzy_matches = pd.DataFrame(columns=[])  # default empty
+    if fuzzy_pairs:
+        pair_df = pd.DataFrame(fuzzy_pairs, columns=['__proj_idx', '__odds_idx', 'match_score'])
+        fuzzy_matches = pair_df.merge(remaining_proj, on='__proj_idx').merge(
+            remaining_odds, on='__odds_idx', suffixes=('_proj', '_odds')
+        )
+        fuzzy_matches['match_type'] = 'fuzzy_name'
+        matched_proj_idx.update(pair_df['__proj_idx'])
+        matched_odds_idx.update(pair_df['__odds_idx'])
+
+    def _prepare_match_frame(frame: pd.DataFrame) -> pd.DataFrame:
+        if frame is None or frame.empty:
+            return frame
+        frame = frame.copy()
+        # Ensure season and week are explicitly set (handle merge suffixes)
+        if 'season_proj' in frame.columns:
+            frame['season'] = frame.pop('season_proj')
+        elif 'season_odds' in frame.columns:
+            frame['season'] = frame.pop('season_odds')
+        elif 'season' not in frame.columns:
+            # Use function parameter if somehow missing
+            frame['season'] = season
+        
+        if 'week_proj' in frame.columns:
+            frame['week'] = frame.pop('week_proj')
+        elif 'week_odds' in frame.columns:
+            frame['week'] = frame.pop('week_odds')
+        elif 'week' not in frame.columns:
+            # Use function parameter if somehow missing
+            frame['week'] = week
+        
+        # Ensure season/week are non-null integers
+        frame['season'] = frame['season'].fillna(season).astype(int)
+        frame['week'] = frame['week'].fillna(week).astype(int)
+        
+        if 'player_id_proj' in frame.columns:
+            frame['player_id_projection'] = frame.pop('player_id_proj')
+        else:
+            frame['player_id_projection'] = frame.get('player_id')
+        if 'player_id_odds' in frame.columns:
+            frame['player_id_odds'] = frame['player_id_odds']
+        elif 'player_id_original' in frame.columns:
+            frame['player_id_odds'] = frame['player_id_original']
+        else:
+            frame['player_id_odds'] = frame.get('player_id')
+        frame['player_id'] = frame['player_id_projection']
+
+        if 'normalized_name_proj' in frame.columns:
+            frame['normalized_name_projection'] = frame.pop('normalized_name_proj')
+        else:
+            frame['normalized_name_projection'] = frame.get('normalized_name')
+        if 'normalized_name_odds' in frame.columns:
+            frame['normalized_name_odds'] = frame.pop('normalized_name_odds')
+        else:
+            frame['normalized_name_odds'] = frame.get('normalized_name')
+        if 'normalized_name' not in frame.columns:
+            frame['normalized_name'] = frame['normalized_name_projection'].where(
+                frame['normalized_name_projection'].notna() & (frame['normalized_name_projection'] != ""),
+                frame['normalized_name_odds']
+            )
+
+        if 'team_token_proj' in frame.columns:
+            frame['team_projection_token'] = frame.pop('team_token_proj')
+        else:
+            frame['team_projection_token'] = frame.get('team_token')
+        if 'team_token_odds' in frame.columns:
+            frame['team_odds_token'] = frame.pop('team_token_odds')
+        else:
+            frame['team_odds_token'] = frame.get('team_token')
+        frame.drop(columns=['team_token'], inplace=True, errors='ignore')
+
+        if 'market_proj' in frame.columns:
+            frame['market'] = frame.pop('market_proj')
+        elif 'market' not in frame.columns and 'market_odds' in frame.columns:
+            frame['market'] = frame['market_odds']
+        if 'market_odds' in frame.columns:
+            frame['market_odds_source'] = frame.pop('market_odds')
+
+        frame['team_odds'] = frame['player_id_odds'].apply(team_from_player_id)
+        return frame
+
+    candidate_frames = [
+        _prepare_match_frame(df)
+        for df in (id_matches, name_matches, fuzzy_matches)
+        if df is not None and not df.empty
+    ]
+
+    if not candidate_frames:
+        logger.warning(
+            "join_odds_projections: no matches found for season=%s week=%s",
+            season,
+            week,
+        )
+        return pd.DataFrame()
+
+    merged = pd.concat(candidate_frames, ignore_index=True)
+    
+    # Ensure season and week are explicitly set (may be lost in merges/concat)
+    merged['season'] = merged.get('season', season)
+    merged['week'] = merged.get('week', week)
+    merged['season'] = merged['season'].fillna(season).astype(int)
+    merged['week'] = merged['week'].fillna(week).astype(int)
+
+    merged['team_match_flag'] = merged['team'].fillna('').eq(merged['team_odds'].fillna(''))
+
+    mismatch_mask = ~merged['team_match_flag']
+    team_mismatch_count = int(mismatch_mask.sum())
+    team_mismatch_sample: List[Dict[str, str]] = []
+    if team_mismatch_count:
+        team_mismatch_sample = (
+            merged.loc[mismatch_mask, ['player_id', 'player_id_odds', 'team', 'team_odds']]
+            .head(5)
+            .to_dict(orient='records')
+        )
+
+    match_breakdown = {
+        key: int(value) for key, value in merged['match_type'].value_counts().to_dict().items()
+    }
+
+    matched_projection_players = set(merged['player_id_projection'].dropna())
+    matched_odds_players = set(merged['player_id_odds'].dropna())
+    unmatched_projection_players = list(proj_players - matched_projection_players)[:15]
+    unmatched_odds_players = list(odds_players_original - matched_odds_players)[:15]
+
+    logger.info(
+        "join_odds_projections: matched_rows=%d matched_players=%d match_breakdown=%s team_mismatches=%d unmatched_projection_players=%d unmatched_odds_players=%d",
+        len(merged),
+        len(matched_projection_players),
+        match_breakdown,
+        team_mismatch_count,
+        max(len(proj_players - matched_projection_players), 0),
+        max(len(odds_players_original - matched_odds_players), 0),
+    )
+
+    if unmatched_projection_players:
+        logger.debug(
+            "join_odds_projections: sample unmatched projection player_ids=%s",
+            unmatched_projection_players,
+        )
+
+    if unmatched_odds_players:
+        logger.debug(
+            "join_odds_projections: sample unmatched odds player_ids=%s",
+            unmatched_odds_players,
+        )
+
+    if team_mismatch_count:
+        logger.warning(
+            "join_odds_projections: team mismatch sample=%s",
+            team_mismatch_sample,
+        )
+
+    merged = merged.merge(players, on='player_id', how='left')
+    merged = merged.merge(injuries, on='player_id', how='left')
+
+    merged['player_name'] = merged['player_name'].fillna(merged['player_id'])
+    merged['position'] = merged['position'].fillna('FLEX')
+    merged['status'] = merged['status'].fillna('ACTIVE')
+    merged['practice_participation'] = merged['practice_participation'].fillna('FULL')
+
+    merged['price'] = merged['price'].astype(int)
+    merged['line'] = merged['line'].astype(float)
+    merged['mu'] = merged['mu'].astype(float)
+    merged['sigma'] = merged['sigma'].astype(float)
+    merged['match_confidence'] = merged['match_score']
+
+    merged.sort_values(['market', 'player_id', 'sportsbook', 'as_of'], inplace=True)
+    merged.reset_index(drop=True, inplace=True)
+
+    merged.drop(
+        columns=[
+            '__proj_idx',
+            '__odds_idx',
+            'team_projection_token',
+            'team_odds_token',
+            'player_id_original',
+            '__mapped_from_table',
+            'mapping_type',
+            'mapping_confidence',
+        ],
+        inplace=True,
+        errors='ignore',
+    )
+
+    return merged
 
 class PropIntegration:
     """Integrate prop lines with existing NFL prediction system"""
