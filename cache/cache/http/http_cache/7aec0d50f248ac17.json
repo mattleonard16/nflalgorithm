@@ -1,0 +1,486 @@
+{
+  "created_at": "2025-10-31T18:45:06.430673+00:00",
+  "elapsed": 0.126041,
+  "encoding": "utf-8",
+  "expires": "2025-10-31T19:15:06.430578+00:00",
+  "headers": {
+    "Apigw-Requestid": "TU2D7gBnoAMEZOA=",
+    "Connection": "keep-alive",
+    "Content-Length": "772",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Fri, 31 Oct 2025 18:45:06 GMT",
+    "X-Requests-Last": "1",
+    "X-Requests-Remaining": "384",
+    "X-Requests-Used": "116",
+    "content-encoding": "gzip",
+    "vary": "Accept-Encoding"
+  },
+  "reason": "OK",
+  "request": {
+    "body": "",
+    "headers": {
+      "Accept": "*/*",
+      "Accept-Encoding": "gzip, deflate",
+      "Connection": "keep-alive",
+      "User-Agent": "python-requests/2.32.4"
+    },
+    "method": "GET",
+    "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/6031b513e188fc19a2311499566c9258/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us"
+  },
+  "status_code": 200,
+  "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/6031b513e188fc19a2311499566c9258/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us",
+  "_decoded_content": {
+    "id": "6031b513e188fc19a2311499566c9258",
+    "sport_key": "americanfootball_nfl",
+    "sport_title": "NFL",
+    "commence_time": "2025-11-02T18:00:00Z",
+    "home_team": "Green Bay Packers",
+    "away_team": "Carolina Panthers",
+    "bookmakers": [
+      {
+        "key": "draftkings",
+        "title": "DraftKings",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:45:04Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Josh Jacobs",
+                "price": -110,
+                "point": 63.5
+              },
+              {
+                "name": "Under",
+                "description": "Josh Jacobs",
+                "price": -114,
+                "point": 63.5
+              },
+              {
+                "name": "Over",
+                "description": "Rico Dowdle",
+                "price": -110,
+                "point": 53.5
+              },
+              {
+                "name": "Under",
+                "description": "Rico Dowdle",
+                "price": -115,
+                "point": 53.5
+              },
+              {
+                "name": "Over",
+                "description": "Emanuel Wilson",
+                "price": -115,
+                "point": 28.5
+              },
+              {
+                "name": "Under",
+                "description": "Emanuel Wilson",
+                "price": -109,
+                "point": 28.5
+              },
+              {
+                "name": "Over",
+                "description": "Chuba Hubbard",
+                "price": -113,
+                "point": 19.5
+              },
+              {
+                "name": "Under",
+                "description": "Chuba Hubbard",
+                "price": -111,
+                "point": 19.5
+              },
+              {
+                "name": "Over",
+                "description": "Jordan Love",
+                "price": -111,
+                "point": 10.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Love",
+                "price": -113,
+                "point": 10.5
+              },
+              {
+                "name": "Over",
+                "description": "Bryce Young",
+                "price": -107,
+                "point": 6.5
+              },
+              {
+                "name": "Under",
+                "description": "Bryce Young",
+                "price": -118,
+                "point": 6.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "fanduel",
+        "title": "FanDuel",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:59Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Jordan Love",
+                "price": -114,
+                "point": 9.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Love",
+                "price": -114,
+                "point": 9.5
+              },
+              {
+                "name": "Over",
+                "description": "Emanuel Wilson",
+                "price": -114,
+                "point": 27.5
+              },
+              {
+                "name": "Under",
+                "description": "Emanuel Wilson",
+                "price": -114,
+                "point": 27.5
+              },
+              {
+                "name": "Over",
+                "description": "Josh Jacobs",
+                "price": -114,
+                "point": 63.5
+              },
+              {
+                "name": "Under",
+                "description": "Josh Jacobs",
+                "price": -114,
+                "point": 63.5
+              },
+              {
+                "name": "Over",
+                "description": "Bryce Young",
+                "price": -114,
+                "point": 7.5
+              },
+              {
+                "name": "Under",
+                "description": "Bryce Young",
+                "price": -114,
+                "point": 7.5
+              },
+              {
+                "name": "Over",
+                "description": "Chuba Hubbard",
+                "price": -114,
+                "point": 18.5
+              },
+              {
+                "name": "Under",
+                "description": "Chuba Hubbard",
+                "price": -114,
+                "point": 18.5
+              },
+              {
+                "name": "Over",
+                "description": "Rico Dowdle",
+                "price": -114,
+                "point": 52.5
+              },
+              {
+                "name": "Under",
+                "description": "Rico Dowdle",
+                "price": -114,
+                "point": 52.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betonlineag",
+        "title": "BetOnline.ag",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:42Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Josh Jacobs",
+                "price": -114,
+                "point": 63.5
+              },
+              {
+                "name": "Under",
+                "description": "Josh Jacobs",
+                "price": -114,
+                "point": 63.5
+              },
+              {
+                "name": "Over",
+                "description": "Jordan Love",
+                "price": -114,
+                "point": 9.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Love",
+                "price": -114,
+                "point": 9.5
+              },
+              {
+                "name": "Over",
+                "description": "Bryce Young",
+                "price": -114,
+                "point": 6.5
+              },
+              {
+                "name": "Under",
+                "description": "Bryce Young",
+                "price": -114,
+                "point": 6.5
+              },
+              {
+                "name": "Over",
+                "description": "Emanuel Wilson",
+                "price": -114,
+                "point": 26.5
+              },
+              {
+                "name": "Under",
+                "description": "Emanuel Wilson",
+                "price": -114,
+                "point": 26.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betrivers",
+        "title": "BetRivers",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:20Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Jordan Love",
+                "price": -117,
+                "point": 10.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Love",
+                "price": -114,
+                "point": 10.5
+              },
+              {
+                "name": "Over",
+                "description": "Emanuel Wilson",
+                "price": -113,
+                "point": 30.5
+              },
+              {
+                "name": "Under",
+                "description": "Emanuel Wilson",
+                "price": -118,
+                "point": 30.5
+              },
+              {
+                "name": "Over",
+                "description": "Chuba Hubbard",
+                "price": -114,
+                "point": 18.5
+              },
+              {
+                "name": "Under",
+                "description": "Chuba Hubbard",
+                "price": -117,
+                "point": 18.5
+              },
+              {
+                "name": "Over",
+                "description": "Rico Dowdle",
+                "price": -118,
+                "point": 54.5
+              },
+              {
+                "name": "Under",
+                "description": "Rico Dowdle",
+                "price": -113,
+                "point": 54.5
+              },
+              {
+                "name": "Over",
+                "description": "Josh Jacobs",
+                "price": -113,
+                "point": 63.5
+              },
+              {
+                "name": "Under",
+                "description": "Josh Jacobs",
+                "price": -118,
+                "point": 63.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betmgm",
+        "title": "BetMGM",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:38Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Jordan Love",
+                "price": -115,
+                "point": 10.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Love",
+                "price": -115,
+                "point": 10.5
+              },
+              {
+                "name": "Over",
+                "description": "Josh Jacobs",
+                "price": -118,
+                "point": 66.5
+              },
+              {
+                "name": "Under",
+                "description": "Josh Jacobs",
+                "price": -110,
+                "point": 66.5
+              },
+              {
+                "name": "Over",
+                "description": "Emanuel Wilson",
+                "price": -115,
+                "point": 30.5
+              },
+              {
+                "name": "Under",
+                "description": "Emanuel Wilson",
+                "price": -115,
+                "point": 30.5
+              },
+              {
+                "name": "Over",
+                "description": "Bryce Young",
+                "price": -110,
+                "point": 6.5
+              },
+              {
+                "name": "Under",
+                "description": "Bryce Young",
+                "price": -118,
+                "point": 6.5
+              },
+              {
+                "name": "Over",
+                "description": "Matthew Golden",
+                "price": -118,
+                "point": 2.5
+              },
+              {
+                "name": "Under",
+                "description": "Matthew Golden",
+                "price": -110,
+                "point": 2.5
+              },
+              {
+                "name": "Over",
+                "description": "Chuba Hubbard",
+                "price": -118,
+                "point": 19.5
+              },
+              {
+                "name": "Under",
+                "description": "Chuba Hubbard",
+                "price": -110,
+                "point": 19.5
+              },
+              {
+                "name": "Over",
+                "description": "Rico Dowdle",
+                "price": -115,
+                "point": 53.5
+              },
+              {
+                "name": "Under",
+                "description": "Rico Dowdle",
+                "price": -115,
+                "point": 53.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "bovada",
+        "title": "Bovada",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:24Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Emanuel Wilson",
+                "price": -115,
+                "point": 29.5
+              },
+              {
+                "name": "Under",
+                "description": "Emanuel Wilson",
+                "price": -115,
+                "point": 29.5
+              },
+              {
+                "name": "Over",
+                "description": "Jordan Love",
+                "price": -115,
+                "point": 9.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Love",
+                "price": -115,
+                "point": 9.5
+              },
+              {
+                "name": "Over",
+                "description": "Josh Jacobs",
+                "price": -115,
+                "point": 63.5
+              },
+              {
+                "name": "Under",
+                "description": "Josh Jacobs",
+                "price": -115,
+                "point": 63.5
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

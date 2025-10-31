@@ -27,7 +27,7 @@ import pandas as pd
 # Local imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import config
-from prop_line_scraper import NFLPropScraper
+from scripts.prop_line_scraper import NFLPropScraper
 from prop_integration import PropIntegration
 from value_betting_engine import ValueBettingEngine
 

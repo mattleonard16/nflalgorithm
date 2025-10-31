@@ -1,0 +1,258 @@
+{
+  "created_at": "2025-10-31T18:45:08.325052+00:00",
+  "elapsed": 0.111024,
+  "encoding": "utf-8",
+  "expires": "2025-10-31T19:15:08.324953+00:00",
+  "headers": {
+    "Apigw-Requestid": "TU2EOg4oIAMEZEg=",
+    "Connection": "keep-alive",
+    "Content-Length": "529",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Fri, 31 Oct 2025 18:45:08 GMT",
+    "X-Requests-Last": "1",
+    "X-Requests-Remaining": "383",
+    "X-Requests-Used": "117",
+    "content-encoding": "gzip",
+    "vary": "Accept-Encoding"
+  },
+  "reason": "OK",
+  "request": {
+    "body": "",
+    "headers": {
+      "Accept": "*/*",
+      "Accept-Encoding": "gzip, deflate",
+      "Connection": "keep-alive",
+      "User-Agent": "python-requests/2.32.4"
+    },
+    "method": "GET",
+    "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/6031b513e188fc19a2311499566c9258/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_pass_yds&oddsFormat=american&regions=us"
+  },
+  "status_code": 200,
+  "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/6031b513e188fc19a2311499566c9258/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_pass_yds&oddsFormat=american&regions=us",
+  "_decoded_content": {
+    "id": "6031b513e188fc19a2311499566c9258",
+    "sport_key": "americanfootball_nfl",
+    "sport_title": "NFL",
+    "commence_time": "2025-11-02T18:00:00Z",
+    "home_team": "Green Bay Packers",
+    "away_team": "Carolina Panthers",
+    "bookmakers": [
+      {
+        "key": "draftkings",
+        "title": "DraftKings",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:45:04Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Jordan Love",
+                "price": -113,
+                "point": 232.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Love",
+                "price": -111,
+                "point": 232.5
+              },
+              {
+                "name": "Over",
+                "description": "Bryce Young",
+                "price": -111,
+                "point": 189.5
+              },
+              {
+                "name": "Under",
+                "description": "Bryce Young",
+                "price": -113,
+                "point": 189.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "fanduel",
+        "title": "FanDuel",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:44:59Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Bryce Young",
+                "price": -114,
+                "point": 187.5
+              },
+              {
+                "name": "Under",
+                "description": "Bryce Young",
+                "price": -114,
+                "point": 187.5
+              },
+              {
+                "name": "Over",
+                "description": "Jordan Love",
+                "price": -114,
+                "point": 233.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Love",
+                "price": -114,
+                "point": 233.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betonlineag",
+        "title": "BetOnline.ag",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:44:42Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Jordan Love",
+                "price": -112,
+                "point": 233.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Love",
+                "price": -115,
+                "point": 233.5
+              },
+              {
+                "name": "Over",
+                "description": "Bryce Young",
+                "price": -112,
+                "point": 189.5
+              },
+              {
+                "name": "Under",
+                "description": "Bryce Young",
+                "price": -115,
+                "point": 189.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betrivers",
+        "title": "BetRivers",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:44:20Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Jordan Love",
+                "price": -117,
+                "point": 231.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Love",
+                "price": -114,
+                "point": 231.5
+              },
+              {
+                "name": "Over",
+                "description": "Bryce Young",
+                "price": -117,
+                "point": 185.5
+              },
+              {
+                "name": "Under",
+                "description": "Bryce Young",
+                "price": -114,
+                "point": 185.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betmgm",
+        "title": "BetMGM",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:44:38Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Bryce Young",
+                "price": -115,
+                "point": 187.5
+              },
+              {
+                "name": "Under",
+                "description": "Bryce Young",
+                "price": -115,
+                "point": 187.5
+              },
+              {
+                "name": "Over",
+                "description": "Jordan Love",
+                "price": -115,
+                "point": 236.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Love",
+                "price": -115,
+                "point": 236.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "bovada",
+        "title": "Bovada",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:44:24Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Bryce Young",
+                "price": -115,
+                "point": 189.5
+              },
+              {
+                "name": "Under",
+                "description": "Bryce Young",
+                "price": -115,
+                "point": 189.5
+              },
+              {
+                "name": "Over",
+                "description": "Jordan Love",
+                "price": -115,
+                "point": 233.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Love",
+                "price": -115,
+                "point": 233.5
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

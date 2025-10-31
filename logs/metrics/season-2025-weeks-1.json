@@ -1,0 +1,15 @@
+{
+  "season": 2025,
+  "weeks": [
+    1
+  ],
+  "generated_at": "2025-10-01T05:18:00.717688",
+  "bets_placed": 0,
+  "total_stake": 0.0,
+  "expected_return": 0.0,
+  "expected_roi": 0,
+  "avg_edge": -0.27131698626260087,
+  "avg_clv_bp": -500.0,
+  "hit_rate": 0.252492537546923,
+  "max_drawdown": -0.0
+}

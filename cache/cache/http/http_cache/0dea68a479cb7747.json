@@ -1,0 +1,78 @@
+{
+  "created_at": "2025-10-01T21:23:30.845585+00:00",
+  "elapsed": 0.179771,
+  "encoding": "utf-8",
+  "expires": "2025-10-01T21:53:30.845482+00:00",
+  "headers": {
+    "Apigw-Requestid": "RyVI_hQUIAMEZUA=",
+    "Connection": "keep-alive",
+    "Content-Length": "332",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Wed, 01 Oct 2025 21:23:30 GMT",
+    "X-Requests-Last": "1",
+    "X-Requests-Remaining": "496",
+    "X-Requests-Used": "4",
+    "content-encoding": "gzip",
+    "vary": "Accept-Encoding"
+  },
+  "reason": "OK",
+  "request": {
+    "body": "",
+    "headers": {
+      "Accept": "*/*",
+      "Accept-Encoding": "gzip, deflate",
+      "Connection": "keep-alive",
+      "User-Agent": "python-requests/2.32.4"
+    },
+    "method": "GET",
+    "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/6eb8eeff6a052455649ddd2a50e0a188/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us"
+  },
+  "status_code": 200,
+  "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/6eb8eeff6a052455649ddd2a50e0a188/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us",
+  "_decoded_content": {
+    "id": "6eb8eeff6a052455649ddd2a50e0a188",
+    "sport_key": "americanfootball_nfl",
+    "sport_title": "NFL",
+    "commence_time": "2025-10-05T17:01:00Z",
+    "home_team": "Baltimore Ravens",
+    "away_team": "Houston Texans",
+    "bookmakers": [
+      {
+        "key": "betmgm",
+        "title": "BetMGM",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-01T21:22:43Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "C.J. Stroud",
+                "price": -110,
+                "point": 13.5
+              },
+              {
+                "name": "Under",
+                "description": "C.J. Stroud",
+                "price": -120,
+                "point": 13.5
+              },
+              {
+                "name": "Over",
+                "description": "Derrick Henry",
+                "price": -115,
+                "point": 78.5
+              },
+              {
+                "name": "Under",
+                "description": "Derrick Henry",
+                "price": -115,
+                "point": 78.5
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

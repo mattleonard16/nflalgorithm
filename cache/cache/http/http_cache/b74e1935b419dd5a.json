@@ -1,0 +1,546 @@
+{
+  "created_at": "2025-10-31T18:45:10.934551+00:00",
+  "elapsed": 0.127949,
+  "encoding": "utf-8",
+  "expires": "2025-10-31T19:15:10.934448+00:00",
+  "headers": {
+    "Apigw-Requestid": "TU2EoiZtIAMEPiQ=",
+    "Connection": "keep-alive",
+    "Content-Length": "818",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Fri, 31 Oct 2025 18:45:10 GMT",
+    "X-Requests-Last": "1",
+    "X-Requests-Remaining": "380",
+    "X-Requests-Used": "120",
+    "content-encoding": "gzip",
+    "vary": "Accept-Encoding"
+  },
+  "reason": "OK",
+  "request": {
+    "body": "",
+    "headers": {
+      "Accept": "*/*",
+      "Accept-Encoding": "gzip, deflate",
+      "Connection": "keep-alive",
+      "User-Agent": "python-requests/2.32.4"
+    },
+    "method": "GET",
+    "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/72e2ce6652bbb3901f60b38bec05bf5f/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us"
+  },
+  "status_code": 200,
+  "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/72e2ce6652bbb3901f60b38bec05bf5f/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us",
+  "_decoded_content": {
+    "id": "72e2ce6652bbb3901f60b38bec05bf5f",
+    "sport_key": "americanfootball_nfl",
+    "sport_title": "NFL",
+    "commence_time": "2025-11-02T18:00:00Z",
+    "home_team": "Houston Texans",
+    "away_team": "Denver Broncos",
+    "bookmakers": [
+      {
+        "key": "draftkings",
+        "title": "DraftKings",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:10Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "J.K. Dobbins",
+                "price": -110,
+                "point": 60.5
+              },
+              {
+                "name": "Under",
+                "description": "J.K. Dobbins",
+                "price": -114,
+                "point": 60.5
+              },
+              {
+                "name": "Over",
+                "description": "Nick Chubb",
+                "price": -114,
+                "point": 38.5
+              },
+              {
+                "name": "Under",
+                "description": "Nick Chubb",
+                "price": -110,
+                "point": 38.5
+              },
+              {
+                "name": "Over",
+                "description": "Woody Marks",
+                "price": -110,
+                "point": 32.5
+              },
+              {
+                "name": "Under",
+                "description": "Woody Marks",
+                "price": -115,
+                "point": 32.5
+              },
+              {
+                "name": "Over",
+                "description": "Bo Nix",
+                "price": -109,
+                "point": 23.5
+              },
+              {
+                "name": "Under",
+                "description": "Bo Nix",
+                "price": -115,
+                "point": 23.5
+              },
+              {
+                "name": "Over",
+                "description": "RJ Harvey",
+                "price": -108,
+                "point": 19.5
+              },
+              {
+                "name": "Under",
+                "description": "RJ Harvey",
+                "price": -117,
+                "point": 19.5
+              },
+              {
+                "name": "Over",
+                "description": "C.J. Stroud",
+                "price": -117,
+                "point": 15.5
+              },
+              {
+                "name": "Under",
+                "description": "C.J. Stroud",
+                "price": -108,
+                "point": 15.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "fanduel",
+        "title": "FanDuel",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:45:02Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "C.J. Stroud",
+                "price": -114,
+                "point": 15.5
+              },
+              {
+                "name": "Under",
+                "description": "C.J. Stroud",
+                "price": -114,
+                "point": 15.5
+              },
+              {
+                "name": "Over",
+                "description": "RJ Harvey",
+                "price": -114,
+                "point": 18.5
+              },
+              {
+                "name": "Under",
+                "description": "RJ Harvey",
+                "price": -114,
+                "point": 18.5
+              },
+              {
+                "name": "Over",
+                "description": "Woody Marks",
+                "price": -114,
+                "point": 32.5
+              },
+              {
+                "name": "Under",
+                "description": "Woody Marks",
+                "price": -114,
+                "point": 32.5
+              },
+              {
+                "name": "Over",
+                "description": "Nick Chubb",
+                "price": -114,
+                "point": 39.5
+              },
+              {
+                "name": "Under",
+                "description": "Nick Chubb",
+                "price": -114,
+                "point": 39.5
+              },
+              {
+                "name": "Over",
+                "description": "Bo Nix",
+                "price": -114,
+                "point": 21.5
+              },
+              {
+                "name": "Under",
+                "description": "Bo Nix",
+                "price": -114,
+                "point": 21.5
+              },
+              {
+                "name": "Over",
+                "description": "J.K. Dobbins",
+                "price": -114,
+                "point": 60.5
+              },
+              {
+                "name": "Under",
+                "description": "J.K. Dobbins",
+                "price": -114,
+                "point": 60.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betonlineag",
+        "title": "BetOnline.ag",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:08Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "C.J. Stroud",
+                "price": -123,
+                "point": 15.5
+              },
+              {
+                "name": "Under",
+                "description": "C.J. Stroud",
+                "price": -104,
+                "point": 15.5
+              },
+              {
+                "name": "Over",
+                "description": "RJ Harvey",
+                "price": -112,
+                "point": 18.5
+              },
+              {
+                "name": "Under",
+                "description": "RJ Harvey",
+                "price": -115,
+                "point": 18.5
+              },
+              {
+                "name": "Over",
+                "description": "J.K. Dobbins",
+                "price": -112,
+                "point": 60.5
+              },
+              {
+                "name": "Under",
+                "description": "J.K. Dobbins",
+                "price": -115,
+                "point": 60.5
+              },
+              {
+                "name": "Over",
+                "description": "Nick Chubb",
+                "price": -114,
+                "point": 39.5
+              },
+              {
+                "name": "Under",
+                "description": "Nick Chubb",
+                "price": -114,
+                "point": 39.5
+              },
+              {
+                "name": "Over",
+                "description": "Bo Nix",
+                "price": -120,
+                "point": 22.5
+              },
+              {
+                "name": "Under",
+                "description": "Bo Nix",
+                "price": -108,
+                "point": 22.5
+              },
+              {
+                "name": "Over",
+                "description": "Woody Marks",
+                "price": -115,
+                "point": 32.5
+              },
+              {
+                "name": "Under",
+                "description": "Woody Marks",
+                "price": -112,
+                "point": 32.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betrivers",
+        "title": "BetRivers",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:45:08Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Bo Nix",
+                "price": -117,
+                "point": 21.5
+              },
+              {
+                "name": "Under",
+                "description": "Bo Nix",
+                "price": -114,
+                "point": 21.5
+              },
+              {
+                "name": "Over",
+                "description": "J.K. Dobbins",
+                "price": -117,
+                "point": 57.5
+              },
+              {
+                "name": "Under",
+                "description": "J.K. Dobbins",
+                "price": -114,
+                "point": 57.5
+              },
+              {
+                "name": "Over",
+                "description": "RJ Harvey",
+                "price": -121,
+                "point": 17.5
+              },
+              {
+                "name": "Under",
+                "description": "RJ Harvey",
+                "price": -110,
+                "point": 17.5
+              },
+              {
+                "name": "Over",
+                "description": "Woody Marks",
+                "price": -112,
+                "point": 34.5
+              },
+              {
+                "name": "Under",
+                "description": "Woody Marks",
+                "price": -120,
+                "point": 34.5
+              },
+              {
+                "name": "Over",
+                "description": "C.J. Stroud",
+                "price": -115,
+                "point": 16.5
+              },
+              {
+                "name": "Under",
+                "description": "C.J. Stroud",
+                "price": -115,
+                "point": 16.5
+              },
+              {
+                "name": "Over",
+                "description": "Nick Chubb",
+                "price": -118,
+                "point": 37.5
+              },
+              {
+                "name": "Under",
+                "description": "Nick Chubb",
+                "price": -112,
+                "point": 37.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betmgm",
+        "title": "BetMGM",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:24Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "J.K. Dobbins",
+                "price": -110,
+                "point": 57.5
+              },
+              {
+                "name": "Under",
+                "description": "J.K. Dobbins",
+                "price": -118,
+                "point": 57.5
+              },
+              {
+                "name": "Over",
+                "description": "Nick Chubb",
+                "price": -110,
+                "point": 40.5
+              },
+              {
+                "name": "Under",
+                "description": "Nick Chubb",
+                "price": -118,
+                "point": 40.5
+              },
+              {
+                "name": "Over",
+                "description": "Woody Marks",
+                "price": -115,
+                "point": 35.5
+              },
+              {
+                "name": "Under",
+                "description": "Woody Marks",
+                "price": -115,
+                "point": 35.5
+              },
+              {
+                "name": "Over",
+                "description": "C.J. Stroud",
+                "price": -118,
+                "point": 16.5
+              },
+              {
+                "name": "Under",
+                "description": "C.J. Stroud",
+                "price": -110,
+                "point": 16.5
+              },
+              {
+                "name": "Over",
+                "description": "RJ Harvey",
+                "price": -115,
+                "point": 18.5
+              },
+              {
+                "name": "Under",
+                "description": "RJ Harvey",
+                "price": -115,
+                "point": 18.5
+              },
+              {
+                "name": "Over",
+                "description": "Bo Nix",
+                "price": -118,
+                "point": 22.5
+              },
+              {
+                "name": "Under",
+                "description": "Bo Nix",
+                "price": -110,
+                "point": 22.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "bovada",
+        "title": "Bovada",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:55Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Bo Nix",
+                "price": -150,
+                "point": 20.5
+              },
+              {
+                "name": "Under",
+                "description": "Bo Nix",
+                "price": 115,
+                "point": 20.5
+              },
+              {
+                "name": "Over",
+                "description": "C.J. Stroud",
+                "price": -130,
+                "point": 15.5
+              },
+              {
+                "name": "Under",
+                "description": "C.J. Stroud",
+                "price": 100,
+                "point": 15.5
+              },
+              {
+                "name": "Over",
+                "description": "J.K. Dobbins",
+                "price": -115,
+                "point": 60.5
+              },
+              {
+                "name": "Under",
+                "description": "J.K. Dobbins",
+                "price": -115,
+                "point": 60.5
+              },
+              {
+                "name": "Over",
+                "description": "Nick Chubb",
+                "price": -150,
+                "point": 37.5
+              },
+              {
+                "name": "Under",
+                "description": "Nick Chubb",
+                "price": 115,
+                "point": 37.5
+              },
+              {
+                "name": "Over",
+                "description": "RJ Harvey",
+                "price": -110,
+                "point": 18.5
+              },
+              {
+                "name": "Under",
+                "description": "RJ Harvey",
+                "price": -120,
+                "point": 18.5
+              },
+              {
+                "name": "Over",
+                "description": "Woody Marks",
+                "price": -115,
+                "point": 34.5
+              },
+              {
+                "name": "Under",
+                "description": "Woody Marks",
+                "price": -115,
+                "point": 34.5
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -453,7 +453,9 @@ class DataPipeline:
         if self._projection_cache is not None:
             return self._projection_cache.copy()
 
-        path = config.project_root / "2024_nfl_projections.csv"
+        path = config.project_root / "data" / "2024_nfl_projections.csv"
+        rookie_path = config.project_root / "data" / "2024_nfl_rookies.csv"
+        
         if not path.exists():
             columns = [
                 'name', 'position', 'team', 'age_2024', '2023_rush_yds',
@@ -473,8 +475,9 @@ class DataPipeline:
             df = df[~df['name'].str.contains('additional|edge cases|suspicious|#', case=False, na=False)]
         
         df['name'] = df['name'].fillna('Unknown Player')
-        df['team'] = df['team'].fillna('FA')
-        df['position'] = df['position'].fillna('FLEX')
+        
+        # Validate and correct team/position data
+        df = self._validate_and_correct_csv_data(df)
         # Convert numeric columns and fill NaN values with defaults
         numeric_cols = ['age_2024', '2023_rush_yds', '2023_rec_yds', '2024_proj_rush', '2024_proj_rec', '2024_proj_total']
         for col in numeric_cols:
@@ -488,6 +491,31 @@ class DataPipeline:
         df['2024_proj_total'] = df['2024_proj_total'].fillna(
             df['2024_proj_rush'] + df['2024_proj_rec']
         ).astype(float)
+        
+        # Add passing projections column if missing
+        if '2024_proj_pass' not in df.columns:
+            df['2024_proj_pass'] = 0.0
+        df['2024_proj_pass'] = pd.to_numeric(df['2024_proj_pass'], errors='coerce').fillna(0.0).astype(float)
+        
+        # Load and merge rookie projections
+        if rookie_path.exists():
+            logger.info(f"Loading rookie projections from {rookie_path}")
+            rookie_df = pd.read_csv(rookie_path, comment='#')
+            rookie_df.columns = [col.lower() for col in rookie_df.columns]
+            
+            # Validate rookie data
+            rookie_df = self._validate_and_correct_csv_data(rookie_df)
+            
+            # Ensure all projection columns exist
+            for col in ['2024_proj_pass', '2024_proj_rush', '2024_proj_rec', '2024_proj_total']:
+                if col not in rookie_df.columns:
+                    rookie_df[col] = 0.0
+            
+            # Concatenate and deduplicate (rookies take precedence)
+            df = pd.concat([df, rookie_df], ignore_index=True)
+            df = df.drop_duplicates(subset=['name', 'team'], keep='last')
+            logger.info(f"Added {len(rookie_df)} rookie players to baseline")
+        
         self._projection_cache = df
         return df.copy()
 
@@ -779,7 +807,7 @@ class DataPipeline:
     def _fetch_real_weekly_odds(self, season: int, week: int, player_stats: pd.DataFrame) -> pd.DataFrame:
         """Fetch real weekly odds from prop scraper, fallback to synthetic if unavailable."""
         try:
-            from prop_line_scraper import NFLPropScraper
+            from scripts.prop_line_scraper import NFLPropScraper
             scraper = NFLPropScraper()
             
             # Fetch real odds data
@@ -1244,14 +1272,19 @@ class DataPipeline:
                         (baseline['name'].str.contains(player_name.split()[0], case=False, na=False)) &
                         (baseline['team'] == team)
                     ]
-                    if not matched.empty and market == 'rushing_yards':
-                        proj = matched['2024_proj_rush'].iloc[0] / 17.0  # Weekly projection
-                        if pd.notna(proj) and proj > 0:
-                            return float(proj)
-                    elif not matched.empty and market == 'receiving_yards':
-                        proj = matched['2024_proj_rec'].iloc[0] / 17.0
-                        if pd.notna(proj) and proj > 0:
-                            return float(proj)
+                    if not matched.empty:
+                        if market == 'rushing_yards':
+                            proj = matched['2024_proj_rush'].iloc[0] / 17.0  # Weekly projection
+                            if pd.notna(proj) and proj > 0:
+                                return float(proj)
+                        elif market == 'receiving_yards':
+                            proj = matched['2024_proj_rec'].iloc[0] / 17.0
+                            if pd.notna(proj) and proj > 0:
+                                return float(proj)
+                        elif market == 'passing_yards' and '2024_proj_pass' in matched.columns:
+                            proj = matched['2024_proj_pass'].iloc[0] / 17.0
+                            if pd.notna(proj) and proj > 0:
+                                return float(proj)
             
             # Final fallback: Use rolling_targets to estimate
             if market == 'receiving_yards':
@@ -1260,9 +1293,23 @@ class DataPipeline:
                     # Estimate receiving yards from targets (avg ~10 yards per target)
                     return float(rolling_targets * 10.0)
             
+            # Final fallback: return reasonable default instead of 0
+            if market == 'passing_yards':
+                return 150.0  # ~2550 yards/17 weeks
+            elif market == 'rushing_yards':
+                return 50.0   # ~850 yards/17 weeks  
+            elif market == 'receiving_yards':
+                return 40.0   # ~680 yards/17 weeks
             return 0.0
         except (AttributeError, Exception) as e:
             logger.warning(f"Error computing mu_prior for {market}: {e}")
+            # Return reasonable defaults on error
+            if market == 'passing_yards':
+                return 150.0
+            elif market == 'rushing_yards':
+                return 50.0
+            elif market == 'receiving_yards':
+                return 40.0
             return 0.0
     
     @retry(tries=3, delay=1, backoff=2)
@@ -1298,7 +1345,7 @@ class DataPipeline:
             }
             
             # Import simplified cached client here to avoid circular imports
-            from simple_cache import simple_cached_client
+            from scripts.simple_cache import simple_cached_client
             
             # Use simplified cached client with weather-specific caching
             response = simple_cached_client.get(
@@ -1507,6 +1554,35 @@ class DataPipeline:
             raise
 
 
+    def _validate_and_correct_csv_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Validate and correct team/position data from CSV."""
+        from utils.player_id_utils import canonicalize_team, validate_position, VALID_NFL_TEAMS
+        
+        df = df.copy()
+        
+        # Handle team/position swaps (common CSV error)
+        if 'team' in df.columns and 'position' in df.columns:
+            # Check if team column contains position codes
+            team_is_position = df['team'].fillna('').str.upper().isin(['QB', 'RB', 'WR', 'TE', 'FB'])
+            position_is_team = df['position'].fillna('').str.upper().isin(VALID_NFL_TEAMS)
+            
+            # Swap them if detected
+            swap_mask = team_is_position | position_is_team
+            if swap_mask.any():
+                logger.warning(f"Swapping team/position for {swap_mask.sum()} rows")
+                df.loc[swap_mask, ['team', 'position']] = df.loc[swap_mask, ['position', 'team']].values
+        
+        # Canonicalize teams
+        df['team'] = df['team'].fillna('FA').apply(canonicalize_team)
+        # Filter out rows with invalid teams (empty after canonicalization)
+        df = df[df['team'] != '']
+        
+        # Validate positions
+        df['position'] = df['position'].fillna('FLEX').apply(validate_position)
+        
+        return df
+
+
 def update_week(season: int, week: int) -> None:
     """Public API to ingest a single NFL week into the database."""
     pipeline = DataPipeline()
@@ -1522,4 +1598,4 @@ def compute_week_features(season: int, week: int) -> pd.DataFrame:
 
 if __name__ == "__main__":
     pipeline = DataPipeline()
-    pipeline.run_full_update() 
+    pipeline.run_full_update()

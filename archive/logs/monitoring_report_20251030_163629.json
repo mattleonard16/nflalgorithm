@@ -1,0 +1,51 @@
+{
+  "generated_at": "2025-10-30T16:36:29.824509",
+  "system_status": "WARNING",
+  "components": {
+    "model_performance": {
+      "timestamp": "2025-10-30T16:36:29.824884",
+      "status": "WARNING",
+      "alerts": [
+        "WARNING: Low prediction count (0)"
+      ],
+      "metrics": {
+        "rushing_mae": 3.6,
+        "receiving_mae": 4.1,
+        "prediction_count": 0
+      }
+    },
+    "data_freshness": {
+      "timestamp": "2025-10-30T16:36:29.825203",
+      "status": "HEALTHY",
+      "alerts": [],
+      "feed_status": {},
+      "feed_updates": {}
+    },
+    "system_health": {
+      "timestamp": "2025-10-30T16:36:29.922060",
+      "status": "WARNING",
+      "alerts": [
+        "WARNING: Low cache hit rate (0.0%)",
+        "WARNING: Disk usage at 83.8%"
+      ],
+      "metrics": {
+        "cache_hit_rate": 0,
+        "disk_usage": 83.82354435341449
+      }
+    },
+    "value_betting": {
+      "timestamp": "2025-10-30T16:36:29.922418",
+      "status": "WARNING",
+      "alerts": [
+        "WARNING: Low active bet count (0)",
+        "WARNING: Low average edge (0.0%)",
+        "WARNING: Low daily ROI (0.0%)"
+      ],
+      "metrics": {
+        "active_bets": 0,
+        "average_edge": 0,
+        "daily_roi": 0
+      }
+    }
+  }
+}

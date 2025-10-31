@@ -6,6 +6,9 @@
 # Environment detection - defaults to UV if available
 ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && echo "uv" || echo "venv")
 
+SEASON ?= 2023
+WEEK ?= 1
+
 # Conditional commands based on ENV_TYPE
 ifeq ($(ENV_TYPE),uv)
     PYTHON := uv run python
@@ -175,14 +178,34 @@ enhanced-report:
 
 # Weekly flow for specific week/season
 week:
-    @echo "Running weekly report for week $(W) season $(S) with $(ENV_TYPE)..."
-    $(PYTHON) run_prop_update.py --week $(W) --season $(S)
-    $(PYTHON) enhanced_visualizer.py
-    @echo "Weekly artifacts in reports/: week_$(W)_*.{csv,json,md,html} and enhanced files"
+	@echo "Running weekly report for week $(W) season $(S) with $(ENV_TYPE)..."
+	$(PYTHON) run_prop_update.py --week $(W) --season $(S)
+	$(PYTHON) enhanced_visualizer.py
+	@echo "Weekly artifacts in reports/: week_$(W)_*.{csv,json,md,html} and enhanced files"
 
 week-open:
-    @echo "Opening weekly enhanced dashboard for week $(W)"
-    @open reports/week_$(W)_enhanced_dashboard.html 2>/dev/null || true
+	@echo "Opening weekly enhanced dashboard for week $(W)"
+	@open reports/week_$(W)_enhanced_dashboard.html 2>/dev/null || true
+
+week-update:
+	@echo "Updating data for season $(SEASON), week $(WEEK)..."
+	$(PYTHON) -c "from data_pipeline import update_week; update_week(int('$(SEASON)'), int('$(WEEK)'))"
+
+week-predict:
+	@echo "Generating projections for season $(SEASON), week $(WEEK)..."
+	$(PYTHON) -c "from models.position_specific import predict_week; predict_week(int('$(SEASON)'), int('$(WEEK)'))"
+
+week-materialize:
+	@echo "Materializing value view for season $(SEASON), week $(WEEK)..."
+	$(PYTHON) scripts/materialize_value_view.py --season $(SEASON) --week $(WEEK)
+
+mini-backtest:
+	@echo "Running mini backtest for season $(SEASON), week $(WEEK)..."
+	$(PYTHON) backtest_replay.py --season $(SEASON) --weeks $(WEEK) --dry-run
+
+health:
+	@echo "Checking feed freshness for season $(SEASON), week $(WEEK)..."
+	$(PYTHON) health_check.py --season $(SEASON) --week $(WEEK)
 
 # Activate betting: scrape props, compute edges, persist to DB
 activate-betting:

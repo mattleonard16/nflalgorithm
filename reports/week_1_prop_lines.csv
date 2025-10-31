@@ -1,51 +1,613 @@
 player,team,position,book,stat,line,over_odds,under_odds,game_date,home_team,away_team
-Davante Adams,NYJ,WR,BetMGM,rushing_yards,62.2,-115,105,2025-08-08,NYJ,TBD
-Davante Adams,NYJ,WR,DraftKings,passing_yards,264.5,-120,-120,2025-08-08,NYJ,TBD
-Amon-Ra St. Brown,DET,WR,FanDuel,rushing_yards,75.3,-120,100,2025-08-08,DET,TBD
-Stefon Diggs,HOU,WR,Caesars,passing_yards,246.0,100,-110,2025-08-08,HOU,TBD
-CeeDee Lamb,DAL,WR,Caesars,rushing_yards,67.0,-115,-115,2025-08-08,DAL,TBD
-Bijan Robinson,ATL,RB,DraftKings,rushing_yards,69.0,-110,-110,2025-08-08,ATL,TBD
-Mark Andrews,BAL,TE,Caesars,rushing_yards,76.8,-105,-120,2025-08-08,BAL,TBD
-C.J. Stroud,HOU,QB,BetMGM,receiving_yards,93.9,105,-120,2025-08-08,HOU,TBD
-Tyreek Hill,MIA,WR,FanDuel,passing_yards,273.7,-120,-115,2025-08-08,MIA,TBD
-Davante Adams,NYJ,WR,BetMGM,receiving_yards,87.7,-110,-115,2025-08-08,NYJ,TBD
-Breece Hall,NYJ,RB,FanDuel,receiving_yards,98.5,105,105,2025-08-08,NYJ,TBD
-Amon-Ra St. Brown,DET,WR,FanDuel,passing_yards,261.7,-115,-115,2025-08-08,DET,TBD
-Josh Allen,BUF,QB,BetMGM,receiving_yards,114.5,105,105,2025-08-08,BUF,TBD
-C.J. Stroud,HOU,QB,BetMGM,rushing_yards,92.1,-120,-115,2025-08-08,HOU,TBD
-Tyreek Hill,MIA,WR,Caesars,receiving_yards,78.4,-115,100,2025-08-08,MIA,TBD
-Bijan Robinson,ATL,RB,Caesars,rushing_yards,69.8,105,-105,2025-08-08,ATL,TBD
-Justin Jefferson,MIN,WR,FanDuel,receiving_yards,77.3,100,100,2025-08-08,MIN,TBD
-Mark Andrews,BAL,TE,Caesars,passing_yards,279.9,-105,-110,2025-08-08,BAL,TBD
-Travis Kelce,KC,TE,Caesars,rushing_yards,54.5,-120,-120,2025-08-08,KC,TBD
-Justin Jefferson,MIN,WR,FanDuel,passing_yards,274.6,-105,100,2025-08-08,MIN,TBD
-Amon-Ra St. Brown,DET,WR,Caesars,receiving_yards,94.8,-105,100,2025-08-08,DET,TBD
-Mark Andrews,BAL,TE,DraftKings,passing_yards,269.0,-120,105,2025-08-08,BAL,TBD
-C.J. Stroud,HOU,QB,BetMGM,receiving_yards,70.6,-105,-115,2025-08-08,HOU,TBD
-Josh Allen,BUF,QB,BetMGM,rushing_yards,98.6,-115,100,2025-08-08,BUF,TBD
-Davante Adams,NYJ,WR,BetMGM,passing_yards,277.1,100,100,2025-08-08,NYJ,TBD
-Stefon Diggs,HOU,WR,BetMGM,rushing_yards,88.1,100,100,2025-08-08,HOU,TBD
-CeeDee Lamb,DAL,WR,BetMGM,passing_yards,259.4,-120,-110,2025-08-08,DAL,TBD
-Josh Jacobs,GB,RB,DraftKings,rushing_yards,62.0,100,-120,2025-08-08,GB,TBD
-Amon-Ra St. Brown,DET,WR,Caesars,passing_yards,275.8,100,-115,2025-08-08,DET,TBD
-Justin Jefferson,MIN,WR,Caesars,passing_yards,282.3,-115,-110,2025-08-08,MIN,TBD
-Patrick Mahomes,KC,QB,Caesars,passing_yards,283.2,100,105,2025-08-08,KC,TBD
-Stefon Diggs,HOU,WR,BetMGM,passing_yards,254.9,105,105,2025-08-08,HOU,TBD
-Breece Hall,NYJ,RB,Caesars,receiving_yards,71.1,-115,-120,2025-08-08,NYJ,TBD
-Bijan Robinson,ATL,RB,FanDuel,rushing_yards,79.4,-120,-120,2025-08-08,ATL,TBD
-Tyreek Hill,MIA,WR,DraftKings,rushing_yards,95.3,-110,-120,2025-08-08,MIA,TBD
-Patrick Mahomes,KC,QB,BetMGM,rushing_yards,83.4,-115,100,2025-08-08,KC,TBD
-Justin Jefferson,MIN,WR,Caesars,passing_yards,247.1,-105,-105,2025-08-08,MIN,TBD
-Stefon Diggs,HOU,WR,DraftKings,rushing_yards,82.9,-110,-105,2025-08-08,HOU,TBD
-Saquon Barkley,PHI,RB,DraftKings,receiving_yards,98.7,105,-120,2025-08-08,PHI,TBD
-Tyreek Hill,MIA,WR,BetMGM,receiving_yards,105.0,-120,-115,2025-08-08,MIA,TBD
-Stefon Diggs,HOU,WR,Caesars,rushing_yards,57.0,-115,-110,2025-08-08,HOU,TBD
-Josh Allen,BUF,QB,DraftKings,rushing_yards,72.2,100,-120,2025-08-08,BUF,TBD
-Tyreek Hill,MIA,WR,DraftKings,passing_yards,283.4,-115,-115,2025-08-08,MIA,TBD
-Saquon Barkley,PHI,RB,Caesars,receiving_yards,75.7,-105,-120,2025-08-08,PHI,TBD
-Ja'Marr Chase,CIN,WR,DraftKings,receiving_yards,114.3,-110,-105,2025-08-08,CIN,TBD
-Josh Jacobs,GB,RB,Caesars,receiving_yards,72.7,-110,-115,2025-08-08,GB,TBD
-Tyreek Hill,MIA,WR,DraftKings,passing_yards,272.4,-120,-120,2025-08-08,MIA,TBD
-Lamar Jackson,BAL,QB,FanDuel,passing_yards,237.8,100,-120,2025-08-08,BAL,TBD
-Ja'Marr Chase,CIN,WR,DraftKings,rushing_yards,83.8,-115,-105,2025-08-08,CIN,TBD
-Davante Adams,NYJ,WR,FanDuel,passing_yards,263.9,-120,100,2025-08-08,NYJ,TBD
+Derrick Henry,MIA,UNKNOWN,DraftKings,rushing_yards,90.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Derrick Henry,MIA,UNKNOWN,DraftKings,rushing_yards,90.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+De'Von Achane,MIA,UNKNOWN,DraftKings,rushing_yards,57.5,-115,-109,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+De'Von Achane,MIA,UNKNOWN,DraftKings,rushing_yards,57.5,-115,-109,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,DraftKings,rushing_yards,40.5,-113,-111,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,DraftKings,rushing_yards,40.5,-113,-111,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Ollie Gordon II,MIA,UNKNOWN,DraftKings,rushing_yards,21.5,-108,-116,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Ollie Gordon II,MIA,UNKNOWN,DraftKings,rushing_yards,21.5,-108,-116,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Keaton Mitchell,MIA,UNKNOWN,DraftKings,rushing_yards,16.5,-114,-110,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Keaton Mitchell,MIA,UNKNOWN,DraftKings,rushing_yards,16.5,-114,-110,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,DraftKings,rushing_yards,2.5,-115,-109,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,DraftKings,rushing_yards,2.5,-115,-109,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Malik Washington,MIA,UNKNOWN,DraftKings,rushing_yards,1.5,-117,-108,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Malik Washington,MIA,UNKNOWN,DraftKings,rushing_yards,1.5,-117,-108,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Mark Andrews,MIA,UNKNOWN,DraftKings,rushing_yards,0.5,239,-309,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Mark Andrews,MIA,UNKNOWN,DraftKings,rushing_yards,0.5,239,-309,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,FanDuel,rushing_yards,2.5,-118,-108,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,FanDuel,rushing_yards,2.5,-118,-108,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Derrick Henry,MIA,UNKNOWN,FanDuel,rushing_yards,87.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Derrick Henry,MIA,UNKNOWN,FanDuel,rushing_yards,87.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Malik Washington,MIA,UNKNOWN,FanDuel,rushing_yards,1.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Malik Washington,MIA,UNKNOWN,FanDuel,rushing_yards,1.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Keaton Mitchell,MIA,UNKNOWN,FanDuel,rushing_yards,14.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Keaton Mitchell,MIA,UNKNOWN,FanDuel,rushing_yards,14.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Ollie Gordon II,MIA,UNKNOWN,FanDuel,rushing_yards,20.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Ollie Gordon II,MIA,UNKNOWN,FanDuel,rushing_yards,20.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Mark Andrews,MIA,UNKNOWN,FanDuel,rushing_yards,0.5,245,-350,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Mark Andrews,MIA,UNKNOWN,FanDuel,rushing_yards,0.5,245,-350,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+De'Von Achane,MIA,UNKNOWN,FanDuel,rushing_yards,57.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+De'Von Achane,MIA,UNKNOWN,FanDuel,rushing_yards,57.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,FanDuel,rushing_yards,40.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,FanDuel,rushing_yards,40.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,BetRivers,rushing_yards,37.5,-115,-115,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,BetRivers,rushing_yards,37.5,-115,-115,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Ollie Gordon II,MIA,UNKNOWN,BetRivers,rushing_yards,20.5,-113,-118,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Ollie Gordon II,MIA,UNKNOWN,BetRivers,rushing_yards,20.5,-113,-118,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+De'Von Achane,MIA,UNKNOWN,BetRivers,rushing_yards,55.5,-118,-113,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+De'Von Achane,MIA,UNKNOWN,BetRivers,rushing_yards,55.5,-118,-113,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Derrick Henry,MIA,UNKNOWN,BetRivers,rushing_yards,86.5,-115,-115,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Derrick Henry,MIA,UNKNOWN,BetRivers,rushing_yards,86.5,-115,-115,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Keaton Mitchell,MIA,UNKNOWN,BetRivers,rushing_yards,14.5,-108,-124,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Keaton Mitchell,MIA,UNKNOWN,BetRivers,rushing_yards,14.5,-108,-124,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,BetMGM,rushing_yards,2.5,-120,-110,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,BetMGM,rushing_yards,2.5,-120,-110,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Derrick Henry,MIA,UNKNOWN,BetMGM,rushing_yards,88.5,-125,-105,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Derrick Henry,MIA,UNKNOWN,BetMGM,rushing_yards,88.5,-125,-105,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,BetMGM,rushing_yards,35.5,-125,-105,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,BetMGM,rushing_yards,35.5,-125,-105,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+De'Von Achane,MIA,UNKNOWN,BetMGM,rushing_yards,57.5,-115,-115,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+De'Von Achane,MIA,UNKNOWN,BetMGM,rushing_yards,57.5,-115,-115,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Keaton Mitchell,MIA,UNKNOWN,BetMGM,rushing_yards,15.5,-110,-120,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Keaton Mitchell,MIA,UNKNOWN,BetMGM,rushing_yards,15.5,-110,-120,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Malik Washington,MIA,UNKNOWN,BetMGM,rushing_yards,1.5,-118,-110,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Malik Washington,MIA,UNKNOWN,BetMGM,rushing_yards,1.5,-118,-110,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Ollie Gordon II,MIA,UNKNOWN,BetMGM,rushing_yards,23.5,-110,-118,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Ollie Gordon II,MIA,UNKNOWN,BetMGM,rushing_yards,23.5,-110,-118,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Mark Andrews,MIA,UNKNOWN,BetMGM,rushing_yards,0.5,310,-500,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Mark Andrews,MIA,UNKNOWN,BetMGM,rushing_yards,0.5,310,-500,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+De'Von Achane,MIA,UNKNOWN,BetOnline.ag,rushing_yards,57.5,-114,-114,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+De'Von Achane,MIA,UNKNOWN,BetOnline.ag,rushing_yards,57.5,-114,-114,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Keaton Mitchell,MIA,UNKNOWN,BetOnline.ag,rushing_yards,15.5,-125,-103,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Keaton Mitchell,MIA,UNKNOWN,BetOnline.ag,rushing_yards,15.5,-125,-103,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,BetOnline.ag,rushing_yards,39.5,-125,-103,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,BetOnline.ag,rushing_yards,39.5,-125,-103,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Derrick Henry,MIA,UNKNOWN,BetOnline.ag,rushing_yards,92.5,-120,-108,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Derrick Henry,MIA,UNKNOWN,BetOnline.ag,rushing_yards,92.5,-120,-108,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Ollie Gordon II,MIA,UNKNOWN,BetOnline.ag,rushing_yards,20.5,-114,-114,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Ollie Gordon II,MIA,UNKNOWN,BetOnline.ag,rushing_yards,20.5,-114,-114,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+De'Von Achane,MIA,UNKNOWN,Bovada,rushing_yards,57.5,-105,-125,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+De'Von Achane,MIA,UNKNOWN,Bovada,rushing_yards,57.5,-105,-125,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Derrick Henry,MIA,UNKNOWN,Bovada,rushing_yards,87.5,-130,100,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Derrick Henry,MIA,UNKNOWN,Bovada,rushing_yards,87.5,-130,100,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,Bovada,rushing_yards,35.5,-160,120,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,Bovada,rushing_yards,35.5,-160,120,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,DraftKings,passing_yards,234.5,-111,-113,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,DraftKings,passing_yards,234.5,-111,-113,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,DraftKings,passing_yards,220.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,DraftKings,passing_yards,220.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,FanDuel,passing_yards,217.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,FanDuel,passing_yards,217.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,FanDuel,passing_yards,230.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,FanDuel,passing_yards,230.5,-112,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,BetRivers,passing_yards,218.5,-117,-114,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,BetRivers,passing_yards,218.5,-117,-114,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,BetRivers,passing_yards,232.5,-117,-114,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,BetRivers,passing_yards,232.5,-117,-114,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,BetMGM,passing_yards,223.5,-115,-115,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,BetMGM,passing_yards,223.5,-115,-115,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,BetMGM,passing_yards,230.5,-115,-115,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,BetMGM,passing_yards,230.5,-115,-115,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,BetOnline.ag,passing_yards,233.5,-115,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,BetOnline.ag,passing_yards,233.5,-115,-112,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,BetOnline.ag,passing_yards,222.5,-114,-114,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,BetOnline.ag,passing_yards,222.5,-114,-114,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,Bovada,passing_yards,233.5,-115,-115,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Lamar Jackson,MIA,UNKNOWN,Bovada,passing_yards,233.5,-115,-115,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,Bovada,passing_yards,220.5,-120,-110,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Tua Tagovailoa,MIA,UNKNOWN,Bovada,passing_yards,220.5,-120,-110,2025-10-31T00:15:00Z,Miami Dolphins,Baltimore Ravens
+Bijan Robinson,NE,UNKNOWN,DraftKings,rushing_yards,64.5,-112,-112,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Bijan Robinson,NE,UNKNOWN,DraftKings,rushing_yards,64.5,-112,-112,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,DraftKings,rushing_yards,31.5,-113,-111,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,DraftKings,rushing_yards,31.5,-113,-111,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Tyler Allgeier,NE,UNKNOWN,DraftKings,rushing_yards,23.5,-113,-111,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Tyler Allgeier,NE,UNKNOWN,DraftKings,rushing_yards,23.5,-113,-111,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Bijan Robinson,NE,UNKNOWN,FanDuel,rushing_yards,63.5,-114,-114,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Bijan Robinson,NE,UNKNOWN,FanDuel,rushing_yards,63.5,-114,-114,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Bijan Robinson,NE,UNKNOWN,BetOnline.ag,rushing_yards,63.5,-114,-114,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Bijan Robinson,NE,UNKNOWN,BetOnline.ag,rushing_yards,63.5,-114,-114,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Tyler Allgeier,NE,UNKNOWN,BetOnline.ag,rushing_yards,23.5,-116,-111,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Tyler Allgeier,NE,UNKNOWN,BetOnline.ag,rushing_yards,23.5,-116,-111,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,BetOnline.ag,rushing_yards,31.5,-115,-112,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,BetOnline.ag,rushing_yards,31.5,-115,-112,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Tyler Allgeier,NE,UNKNOWN,BetRivers,rushing_yards,23.5,-113,-117,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Tyler Allgeier,NE,UNKNOWN,BetRivers,rushing_yards,23.5,-113,-117,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,BetRivers,rushing_yards,28.5,-118,-113,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,BetRivers,rushing_yards,28.5,-118,-113,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Bijan Robinson,NE,UNKNOWN,BetRivers,rushing_yards,64.5,-117,-114,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Bijan Robinson,NE,UNKNOWN,BetRivers,rushing_yards,64.5,-117,-114,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Bijan Robinson,NE,UNKNOWN,BetMGM,rushing_yards,67.5,-118,-110,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Bijan Robinson,NE,UNKNOWN,BetMGM,rushing_yards,67.5,-118,-110,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Tyler Allgeier,NE,UNKNOWN,BetMGM,rushing_yards,23.5,-120,-110,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Tyler Allgeier,NE,UNKNOWN,BetMGM,rushing_yards,23.5,-120,-110,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,BetMGM,rushing_yards,30.5,-115,-115,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,BetMGM,rushing_yards,30.5,-115,-115,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,DraftKings,passing_yards,232.5,-113,-111,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,DraftKings,passing_yards,232.5,-113,-111,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Michael Penix Jr.,NE,UNKNOWN,DraftKings,passing_yards,227.5,-113,-111,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Michael Penix Jr.,NE,UNKNOWN,DraftKings,passing_yards,227.5,-113,-111,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,FanDuel,passing_yards,230.5,-114,-114,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,FanDuel,passing_yards,230.5,-114,-114,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Michael Penix Jr.,NE,UNKNOWN,FanDuel,passing_yards,225.5,-114,-114,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Michael Penix Jr.,NE,UNKNOWN,FanDuel,passing_yards,225.5,-114,-114,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,BetOnline.ag,passing_yards,231.5,-112,-115,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,BetOnline.ag,passing_yards,231.5,-112,-115,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Michael Penix Jr.,NE,UNKNOWN,BetRivers,passing_yards,221.5,-114,-117,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Michael Penix Jr.,NE,UNKNOWN,BetRivers,passing_yards,221.5,-114,-117,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,BetRivers,passing_yards,230.5,-115,-114,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,BetRivers,passing_yards,230.5,-115,-114,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Michael Penix Jr.,NE,UNKNOWN,BetMGM,passing_yards,222.5,-115,-115,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Michael Penix Jr.,NE,UNKNOWN,BetMGM,passing_yards,222.5,-115,-115,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,BetMGM,passing_yards,235.5,-115,-115,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Drake Maye,NE,UNKNOWN,BetMGM,passing_yards,235.5,-115,-115,2025-11-02T18:00:00Z,New England Patriots,Atlanta Falcons
+Josh Jacobs,GB,UNKNOWN,DraftKings,rushing_yards,64.5,-112,-112,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Josh Jacobs,GB,UNKNOWN,DraftKings,rushing_yards,64.5,-112,-112,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Rico Dowdle,GB,UNKNOWN,DraftKings,rushing_yards,49.5,-115,-109,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Rico Dowdle,GB,UNKNOWN,DraftKings,rushing_yards,49.5,-115,-109,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Emanuel Wilson,GB,UNKNOWN,DraftKings,rushing_yards,30.5,-110,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Emanuel Wilson,GB,UNKNOWN,DraftKings,rushing_yards,30.5,-110,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Chuba Hubbard,GB,UNKNOWN,DraftKings,rushing_yards,24.5,-107,-117,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Chuba Hubbard,GB,UNKNOWN,DraftKings,rushing_yards,24.5,-107,-117,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,DraftKings,rushing_yards,10.5,-111,-113,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,DraftKings,rushing_yards,10.5,-111,-113,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,DraftKings,rushing_yards,6.5,-110,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,DraftKings,rushing_yards,6.5,-110,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,FanDuel,rushing_yards,9.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,FanDuel,rushing_yards,9.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Emanuel Wilson,GB,UNKNOWN,FanDuel,rushing_yards,30.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Emanuel Wilson,GB,UNKNOWN,FanDuel,rushing_yards,30.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Josh Jacobs,GB,UNKNOWN,FanDuel,rushing_yards,63.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Josh Jacobs,GB,UNKNOWN,FanDuel,rushing_yards,63.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,FanDuel,rushing_yards,5.5,-130,-102,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,FanDuel,rushing_yards,5.5,-130,-102,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Chuba Hubbard,GB,UNKNOWN,FanDuel,rushing_yards,22.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Chuba Hubbard,GB,UNKNOWN,FanDuel,rushing_yards,22.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Rico Dowdle,GB,UNKNOWN,FanDuel,rushing_yards,47.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Rico Dowdle,GB,UNKNOWN,FanDuel,rushing_yards,47.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Josh Jacobs,GB,UNKNOWN,BetOnline.ag,rushing_yards,64.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Josh Jacobs,GB,UNKNOWN,BetOnline.ag,rushing_yards,64.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,BetOnline.ag,rushing_yards,9.5,-115,-112,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,BetOnline.ag,rushing_yards,9.5,-115,-112,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Chuba Hubbard,GB,UNKNOWN,BetOnline.ag,rushing_yards,23.5,-112,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Chuba Hubbard,GB,UNKNOWN,BetOnline.ag,rushing_yards,23.5,-112,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Emanuel Wilson,GB,UNKNOWN,BetOnline.ag,rushing_yards,29.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Emanuel Wilson,GB,UNKNOWN,BetOnline.ag,rushing_yards,29.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,BetOnline.ag,rushing_yards,6.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,BetOnline.ag,rushing_yards,6.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Rico Dowdle,GB,UNKNOWN,BetOnline.ag,rushing_yards,48.5,-112,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Rico Dowdle,GB,UNKNOWN,BetOnline.ag,rushing_yards,48.5,-112,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Rico Dowdle,GB,UNKNOWN,BetRivers,rushing_yards,50.5,-113,-118,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Rico Dowdle,GB,UNKNOWN,BetRivers,rushing_yards,50.5,-113,-118,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Emanuel Wilson,GB,UNKNOWN,BetRivers,rushing_yards,31.5,-118,-113,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Emanuel Wilson,GB,UNKNOWN,BetRivers,rushing_yards,31.5,-118,-113,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Josh Jacobs,GB,UNKNOWN,BetRivers,rushing_yards,65.5,-117,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Josh Jacobs,GB,UNKNOWN,BetRivers,rushing_yards,65.5,-117,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,BetRivers,rushing_yards,7.5,-122,-109,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,BetRivers,rushing_yards,7.5,-122,-109,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Chuba Hubbard,GB,UNKNOWN,BetRivers,rushing_yards,24.5,-113,-118,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Chuba Hubbard,GB,UNKNOWN,BetRivers,rushing_yards,24.5,-113,-118,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,BetMGM,rushing_yards,10.5,-110,-120,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,BetMGM,rushing_yards,10.5,-110,-120,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Rico Dowdle,GB,UNKNOWN,BetMGM,rushing_yards,48.5,-115,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Rico Dowdle,GB,UNKNOWN,BetMGM,rushing_yards,48.5,-115,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Josh Jacobs,GB,UNKNOWN,BetMGM,rushing_yards,66.5,-115,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Josh Jacobs,GB,UNKNOWN,BetMGM,rushing_yards,66.5,-115,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Emanuel Wilson,GB,UNKNOWN,BetMGM,rushing_yards,30.5,-115,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Emanuel Wilson,GB,UNKNOWN,BetMGM,rushing_yards,30.5,-115,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Chuba Hubbard,GB,UNKNOWN,BetMGM,rushing_yards,23.5,-110,-120,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Chuba Hubbard,GB,UNKNOWN,BetMGM,rushing_yards,23.5,-110,-120,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,BetMGM,rushing_yards,6.5,-105,-130,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,BetMGM,rushing_yards,6.5,-105,-130,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,DraftKings,passing_yards,235.5,-113,-111,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,DraftKings,passing_yards,235.5,-113,-111,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,DraftKings,passing_yards,191.5,-111,-113,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,DraftKings,passing_yards,191.5,-111,-113,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,FanDuel,passing_yards,189.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,FanDuel,passing_yards,189.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,FanDuel,passing_yards,233.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,FanDuel,passing_yards,233.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,BetOnline.ag,passing_yards,235.5,-115,-112,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,BetOnline.ag,passing_yards,235.5,-115,-112,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,BetOnline.ag,passing_yards,189.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,BetOnline.ag,passing_yards,189.5,-114,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,BetRivers,passing_yards,231.5,-117,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,BetRivers,passing_yards,231.5,-117,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,BetRivers,passing_yards,187.5,-117,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,BetRivers,passing_yards,187.5,-117,-114,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,BetMGM,passing_yards,188.5,-115,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Bryce Young,GB,UNKNOWN,BetMGM,passing_yards,188.5,-115,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,BetMGM,passing_yards,242.5,-115,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Jordan Love,GB,UNKNOWN,BetMGM,passing_yards,242.5,-115,-115,2025-11-02T18:00:00Z,Green Bay Packers,Carolina Panthers
+Samaje Perine,CIN,UNKNOWN,BetMGM,rushing_yards,29.5,-115,-115,2025-11-02T18:00:00Z,Cincinnati Bengals,Chicago Bears
+Samaje Perine,CIN,UNKNOWN,BetMGM,rushing_yards,29.5,-115,-115,2025-11-02T18:00:00Z,Cincinnati Bengals,Chicago Bears
+Chase Brown,CIN,UNKNOWN,BetMGM,rushing_yards,50.5,-115,-115,2025-11-02T18:00:00Z,Cincinnati Bengals,Chicago Bears
+Chase Brown,CIN,UNKNOWN,BetMGM,rushing_yards,50.5,-115,-115,2025-11-02T18:00:00Z,Cincinnati Bengals,Chicago Bears
+Caleb Williams,CIN,UNKNOWN,DraftKings,passing_yards,234.5,-113,-111,2025-11-02T18:00:00Z,Cincinnati Bengals,Chicago Bears
+Caleb Williams,CIN,UNKNOWN,DraftKings,passing_yards,234.5,-113,-111,2025-11-02T18:00:00Z,Cincinnati Bengals,Chicago Bears
+Caleb Williams,CIN,UNKNOWN,BetOnline.ag,passing_yards,234.5,-116,-111,2025-11-02T18:00:00Z,Cincinnati Bengals,Chicago Bears
+Caleb Williams,CIN,UNKNOWN,BetOnline.ag,passing_yards,234.5,-116,-111,2025-11-02T18:00:00Z,Cincinnati Bengals,Chicago Bears
+Caleb Williams,CIN,UNKNOWN,BetMGM,passing_yards,234.5,-118,-115,2025-11-02T18:00:00Z,Cincinnati Bengals,Chicago Bears
+Caleb Williams,CIN,UNKNOWN,BetMGM,passing_yards,234.5,-118,-115,2025-11-02T18:00:00Z,Cincinnati Bengals,Chicago Bears
+J.K. Dobbins,HOU,UNKNOWN,DraftKings,rushing_yards,59.5,-111,-113,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+J.K. Dobbins,HOU,UNKNOWN,DraftKings,rushing_yards,59.5,-111,-113,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Nick Chubb,HOU,UNKNOWN,DraftKings,rushing_yards,38.5,-111,-113,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Nick Chubb,HOU,UNKNOWN,DraftKings,rushing_yards,38.5,-111,-113,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Woody Marks,HOU,UNKNOWN,DraftKings,rushing_yards,33.5,-116,-108,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Woody Marks,HOU,UNKNOWN,DraftKings,rushing_yards,33.5,-116,-108,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,DraftKings,rushing_yards,22.5,-113,-111,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,DraftKings,rushing_yards,22.5,-113,-111,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+RJ Harvey,HOU,UNKNOWN,DraftKings,rushing_yards,19.5,-113,-111,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+RJ Harvey,HOU,UNKNOWN,DraftKings,rushing_yards,19.5,-113,-111,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,DraftKings,rushing_yards,15.5,-109,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,DraftKings,rushing_yards,15.5,-109,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,FanDuel,rushing_yards,15.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,FanDuel,rushing_yards,15.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+RJ Harvey,HOU,UNKNOWN,FanDuel,rushing_yards,18.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+RJ Harvey,HOU,UNKNOWN,FanDuel,rushing_yards,18.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,FanDuel,rushing_yards,20.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,FanDuel,rushing_yards,20.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+J.K. Dobbins,HOU,UNKNOWN,FanDuel,rushing_yards,60.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+J.K. Dobbins,HOU,UNKNOWN,FanDuel,rushing_yards,60.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,BetOnline.ag,rushing_yards,15.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,BetOnline.ag,rushing_yards,15.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+RJ Harvey,HOU,UNKNOWN,BetOnline.ag,rushing_yards,18.5,-115,-112,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+RJ Harvey,HOU,UNKNOWN,BetOnline.ag,rushing_yards,18.5,-115,-112,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+J.K. Dobbins,HOU,UNKNOWN,BetOnline.ag,rushing_yards,60.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+J.K. Dobbins,HOU,UNKNOWN,BetOnline.ag,rushing_yards,60.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Woody Marks,HOU,UNKNOWN,BetOnline.ag,rushing_yards,34.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Woody Marks,HOU,UNKNOWN,BetOnline.ag,rushing_yards,34.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Nick Chubb,HOU,UNKNOWN,BetOnline.ag,rushing_yards,39.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Nick Chubb,HOU,UNKNOWN,BetOnline.ag,rushing_yards,39.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,BetOnline.ag,rushing_yards,22.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,BetOnline.ag,rushing_yards,22.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,BetRivers,rushing_yards,17.5,-113,-117,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,BetRivers,rushing_yards,17.5,-113,-117,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+J.K. Dobbins,HOU,UNKNOWN,BetRivers,rushing_yards,59.5,-118,-113,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+J.K. Dobbins,HOU,UNKNOWN,BetRivers,rushing_yards,59.5,-118,-113,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,BetRivers,rushing_yards,20.5,-112,-120,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,BetRivers,rushing_yards,20.5,-112,-120,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+RJ Harvey,HOU,UNKNOWN,BetRivers,rushing_yards,18.5,-112,-120,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+RJ Harvey,HOU,UNKNOWN,BetRivers,rushing_yards,18.5,-112,-120,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Woody Marks,HOU,UNKNOWN,BetRivers,rushing_yards,37.5,-114,-117,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Woody Marks,HOU,UNKNOWN,BetRivers,rushing_yards,37.5,-114,-117,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Nick Chubb,HOU,UNKNOWN,BetRivers,rushing_yards,35.5,-118,-113,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Nick Chubb,HOU,UNKNOWN,BetRivers,rushing_yards,35.5,-118,-113,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,BetMGM,rushing_yards,19.5,-120,-110,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,BetMGM,rushing_yards,19.5,-120,-110,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,BetMGM,rushing_yards,18.5,-110,-120,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,BetMGM,rushing_yards,18.5,-110,-120,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Nick Chubb,HOU,UNKNOWN,BetMGM,rushing_yards,38.5,-115,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Nick Chubb,HOU,UNKNOWN,BetMGM,rushing_yards,38.5,-115,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+J.K. Dobbins,HOU,UNKNOWN,BetMGM,rushing_yards,58.5,-118,-110,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+J.K. Dobbins,HOU,UNKNOWN,BetMGM,rushing_yards,58.5,-118,-110,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+RJ Harvey,HOU,UNKNOWN,BetMGM,rushing_yards,17.5,-110,-120,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+RJ Harvey,HOU,UNKNOWN,BetMGM,rushing_yards,17.5,-110,-120,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Woody Marks,HOU,UNKNOWN,BetMGM,rushing_yards,34.5,-110,-118,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Woody Marks,HOU,UNKNOWN,BetMGM,rushing_yards,34.5,-110,-118,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,DraftKings,passing_yards,220.5,-112,-112,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,DraftKings,passing_yards,220.5,-112,-112,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,DraftKings,passing_yards,208.5,-113,-111,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,DraftKings,passing_yards,208.5,-113,-111,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,FanDuel,passing_yards,205.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,FanDuel,passing_yards,205.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,FanDuel,passing_yards,225.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,FanDuel,passing_yards,225.5,-114,-114,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,BetOnline.ag,passing_yards,207.5,-112,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,BetOnline.ag,passing_yards,207.5,-112,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,BetOnline.ag,passing_yards,223.5,-112,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,BetOnline.ag,passing_yards,223.5,-112,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,BetRivers,passing_yards,202.5,-115,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,BetRivers,passing_yards,202.5,-115,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,BetRivers,passing_yards,218.5,-114,-117,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,BetRivers,passing_yards,218.5,-114,-117,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,BetMGM,passing_yards,221.5,-115,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+C.J. Stroud,HOU,UNKNOWN,BetMGM,passing_yards,221.5,-115,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,BetMGM,passing_yards,199.5,-115,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Bo Nix,HOU,UNKNOWN,BetMGM,passing_yards,199.5,-115,-115,2025-11-02T18:00:00Z,Houston Texans,Denver Broncos
+Jahmyr Gibbs,DET,UNKNOWN,DraftKings,rushing_yards,72.5,-112,-112,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jahmyr Gibbs,DET,UNKNOWN,DraftKings,rushing_yards,72.5,-112,-112,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+David Montgomery,DET,UNKNOWN,DraftKings,rushing_yards,48.5,-110,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+David Montgomery,DET,UNKNOWN,DraftKings,rushing_yards,48.5,-110,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jordan Mason,DET,UNKNOWN,DraftKings,rushing_yards,36.5,-111,-113,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jordan Mason,DET,UNKNOWN,DraftKings,rushing_yards,36.5,-111,-113,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Aaron Jones,DET,UNKNOWN,DraftKings,rushing_yards,33.5,-110,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Aaron Jones,DET,UNKNOWN,DraftKings,rushing_yards,33.5,-110,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,DraftKings,rushing_yards,20.5,-109,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,DraftKings,rushing_yards,20.5,-109,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Aaron Jones,DET,UNKNOWN,BetMGM,rushing_yards,31.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Aaron Jones,DET,UNKNOWN,BetMGM,rushing_yards,31.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jordan Mason,DET,UNKNOWN,BetMGM,rushing_yards,38.5,-110,-118,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jordan Mason,DET,UNKNOWN,BetMGM,rushing_yards,38.5,-110,-118,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,BetMGM,rushing_yards,19.5,-110,-118,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,BetMGM,rushing_yards,19.5,-110,-118,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+David Montgomery,DET,UNKNOWN,BetMGM,rushing_yards,48.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+David Montgomery,DET,UNKNOWN,BetMGM,rushing_yards,48.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jahmyr Gibbs,DET,UNKNOWN,BetMGM,rushing_yards,70.5,-125,-105,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jahmyr Gibbs,DET,UNKNOWN,BetMGM,rushing_yards,70.5,-125,-105,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,FanDuel,rushing_yards,21.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,FanDuel,rushing_yards,21.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+David Montgomery,DET,UNKNOWN,FanDuel,rushing_yards,49.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+David Montgomery,DET,UNKNOWN,FanDuel,rushing_yards,49.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jordan Mason,DET,UNKNOWN,FanDuel,rushing_yards,37.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jordan Mason,DET,UNKNOWN,FanDuel,rushing_yards,37.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Aaron Jones,DET,UNKNOWN,FanDuel,rushing_yards,31.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Aaron Jones,DET,UNKNOWN,FanDuel,rushing_yards,31.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jahmyr Gibbs,DET,UNKNOWN,FanDuel,rushing_yards,74.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jahmyr Gibbs,DET,UNKNOWN,FanDuel,rushing_yards,74.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,BetOnline.ag,rushing_yards,19.5,-112,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,BetOnline.ag,rushing_yards,19.5,-112,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Aaron Jones,DET,UNKNOWN,BetOnline.ag,rushing_yards,31.5,-112,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Aaron Jones,DET,UNKNOWN,BetOnline.ag,rushing_yards,31.5,-112,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jordan Mason,DET,UNKNOWN,BetOnline.ag,rushing_yards,37.5,-110,-118,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jordan Mason,DET,UNKNOWN,BetOnline.ag,rushing_yards,37.5,-110,-118,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+David Montgomery,DET,UNKNOWN,BetOnline.ag,rushing_yards,48.5,-116,-111,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+David Montgomery,DET,UNKNOWN,BetOnline.ag,rushing_yards,48.5,-116,-111,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jahmyr Gibbs,DET,UNKNOWN,BetOnline.ag,rushing_yards,74.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jahmyr Gibbs,DET,UNKNOWN,BetOnline.ag,rushing_yards,74.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jordan Mason,DET,UNKNOWN,BetRivers,rushing_yards,37.5,-113,-118,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jordan Mason,DET,UNKNOWN,BetRivers,rushing_yards,37.5,-113,-118,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jahmyr Gibbs,DET,UNKNOWN,BetRivers,rushing_yards,71.5,-117,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jahmyr Gibbs,DET,UNKNOWN,BetRivers,rushing_yards,71.5,-117,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+David Montgomery,DET,UNKNOWN,BetRivers,rushing_yards,49.5,-118,-113,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+David Montgomery,DET,UNKNOWN,BetRivers,rushing_yards,49.5,-118,-113,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,BetRivers,rushing_yards,18.5,-113,-118,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,BetRivers,rushing_yards,18.5,-113,-118,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Aaron Jones,DET,UNKNOWN,BetRivers,rushing_yards,31.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Aaron Jones,DET,UNKNOWN,BetRivers,rushing_yards,31.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Aaron Jones,DET,UNKNOWN,Bovada,rushing_yards,31.5,-110,-120,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Aaron Jones,DET,UNKNOWN,Bovada,rushing_yards,31.5,-110,-120,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+David Montgomery,DET,UNKNOWN,Bovada,rushing_yards,46.5,-110,-120,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+David Montgomery,DET,UNKNOWN,Bovada,rushing_yards,46.5,-110,-120,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,Bovada,rushing_yards,19.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,Bovada,rushing_yards,19.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jahmyr Gibbs,DET,UNKNOWN,Bovada,rushing_yards,71.5,-150,115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jahmyr Gibbs,DET,UNKNOWN,Bovada,rushing_yards,71.5,-150,115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jordan Mason,DET,UNKNOWN,Bovada,rushing_yards,37.5,-105,-125,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jordan Mason,DET,UNKNOWN,Bovada,rushing_yards,37.5,-105,-125,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jared Goff,DET,UNKNOWN,DraftKings,passing_yards,238.5,-112,-112,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jared Goff,DET,UNKNOWN,DraftKings,passing_yards,238.5,-112,-112,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,DraftKings,passing_yards,209.5,-113,-111,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,DraftKings,passing_yards,209.5,-113,-111,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jared Goff,DET,UNKNOWN,BetMGM,passing_yards,240.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jared Goff,DET,UNKNOWN,BetMGM,passing_yards,240.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,BetMGM,passing_yards,212.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,BetMGM,passing_yards,212.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,FanDuel,passing_yards,214.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,FanDuel,passing_yards,214.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jared Goff,DET,UNKNOWN,FanDuel,passing_yards,236.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jared Goff,DET,UNKNOWN,FanDuel,passing_yards,236.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jared Goff,DET,UNKNOWN,BetOnline.ag,passing_yards,240.5,-125,-103,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jared Goff,DET,UNKNOWN,BetOnline.ag,passing_yards,240.5,-125,-103,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,BetOnline.ag,passing_yards,212.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,BetOnline.ag,passing_yards,212.5,-114,-114,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jared Goff,DET,UNKNOWN,BetRivers,passing_yards,240.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jared Goff,DET,UNKNOWN,BetRivers,passing_yards,240.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,BetRivers,passing_yards,209.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,BetRivers,passing_yards,209.5,-115,-115,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,Bovada,passing_yards,209.5,-110,-120,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+J.J. McCarthy,DET,UNKNOWN,Bovada,passing_yards,209.5,-110,-120,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jared Goff,DET,UNKNOWN,Bovada,passing_yards,235.5,-160,120,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jared Goff,DET,UNKNOWN,Bovada,passing_yards,235.5,-160,120,2025-11-02T18:00:00Z,Detroit Lions,Minnesota Vikings
+Jonathan Taylor,PIT,UNKNOWN,DraftKings,rushing_yards,94.5,-111,-113,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jonathan Taylor,PIT,UNKNOWN,DraftKings,rushing_yards,94.5,-111,-113,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jaylen Warren,PIT,UNKNOWN,DraftKings,rushing_yards,56.5,-112,-112,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jaylen Warren,PIT,UNKNOWN,DraftKings,rushing_yards,56.5,-112,-112,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Kenneth Gainwell,PIT,UNKNOWN,DraftKings,rushing_yards,20.5,-115,-109,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Kenneth Gainwell,PIT,UNKNOWN,DraftKings,rushing_yards,20.5,-115,-109,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,DraftKings,rushing_yards,13.5,-111,-113,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,DraftKings,rushing_yards,13.5,-111,-113,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jonathan Taylor,PIT,UNKNOWN,FanDuel,rushing_yards,93.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jonathan Taylor,PIT,UNKNOWN,FanDuel,rushing_yards,93.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Kenneth Gainwell,PIT,UNKNOWN,FanDuel,rushing_yards,19.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Kenneth Gainwell,PIT,UNKNOWN,FanDuel,rushing_yards,19.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jaylen Warren,PIT,UNKNOWN,FanDuel,rushing_yards,56.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jaylen Warren,PIT,UNKNOWN,FanDuel,rushing_yards,56.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,FanDuel,rushing_yards,13.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,FanDuel,rushing_yards,13.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jonathan Taylor,PIT,UNKNOWN,BetOnline.ag,rushing_yards,94.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jonathan Taylor,PIT,UNKNOWN,BetOnline.ag,rushing_yards,94.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jaylen Warren,PIT,UNKNOWN,BetOnline.ag,rushing_yards,56.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jaylen Warren,PIT,UNKNOWN,BetOnline.ag,rushing_yards,56.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Kenneth Gainwell,PIT,UNKNOWN,BetOnline.ag,rushing_yards,20.5,-112,-115,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Kenneth Gainwell,PIT,UNKNOWN,BetOnline.ag,rushing_yards,20.5,-112,-115,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,BetOnline.ag,rushing_yards,13.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,BetOnline.ag,rushing_yards,13.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Kenneth Gainwell,PIT,UNKNOWN,BetRivers,rushing_yards,19.5,-120,-110,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Kenneth Gainwell,PIT,UNKNOWN,BetRivers,rushing_yards,19.5,-120,-110,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jonathan Taylor,PIT,UNKNOWN,BetRivers,rushing_yards,96.5,-113,-118,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jonathan Taylor,PIT,UNKNOWN,BetRivers,rushing_yards,96.5,-113,-118,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,BetRivers,rushing_yards,13.5,-110,-121,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,BetRivers,rushing_yards,13.5,-110,-121,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jaylen Warren,PIT,UNKNOWN,BetRivers,rushing_yards,58.5,-117,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jaylen Warren,PIT,UNKNOWN,BetRivers,rushing_yards,58.5,-117,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jonathan Taylor,PIT,UNKNOWN,BetMGM,rushing_yards,96.5,-115,-115,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jonathan Taylor,PIT,UNKNOWN,BetMGM,rushing_yards,96.5,-115,-115,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,BetMGM,rushing_yards,13.5,-110,-118,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,BetMGM,rushing_yards,13.5,-110,-118,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Kenneth Gainwell,PIT,UNKNOWN,BetMGM,rushing_yards,21.5,-120,-110,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Kenneth Gainwell,PIT,UNKNOWN,BetMGM,rushing_yards,21.5,-120,-110,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jaylen Warren,PIT,UNKNOWN,BetMGM,rushing_yards,55.5,-118,-110,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Jaylen Warren,PIT,UNKNOWN,BetMGM,rushing_yards,55.5,-118,-110,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,DraftKings,passing_yards,250.5,-111,-113,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,DraftKings,passing_yards,250.5,-111,-113,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Aaron Rodgers,PIT,UNKNOWN,DraftKings,passing_yards,235.5,-112,-112,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Aaron Rodgers,PIT,UNKNOWN,DraftKings,passing_yards,235.5,-112,-112,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,FanDuel,passing_yards,251.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,FanDuel,passing_yards,251.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Aaron Rodgers,PIT,UNKNOWN,FanDuel,passing_yards,222.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Aaron Rodgers,PIT,UNKNOWN,FanDuel,passing_yards,222.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,BetOnline.ag,passing_yards,250.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,BetOnline.ag,passing_yards,250.5,-114,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Aaron Rodgers,PIT,UNKNOWN,BetOnline.ag,passing_yards,228.5,-112,-115,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Aaron Rodgers,PIT,UNKNOWN,BetOnline.ag,passing_yards,228.5,-112,-115,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Aaron Rodgers,PIT,UNKNOWN,BetRivers,passing_yards,237.5,-114,-117,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Aaron Rodgers,PIT,UNKNOWN,BetRivers,passing_yards,237.5,-114,-117,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,BetRivers,passing_yards,251.5,-117,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,BetRivers,passing_yards,251.5,-117,-114,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Aaron Rodgers,PIT,UNKNOWN,BetMGM,passing_yards,240.5,-115,-118,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Aaron Rodgers,PIT,UNKNOWN,BetMGM,passing_yards,240.5,-115,-118,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,BetMGM,passing_yards,250.5,-115,-115,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Daniel Jones,PIT,UNKNOWN,BetMGM,passing_yards,250.5,-115,-115,2025-11-02T18:00:00Z,Pittsburgh Steelers,Indianapolis Colts
+Kimani Vidal,TEN,UNKNOWN,DraftKings,rushing_yards,76.5,-113,-111,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Kimani Vidal,TEN,UNKNOWN,DraftKings,rushing_yards,76.5,-113,-111,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tony Pollard,TEN,UNKNOWN,DraftKings,rushing_yards,37.5,-113,-111,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tony Pollard,TEN,UNKNOWN,DraftKings,rushing_yards,37.5,-113,-111,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tyjae Spears,TEN,UNKNOWN,DraftKings,rushing_yards,26.5,-111,-113,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tyjae Spears,TEN,UNKNOWN,DraftKings,rushing_yards,26.5,-111,-113,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,DraftKings,rushing_yards,15.5,-116,-108,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,DraftKings,rushing_yards,15.5,-116,-108,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cameron Ward,TEN,UNKNOWN,DraftKings,rushing_yards,4.5,-106,-119,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cameron Ward,TEN,UNKNOWN,DraftKings,rushing_yards,4.5,-106,-119,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,FanDuel,rushing_yards,15.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,FanDuel,rushing_yards,15.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tyjae Spears,TEN,UNKNOWN,FanDuel,rushing_yards,23.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tyjae Spears,TEN,UNKNOWN,FanDuel,rushing_yards,23.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Kimani Vidal,TEN,UNKNOWN,FanDuel,rushing_yards,77.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Kimani Vidal,TEN,UNKNOWN,FanDuel,rushing_yards,77.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tony Pollard,TEN,UNKNOWN,FanDuel,rushing_yards,39.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tony Pollard,TEN,UNKNOWN,FanDuel,rushing_yards,39.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cam Ward,TEN,UNKNOWN,FanDuel,rushing_yards,3.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cam Ward,TEN,UNKNOWN,FanDuel,rushing_yards,3.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tyjae Spears,TEN,UNKNOWN,BetOnline.ag,rushing_yards,24.5,-108,-120,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tyjae Spears,TEN,UNKNOWN,BetOnline.ag,rushing_yards,24.5,-108,-120,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tony Pollard,TEN,UNKNOWN,BetOnline.ag,rushing_yards,37.5,-116,-111,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tony Pollard,TEN,UNKNOWN,BetOnline.ag,rushing_yards,37.5,-116,-111,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,BetOnline.ag,rushing_yards,15.5,-118,-110,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,BetOnline.ag,rushing_yards,15.5,-118,-110,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Kimani Vidal,TEN,UNKNOWN,BetOnline.ag,rushing_yards,76.5,-116,-111,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Kimani Vidal,TEN,UNKNOWN,BetOnline.ag,rushing_yards,76.5,-116,-111,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tyjae Spears,TEN,UNKNOWN,BetMGM,rushing_yards,27.5,-115,-118,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tyjae Spears,TEN,UNKNOWN,BetMGM,rushing_yards,27.5,-115,-118,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Kimani Vidal,TEN,UNKNOWN,BetMGM,rushing_yards,71.5,-118,-115,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Kimani Vidal,TEN,UNKNOWN,BetMGM,rushing_yards,71.5,-118,-115,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cam Ward,TEN,UNKNOWN,BetMGM,rushing_yards,4.5,-115,-115,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cam Ward,TEN,UNKNOWN,BetMGM,rushing_yards,4.5,-115,-115,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tony Pollard,TEN,UNKNOWN,BetMGM,rushing_yards,37.5,-115,-115,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Tony Pollard,TEN,UNKNOWN,BetMGM,rushing_yards,37.5,-115,-115,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,BetMGM,rushing_yards,15.5,-115,-118,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,BetMGM,rushing_yards,15.5,-115,-118,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,DraftKings,passing_yards,243.5,-112,-112,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,DraftKings,passing_yards,243.5,-112,-112,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cameron Ward,TEN,UNKNOWN,DraftKings,passing_yards,208.5,-111,-113,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cameron Ward,TEN,UNKNOWN,DraftKings,passing_yards,208.5,-111,-113,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cam Ward,TEN,UNKNOWN,FanDuel,passing_yards,205.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cam Ward,TEN,UNKNOWN,FanDuel,passing_yards,205.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,FanDuel,passing_yards,242.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,FanDuel,passing_yards,242.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,BetOnline.ag,passing_yards,244.5,-115,-112,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,BetOnline.ag,passing_yards,244.5,-115,-112,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cameron Ward,TEN,UNKNOWN,BetOnline.ag,passing_yards,205.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cameron Ward,TEN,UNKNOWN,BetOnline.ag,passing_yards,205.5,-114,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,BetRivers,passing_yards,243.5,-115,-115,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,BetRivers,passing_yards,243.5,-115,-115,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cameron Ward,TEN,UNKNOWN,BetRivers,passing_yards,210.5,-117,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cameron Ward,TEN,UNKNOWN,BetRivers,passing_yards,210.5,-117,-114,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,BetMGM,passing_yards,244.5,-115,-115,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Justin Herbert,TEN,UNKNOWN,BetMGM,passing_yards,244.5,-115,-115,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cam Ward,TEN,UNKNOWN,BetMGM,passing_yards,208.5,-115,-115,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Cam Ward,TEN,UNKNOWN,BetMGM,passing_yards,208.5,-115,-115,2025-11-02T18:00:00Z,Tennessee Titans,Los Angeles Chargers
+Christian McCaffrey,NYG,UNKNOWN,DraftKings,rushing_yards,70.5,-111,-113,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Christian McCaffrey,NYG,UNKNOWN,DraftKings,rushing_yards,70.5,-111,-113,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Tyrone Tracy Jr.,NYG,UNKNOWN,DraftKings,rushing_yards,52.5,-112,-112,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Tyrone Tracy Jr.,NYG,UNKNOWN,DraftKings,rushing_yards,52.5,-112,-112,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,DraftKings,rushing_yards,35.5,-112,-112,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,DraftKings,rushing_yards,35.5,-112,-112,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Tyrone Tracy Jr.,NYG,UNKNOWN,FanDuel,rushing_yards,52.5,-114,-114,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Tyrone Tracy Jr.,NYG,UNKNOWN,FanDuel,rushing_yards,52.5,-114,-114,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Christian McCaffrey,NYG,UNKNOWN,FanDuel,rushing_yards,66.5,-114,-114,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Christian McCaffrey,NYG,UNKNOWN,FanDuel,rushing_yards,66.5,-114,-114,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,FanDuel,rushing_yards,34.5,-114,-114,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,FanDuel,rushing_yards,34.5,-114,-114,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Christian McCaffrey,NYG,UNKNOWN,BetOnline.ag,rushing_yards,69.5,-120,-108,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Christian McCaffrey,NYG,UNKNOWN,BetOnline.ag,rushing_yards,69.5,-120,-108,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Tyrone Tracy Jr.,NYG,UNKNOWN,BetOnline.ag,rushing_yards,52.5,-114,-114,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Tyrone Tracy Jr.,NYG,UNKNOWN,BetOnline.ag,rushing_yards,52.5,-114,-114,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,BetOnline.ag,rushing_yards,35.5,-111,-116,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,BetOnline.ag,rushing_yards,35.5,-111,-116,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Tyrone Tracy Jr.,NYG,UNKNOWN,BetRivers,rushing_yards,55.5,-115,-115,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Tyrone Tracy Jr.,NYG,UNKNOWN,BetRivers,rushing_yards,55.5,-115,-115,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,BetRivers,rushing_yards,37.5,-117,-114,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,BetRivers,rushing_yards,37.5,-117,-114,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Devin Singletary,NYG,UNKNOWN,BetRivers,rushing_yards,17.5,-120,-112,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Devin Singletary,NYG,UNKNOWN,BetRivers,rushing_yards,17.5,-120,-112,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,BetMGM,rushing_yards,38.5,-115,-115,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,BetMGM,rushing_yards,38.5,-115,-115,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Tyrone Tracy Jr.,NYG,UNKNOWN,BetMGM,rushing_yards,51.5,-118,-110,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Tyrone Tracy Jr.,NYG,UNKNOWN,BetMGM,rushing_yards,51.5,-118,-110,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Brian Robinson Jr.,NYG,UNKNOWN,BetMGM,rushing_yards,13.5,-115,-118,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Brian Robinson Jr.,NYG,UNKNOWN,BetMGM,rushing_yards,13.5,-115,-118,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Devin Singletary,NYG,UNKNOWN,BetMGM,rushing_yards,17.5,-110,-118,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Devin Singletary,NYG,UNKNOWN,BetMGM,rushing_yards,17.5,-110,-118,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Christian McCaffrey,NYG,UNKNOWN,BetMGM,rushing_yards,66.5,-118,-110,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Christian McCaffrey,NYG,UNKNOWN,BetMGM,rushing_yards,66.5,-118,-110,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,DraftKings,passing_yards,207.5,-113,-111,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,DraftKings,passing_yards,207.5,-113,-111,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,FanDuel,passing_yards,210.5,-114,-114,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,FanDuel,passing_yards,210.5,-114,-114,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,BetOnline.ag,passing_yards,209.5,-116,-111,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,BetOnline.ag,passing_yards,209.5,-116,-111,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,BetRivers,passing_yards,214.5,-115,-115,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,BetRivers,passing_yards,214.5,-115,-115,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,BetMGM,passing_yards,209.5,-115,-115,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Jaxson Dart,NYG,UNKNOWN,BetMGM,passing_yards,209.5,-115,-115,2025-11-02T18:00:00Z,New York Giants,San Francisco 49ers
+Ashton Jeanty,LV,UNKNOWN,DraftKings,rushing_yards,61.5,-111,-113,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Ashton Jeanty,LV,UNKNOWN,DraftKings,rushing_yards,61.5,-111,-113,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Travis Etienne Jr.,LV,UNKNOWN,DraftKings,rushing_yards,57.5,-114,-110,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Travis Etienne Jr.,LV,UNKNOWN,DraftKings,rushing_yards,57.5,-114,-110,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Bhayshul Tuten,LV,UNKNOWN,DraftKings,rushing_yards,21.5,-108,-116,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Bhayshul Tuten,LV,UNKNOWN,DraftKings,rushing_yards,21.5,-108,-116,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,DraftKings,rushing_yards,13.5,-118,-107,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,DraftKings,rushing_yards,13.5,-118,-107,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,DraftKings,rushing_yards,11.5,-107,-118,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,DraftKings,rushing_yards,11.5,-107,-118,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Ashton Jeanty,LV,UNKNOWN,FanDuel,rushing_yards,61.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Ashton Jeanty,LV,UNKNOWN,FanDuel,rushing_yards,61.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,FanDuel,rushing_yards,10.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,FanDuel,rushing_yards,10.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Bhayshul Tuten,LV,UNKNOWN,FanDuel,rushing_yards,20.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Bhayshul Tuten,LV,UNKNOWN,FanDuel,rushing_yards,20.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,FanDuel,rushing_yards,13.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,FanDuel,rushing_yards,13.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Travis Etienne Jr.,LV,UNKNOWN,FanDuel,rushing_yards,57.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Travis Etienne Jr.,LV,UNKNOWN,FanDuel,rushing_yards,57.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Ashton Jeanty,LV,UNKNOWN,BetOnline.ag,rushing_yards,61.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Ashton Jeanty,LV,UNKNOWN,BetOnline.ag,rushing_yards,61.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Bhayshul Tuten,LV,UNKNOWN,BetOnline.ag,rushing_yards,20.5,-116,-111,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Bhayshul Tuten,LV,UNKNOWN,BetOnline.ag,rushing_yards,20.5,-116,-111,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,BetOnline.ag,rushing_yards,10.5,-116,-111,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,BetOnline.ag,rushing_yards,10.5,-116,-111,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,BetOnline.ag,rushing_yards,13.5,-115,-112,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,BetOnline.ag,rushing_yards,13.5,-115,-112,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Travis Etienne Jr.,LV,UNKNOWN,BetOnline.ag,rushing_yards,56.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Travis Etienne Jr.,LV,UNKNOWN,BetOnline.ag,rushing_yards,56.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,BetMGM,rushing_yards,13.5,-110,-120,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,BetMGM,rushing_yards,13.5,-110,-120,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Ashton Jeanty,LV,UNKNOWN,BetMGM,rushing_yards,57.5,-118,-110,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Ashton Jeanty,LV,UNKNOWN,BetMGM,rushing_yards,57.5,-118,-110,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Travis Etienne Jr.,LV,UNKNOWN,BetMGM,rushing_yards,58.5,-118,-115,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Travis Etienne Jr.,LV,UNKNOWN,BetMGM,rushing_yards,58.5,-118,-115,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,BetMGM,rushing_yards,8.5,-118,-110,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,BetMGM,rushing_yards,8.5,-118,-110,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Bhayshul Tuten,LV,UNKNOWN,BetMGM,rushing_yards,23.5,-110,-120,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Bhayshul Tuten,LV,UNKNOWN,BetMGM,rushing_yards,23.5,-110,-120,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,DraftKings,passing_yards,228.5,-113,-111,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,DraftKings,passing_yards,228.5,-113,-111,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,DraftKings,passing_yards,227.5,-113,-111,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,DraftKings,passing_yards,227.5,-113,-111,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,FanDuel,passing_yards,227.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,FanDuel,passing_yards,227.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,FanDuel,passing_yards,229.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,FanDuel,passing_yards,229.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,BetOnline.ag,passing_yards,227.5,-115,-112,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,BetOnline.ag,passing_yards,227.5,-115,-112,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,BetOnline.ag,passing_yards,232.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,BetOnline.ag,passing_yards,232.5,-114,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,BetRivers,passing_yards,227.5,-114,-117,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,BetRivers,passing_yards,227.5,-114,-117,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,BetRivers,passing_yards,228.5,-117,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,BetRivers,passing_yards,228.5,-117,-114,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,BetMGM,passing_yards,234.5,-115,-115,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Trevor Lawrence,LV,UNKNOWN,BetMGM,passing_yards,234.5,-115,-115,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,BetMGM,passing_yards,224.5,-115,-115,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars
+Geno Smith,LV,UNKNOWN,BetMGM,passing_yards,224.5,-115,-115,2025-11-02T21:05:00Z,Las Vegas Raiders,Jacksonville Jaguars

@@ -1,0 +1,40 @@
+{
+  "created_at": "2025-10-01T21:23:40.803798+00:00",
+  "elapsed": 0.294214,
+  "encoding": "utf-8",
+  "expires": "2025-10-01T21:53:40.803756+00:00",
+  "headers": {
+    "Apigw-Requestid": "RyVKhioZIAMEZMg=",
+    "Connection": "keep-alive",
+    "Content-Length": "218",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Wed, 01 Oct 2025 21:23:40 GMT",
+    "X-Requests-Last": "0",
+    "X-Requests-Remaining": "487",
+    "X-Requests-Used": "13",
+    "vary": "Accept-Encoding"
+  },
+  "reason": "OK",
+  "request": {
+    "body": "",
+    "headers": {
+      "Accept": "*/*",
+      "Accept-Encoding": "gzip, deflate",
+      "Connection": "keep-alive",
+      "User-Agent": "python-requests/2.32.4"
+    },
+    "method": "GET",
+    "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/6f5a22a3ca33478094cef1e9212ba0fc/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us"
+  },
+  "status_code": 200,
+  "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/6f5a22a3ca33478094cef1e9212ba0fc/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us",
+  "_decoded_content": {
+    "id": "6f5a22a3ca33478094cef1e9212ba0fc",
+    "sport_key": "americanfootball_nfl",
+    "sport_title": "NFL",
+    "commence_time": "2025-10-05T20:06:00Z",
+    "home_team": "Seattle Seahawks",
+    "away_team": "Tampa Bay Buccaneers",
+    "bookmakers": []
+  }
+}

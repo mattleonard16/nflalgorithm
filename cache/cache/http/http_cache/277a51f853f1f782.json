@@ -1,0 +1,102 @@
+{
+  "created_at": "2025-10-01T21:23:31.893735+00:00",
+  "elapsed": 0.294485,
+  "encoding": "utf-8",
+  "expires": "2025-10-01T21:53:31.893686+00:00",
+  "headers": {
+    "Apigw-Requestid": "RyVJIiPZIAMEZag=",
+    "Connection": "keep-alive",
+    "Content-Length": "383",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Wed, 01 Oct 2025 21:23:31 GMT",
+    "X-Requests-Last": "1",
+    "X-Requests-Remaining": "494",
+    "X-Requests-Used": "6",
+    "content-encoding": "gzip",
+    "vary": "Accept-Encoding"
+  },
+  "reason": "OK",
+  "request": {
+    "body": "",
+    "headers": {
+      "Accept": "*/*",
+      "Accept-Encoding": "gzip, deflate",
+      "Connection": "keep-alive",
+      "User-Agent": "python-requests/2.32.4"
+    },
+    "method": "GET",
+    "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/ff8222149317a63ffe50fcda777d14c0/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us"
+  },
+  "status_code": 200,
+  "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/ff8222149317a63ffe50fcda777d14c0/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us",
+  "_decoded_content": {
+    "id": "ff8222149317a63ffe50fcda777d14c0",
+    "sport_key": "americanfootball_nfl",
+    "sport_title": "NFL",
+    "commence_time": "2025-10-05T17:01:00Z",
+    "home_team": "Carolina Panthers",
+    "away_team": "Miami Dolphins",
+    "bookmakers": [
+      {
+        "key": "betmgm",
+        "title": "BetMGM",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-01T21:23:30Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Chuba Hubbard",
+                "price": -115,
+                "point": 54.5
+              },
+              {
+                "name": "Under",
+                "description": "Chuba Hubbard",
+                "price": -118,
+                "point": 54.5
+              },
+              {
+                "name": "Over",
+                "description": "Bryce Young",
+                "price": -110,
+                "point": 11.5
+              },
+              {
+                "name": "Under",
+                "description": "Bryce Young",
+                "price": -120,
+                "point": 11.5
+              },
+              {
+                "name": "Over",
+                "description": "Tua Tagovailoa",
+                "price": -110,
+                "point": 2.5
+              },
+              {
+                "name": "Under",
+                "description": "Tua Tagovailoa",
+                "price": -118,
+                "point": 2.5
+              },
+              {
+                "name": "Over",
+                "description": "De'Von Achane",
+                "price": -110,
+                "point": 68.5
+              },
+              {
+                "name": "Under",
+                "description": "De'Von Achane",
+                "price": -118,
+                "point": 68.5
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

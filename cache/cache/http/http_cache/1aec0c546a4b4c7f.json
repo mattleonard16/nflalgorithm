@@ -1,0 +1,402 @@
+{
+  "created_at": "2025-10-31T18:45:16.953256+00:00",
+  "elapsed": 0.120031,
+  "encoding": "utf-8",
+  "expires": "2025-10-31T19:15:16.953187+00:00",
+  "headers": {
+    "Apigw-Requestid": "TU2FlgBwIAMEZIw=",
+    "Connection": "keep-alive",
+    "Content-Length": "682",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Fri, 31 Oct 2025 18:45:16 GMT",
+    "X-Requests-Last": "1",
+    "X-Requests-Remaining": "376",
+    "X-Requests-Used": "124",
+    "content-encoding": "gzip",
+    "vary": "Accept-Encoding"
+  },
+  "reason": "OK",
+  "request": {
+    "body": "",
+    "headers": {
+      "Accept": "*/*",
+      "Accept-Encoding": "gzip, deflate",
+      "Connection": "keep-alive",
+      "User-Agent": "python-requests/2.32.4"
+    },
+    "method": "GET",
+    "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/2340a6e0794d5688996dcf8aaf634742/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us"
+  },
+  "status_code": 200,
+  "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/2340a6e0794d5688996dcf8aaf634742/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us",
+  "_decoded_content": {
+    "id": "2340a6e0794d5688996dcf8aaf634742",
+    "sport_key": "americanfootball_nfl",
+    "sport_title": "NFL",
+    "commence_time": "2025-11-02T18:00:00Z",
+    "home_team": "Pittsburgh Steelers",
+    "away_team": "Indianapolis Colts",
+    "bookmakers": [
+      {
+        "key": "draftkings",
+        "title": "DraftKings",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:18Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Jonathan Taylor",
+                "price": -112,
+                "point": 94.5
+              },
+              {
+                "name": "Under",
+                "description": "Jonathan Taylor",
+                "price": -112,
+                "point": 94.5
+              },
+              {
+                "name": "Over",
+                "description": "Jaylen Warren",
+                "price": -115,
+                "point": 56.5
+              },
+              {
+                "name": "Under",
+                "description": "Jaylen Warren",
+                "price": -110,
+                "point": 56.5
+              },
+              {
+                "name": "Over",
+                "description": "Kenneth Gainwell",
+                "price": -115,
+                "point": 20.5
+              },
+              {
+                "name": "Under",
+                "description": "Kenneth Gainwell",
+                "price": -109,
+                "point": 20.5
+              },
+              {
+                "name": "Over",
+                "description": "Daniel Jones",
+                "price": -114,
+                "point": 13.5
+              },
+              {
+                "name": "Under",
+                "description": "Daniel Jones",
+                "price": -110,
+                "point": 13.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "fanduel",
+        "title": "FanDuel",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:45:06Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Jaylen Warren",
+                "price": -114,
+                "point": 56.5
+              },
+              {
+                "name": "Under",
+                "description": "Jaylen Warren",
+                "price": -114,
+                "point": 56.5
+              },
+              {
+                "name": "Over",
+                "description": "Daniel Jones",
+                "price": -114,
+                "point": 13.5
+              },
+              {
+                "name": "Under",
+                "description": "Daniel Jones",
+                "price": -114,
+                "point": 13.5
+              },
+              {
+                "name": "Over",
+                "description": "Jonathan Taylor",
+                "price": -114,
+                "point": 93.5
+              },
+              {
+                "name": "Under",
+                "description": "Jonathan Taylor",
+                "price": -114,
+                "point": 93.5
+              },
+              {
+                "name": "Over",
+                "description": "Kenneth Gainwell",
+                "price": -114,
+                "point": 19.5
+              },
+              {
+                "name": "Under",
+                "description": "Kenneth Gainwell",
+                "price": -114,
+                "point": 19.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betonlineag",
+        "title": "BetOnline.ag",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:06Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Jonathan Taylor",
+                "price": -116,
+                "point": 94.5
+              },
+              {
+                "name": "Under",
+                "description": "Jonathan Taylor",
+                "price": -111,
+                "point": 94.5
+              },
+              {
+                "name": "Over",
+                "description": "Jaylen Warren",
+                "price": -114,
+                "point": 56.5
+              },
+              {
+                "name": "Under",
+                "description": "Jaylen Warren",
+                "price": -114,
+                "point": 56.5
+              },
+              {
+                "name": "Over",
+                "description": "Kenneth Gainwell",
+                "price": -112,
+                "point": 20.5
+              },
+              {
+                "name": "Under",
+                "description": "Kenneth Gainwell",
+                "price": -115,
+                "point": 20.5
+              },
+              {
+                "name": "Over",
+                "description": "Daniel Jones",
+                "price": -115,
+                "point": 13.5
+              },
+              {
+                "name": "Under",
+                "description": "Daniel Jones",
+                "price": -112,
+                "point": 13.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betrivers",
+        "title": "BetRivers",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:14Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Kenneth Gainwell",
+                "price": -121,
+                "point": 18.5
+              },
+              {
+                "name": "Under",
+                "description": "Kenneth Gainwell",
+                "price": -110,
+                "point": 18.5
+              },
+              {
+                "name": "Over",
+                "description": "Daniel Jones",
+                "price": -121,
+                "point": 12.5
+              },
+              {
+                "name": "Under",
+                "description": "Daniel Jones",
+                "price": -110,
+                "point": 12.5
+              },
+              {
+                "name": "Over",
+                "description": "Jaylen Warren",
+                "price": -118,
+                "point": 56.5
+              },
+              {
+                "name": "Under",
+                "description": "Jaylen Warren",
+                "price": -113,
+                "point": 56.5
+              },
+              {
+                "name": "Over",
+                "description": "Jonathan Taylor",
+                "price": -118,
+                "point": 92.5
+              },
+              {
+                "name": "Under",
+                "description": "Jonathan Taylor",
+                "price": -113,
+                "point": 92.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betmgm",
+        "title": "BetMGM",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:45:02Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Jonathan Taylor",
+                "price": -118,
+                "point": 94.5
+              },
+              {
+                "name": "Under",
+                "description": "Jonathan Taylor",
+                "price": -110,
+                "point": 94.5
+              },
+              {
+                "name": "Over",
+                "description": "Daniel Jones",
+                "price": -120,
+                "point": 12.5
+              },
+              {
+                "name": "Under",
+                "description": "Daniel Jones",
+                "price": -110,
+                "point": 12.5
+              },
+              {
+                "name": "Over",
+                "description": "Kenneth Gainwell",
+                "price": -115,
+                "point": 21.5
+              },
+              {
+                "name": "Under",
+                "description": "Kenneth Gainwell",
+                "price": -115,
+                "point": 21.5
+              },
+              {
+                "name": "Over",
+                "description": "Jaylen Warren",
+                "price": -110,
+                "point": 60.5
+              },
+              {
+                "name": "Under",
+                "description": "Jaylen Warren",
+                "price": -118,
+                "point": 60.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "bovada",
+        "title": "Bovada",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:40Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Daniel Jones",
+                "price": -115,
+                "point": 13.5
+              },
+              {
+                "name": "Under",
+                "description": "Daniel Jones",
+                "price": -115,
+                "point": 13.5
+              },
+              {
+                "name": "Over",
+                "description": "Jaylen Warren",
+                "price": -115,
+                "point": 56.5
+              },
+              {
+                "name": "Under",
+                "description": "Jaylen Warren",
+                "price": -115,
+                "point": 56.5
+              },
+              {
+                "name": "Over",
+                "description": "Jonathan Taylor",
+                "price": -115,
+                "point": 95.5
+              },
+              {
+                "name": "Under",
+                "description": "Jonathan Taylor",
+                "price": -115,
+                "point": 95.5
+              },
+              {
+                "name": "Over",
+                "description": "Kenneth Gainwell",
+                "price": -110,
+                "point": 20.5
+              },
+              {
+                "name": "Under",
+                "description": "Kenneth Gainwell",
+                "price": -120,
+                "point": 20.5
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

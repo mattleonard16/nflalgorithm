@@ -37,18 +37,20 @@ class OptunaOptimizer:
         storage_url = f"sqlite:///{config.project_root}/optuna.db"
         self.storage = RDBStorage(storage_url)
         
-    def optimize_gradient_boosting(self, X: pd.DataFrame, y: pd.Series, n_trials: int = 100) -> Dict[str, Any]:
-        """Optimize GradientBoosting hyperparameters."""
+    def optimize_gradient_boosting(self, X: pd.DataFrame, y: pd.Series, n_trials: int = 300) -> Dict[str, Any]:
+        """Optimize GradientBoosting hyperparameters with expanded search space."""
         
         def objective(trial):
             params = {
-                'n_estimators': trial.suggest_int('n_estimators', 50, 500),
-                'max_depth': trial.suggest_int('max_depth', 3, 15),
-                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
-                'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-                'min_samples_split': trial.suggest_int('min_samples_split', 2, 20),
-                'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 10),
-                'max_features': trial.suggest_categorical('max_features', ['sqrt', 'log2', None])
+                'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
+                'max_depth': trial.suggest_int('max_depth', 3, 20),
+                'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.3, log=True),
+                'subsample': trial.suggest_float('subsample', 0.5, 1.0),
+                'min_samples_split': trial.suggest_int('min_samples_split', 2, 50),
+                'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 25),
+                'max_features': trial.suggest_categorical('max_features', ['sqrt', 'log2', None, 0.8, 0.9]),
+                'tol': trial.suggest_float('tol', 1e-8, 1e-3, log=True),
+                'ccp_alpha': trial.suggest_float('ccp_alpha', 0.0, 0.1)
             }
             
             model = GradientBoostingRegressor(random_state=42, **params)
@@ -77,17 +79,19 @@ class OptunaOptimizer:
             'study_name': study.study_name
         }
     
-    def optimize_random_forest(self, X: pd.DataFrame, y: pd.Series, n_trials: int = 100) -> Dict[str, Any]:
-        """Optimize RandomForest hyperparameters."""
+    def optimize_random_forest(self, X: pd.DataFrame, y: pd.Series, n_trials: int = 300) -> Dict[str, Any]:
+        """Optimize RandomForest hyperparameters with expanded search space."""
         
         def objective(trial):
             params = {
-                'n_estimators': trial.suggest_int('n_estimators', 50, 500),
-                'max_depth': trial.suggest_int('max_depth', 5, 30),
-                'min_samples_split': trial.suggest_int('min_samples_split', 2, 20),
-                'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 10),
-                'max_features': trial.suggest_categorical('max_features', ['sqrt', 'log2', None]),
-                'bootstrap': trial.suggest_categorical('bootstrap', [True, False])
+                'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
+                'max_depth': trial.suggest_int('max_depth', 5, 40),
+                'min_samples_split': trial.suggest_int('min_samples_split', 2, 50),
+                'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 25),
+                'max_features': trial.suggest_categorical('max_features', ['sqrt', 'log2', None, 0.8, 0.9]),
+                'bootstrap': trial.suggest_categorical('bootstrap', [True, False]),
+                'min_impurity_decrease': trial.suggest_float('min_impurity_decrease', 0.0, 0.1),
+                'max_samples': trial.suggest_float('max_samples', 0.5, 1.0)
             }
             
             model = RandomForestRegressor(random_state=42, **params)
@@ -187,17 +191,18 @@ class OptunaOptimizer:
             'study_name': study.study_name
         }
     
-    def optimize_lightgbm(self, X: pd.DataFrame, y: pd.Series, n_trials: int = 100) -> Dict[str, Any]:
+    def optimize_lightgbm(self, X: pd.DataFrame, y: pd.Series, n_trials: int = 300) -> Dict[str, Any]:
         """Optimize LightGBM with monotonic constraints for breakout prediction."""
         def objective(trial):
             params = {
                 'objective': 'regression',
                 'metric': 'mae',
                 'verbose': -1,
-                'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
-                'num_leaves': trial.suggest_int('num_leaves', 20, 300),
-                'max_depth': trial.suggest_int('max_depth', 3, 15),
-                'min_data_in_leaf': trial.suggest_int('min_data_in_leaf', 20, 200),
+                'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.3, log=True),
+                'num_leaves': trial.suggest_int('num_leaves', 31, 500),
+                'max_depth': trial.suggest_int('max_depth', 3, 20),
+                'min_data_in_leaf': trial.suggest_int('min_data_in_leaf', 10, 300),
+                'min_sum_hessian_in_leaf': trial.suggest_float('min_sum_hessian_in_leaf', 0.0, 10.0),
                 'lambda_l1': trial.suggest_float('lambda_l1', 0, 5),
                 'lambda_l2': trial.suggest_float('lambda_l2', 0, 5),
                 'feature_fraction': trial.suggest_float('feature_fraction', 0.4, 1.0),
@@ -304,22 +309,22 @@ class OptunaOptimizer:
         
         results = {}
         
-        # Optimize GradientBoosting
-        logger.info("Optimizing GradientBoosting...")
-        results['gradient_boosting'] = self.optimize_gradient_boosting(X, y, n_trials=100)
+        # Optimize GradientBoosting with increased trials
+        logger.info("Optimizing GradientBoosting with 300 trials...")
+        results['gradient_boosting'] = self.optimize_gradient_boosting(X, y, n_trials=300)
         
-        # Optimize RandomForest
-        logger.info("Optimizing RandomForest...")
-        results['random_forest'] = self.optimize_random_forest(X, y, n_trials=100)
+        # Optimize RandomForest with increased trials
+        logger.info("Optimizing RandomForest with 300 trials...")
+        results['random_forest'] = self.optimize_random_forest(X, y, n_trials=300)
         
         # Optimize LSTM (if enough data)
         if len(X) > 500:
             logger.info("Optimizing LSTM...")
             results['lstm'] = self.optimize_lstm(X, y, n_trials=30)
         
-        # Optimize LightGBM
-        logger.info("Optimizing LightGBM...")
-        results['lightgbm'] = self.optimize_lightgbm(X, y, n_trials=100)
+        # Optimize LightGBM with increased trials
+        logger.info("Optimizing LightGBM with 300 trials...")
+        results['lightgbm'] = self.optimize_lightgbm(X, y, n_trials=300)
         
         # Ensemble stacking
         base_models = {

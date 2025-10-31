@@ -1,0 +1,222 @@
+{
+  "created_at": "2025-10-31T18:45:31.652200+00:00",
+  "elapsed": 0.129875,
+  "encoding": "utf-8",
+  "expires": "2025-10-31T19:15:31.652158+00:00",
+  "headers": {
+    "Apigw-Requestid": "TU2H4gQQoAMEPsA=",
+    "Connection": "keep-alive",
+    "Content-Length": "503",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Fri, 31 Oct 2025 18:45:31 GMT",
+    "X-Requests-Last": "1",
+    "X-Requests-Remaining": "367",
+    "X-Requests-Used": "133",
+    "content-encoding": "gzip",
+    "vary": "Accept-Encoding"
+  },
+  "reason": "OK",
+  "request": {
+    "body": "",
+    "headers": {
+      "Accept": "*/*",
+      "Accept-Encoding": "gzip, deflate",
+      "Connection": "keep-alive",
+      "User-Agent": "python-requests/2.32.4"
+    },
+    "method": "GET",
+    "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/b08df670a95f1809707b335dc75081c6/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_pass_yds&oddsFormat=american&regions=us"
+  },
+  "status_code": 200,
+  "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/b08df670a95f1809707b335dc75081c6/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_pass_yds&oddsFormat=american&regions=us",
+  "_decoded_content": {
+    "id": "b08df670a95f1809707b335dc75081c6",
+    "sport_key": "americanfootball_nfl",
+    "sport_title": "NFL",
+    "commence_time": "2025-11-02T21:05:00Z",
+    "home_team": "Los Angeles Rams",
+    "away_team": "New Orleans Saints",
+    "bookmakers": [
+      {
+        "key": "draftkings",
+        "title": "DraftKings",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:44:29Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Matthew Stafford",
+                "price": -113,
+                "point": 255.5
+              },
+              {
+                "name": "Under",
+                "description": "Matthew Stafford",
+                "price": -111,
+                "point": 255.5
+              },
+              {
+                "name": "Over",
+                "description": "Tyler Shough",
+                "price": -111,
+                "point": 190.5
+              },
+              {
+                "name": "Under",
+                "description": "Tyler Shough",
+                "price": -113,
+                "point": 190.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betonlineag",
+        "title": "BetOnline.ag",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:44:45Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Matthew Stafford",
+                "price": -115,
+                "point": 255.5
+              },
+              {
+                "name": "Under",
+                "description": "Matthew Stafford",
+                "price": -112,
+                "point": 255.5
+              },
+              {
+                "name": "Over",
+                "description": "Tyler Shough",
+                "price": -114,
+                "point": 189.5
+              },
+              {
+                "name": "Under",
+                "description": "Tyler Shough",
+                "price": -114,
+                "point": 189.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "fanduel",
+        "title": "FanDuel",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:45:18Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Matthew Stafford",
+                "price": -114,
+                "point": 255.5
+              },
+              {
+                "name": "Under",
+                "description": "Matthew Stafford",
+                "price": -114,
+                "point": 255.5
+              },
+              {
+                "name": "Over",
+                "description": "Tyler Shough",
+                "price": -114,
+                "point": 189.5
+              },
+              {
+                "name": "Under",
+                "description": "Tyler Shough",
+                "price": -114,
+                "point": 189.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betrivers",
+        "title": "BetRivers",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:44:31Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Tyler Shough",
+                "price": -117,
+                "point": 184.5
+              },
+              {
+                "name": "Under",
+                "description": "Tyler Shough",
+                "price": -114,
+                "point": 184.5
+              },
+              {
+                "name": "Over",
+                "description": "Matthew Stafford",
+                "price": -115,
+                "point": 252.5
+              },
+              {
+                "name": "Under",
+                "description": "Matthew Stafford",
+                "price": -115,
+                "point": 252.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betmgm",
+        "title": "BetMGM",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:43:04Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Matthew Stafford",
+                "price": -115,
+                "point": 253.5
+              },
+              {
+                "name": "Under",
+                "description": "Matthew Stafford",
+                "price": -115,
+                "point": 253.5
+              },
+              {
+                "name": "Over",
+                "description": "Tyler Shough",
+                "price": -115,
+                "point": 190.5
+              },
+              {
+                "name": "Under",
+                "description": "Tyler Shough",
+                "price": -115,
+                "point": 190.5
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

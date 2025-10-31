@@ -60,18 +60,49 @@ class EnhancedCrossSeasonValidator:
         """Engineer enhanced features for better performance."""
         features = df.copy()
         
-        # Basic derived features
-        features['yards_per_attempt'] = features['rushing_yards'] / (features['rushing_attempts'] + 1)
-        features['receptions_per_target'] = features['receptions'] / (features['targets'] + 1)
-        features['total_touches'] = features['rushing_attempts'] + features['receptions']
+        # Create missing columns with defaults if they don't exist
+        required_columns = {
+            'rushing_attempts': 0,
+            'receptions': 0,
+            'targets': 0,
+            'receiving_tds': 0,
+            'rushing_tds': 0,
+            'passing_tds': 0
+        }
+        
+        for col, default_value in required_columns.items():
+            if col not in features.columns:
+                features[col] = default_value
+
+        # Ensure age exists (fallback for basic tables)
+        if 'age' not in features.columns:
+            # Conservative default age to enable feature engineering
+            features['age'] = 26
+
+        # Ensure games_played exists; if missing, derive from weekly rows
+        if 'games_played' not in features.columns:
+            if all(c in features.columns for c in ['player_id', 'season', 'week']):
+                tmp = features.sort_values(['player_id', 'season', 'week'])
+                tmp['games_played'] = tmp.groupby(['player_id', 'season']).cumcount() + 1
+                features['games_played'] = tmp['games_played']
+            else:
+                features['games_played'] = 1
+        
+        # Basic derived features - handle missing columns gracefully
+        features['yards_per_attempt'] = features['rushing_yards'] / (features.get('rushing_attempts', 0) + 1)
+        features['receptions_per_target'] = features.get('receptions', 0) / (features.get('targets', 0) + 1)
+        features['total_touches'] = features.get('rushing_attempts', 0) + features.get('receptions', 0)
         features['total_yards'] = features['rushing_yards'] + features['receiving_yards']
         features['yards_per_touch'] = features['total_yards'] / (features['total_touches'] + 1)
         
         # Position encoding
         position_map = {'RB': 1, 'WR': 2, 'TE': 3, 'QB': 4, 'FB': 5}
-        features['position_encoded'] = features['position'].map(position_map).fillna(0)
+        if 'position' in features.columns:
+            features['position_encoded'] = features['position'].map(position_map).fillna(0)
+        else:
+            features['position_encoded'] = 0
         
-        # Enhanced age features
+        # Enhanced age features (safe after defaulting age)
         features['age_squared'] = features['age'] ** 2
         features['age_cubed'] = features['age'] ** 3
         features['is_prime'] = ((features['age'] >= 24) & (features['age'] <= 28)).astype(int)
@@ -79,9 +110,9 @@ class EnhancedCrossSeasonValidator:
         features['is_rookie'] = (features['age'] <= 22).astype(int)
         
         # Usage rate features
-        features['rush_usage'] = features['rushing_attempts'] / (features['games_played'] + 1)
-        features['target_usage'] = features['targets'] / (features['games_played'] + 1)
-        features['touch_usage'] = features['total_touches'] / (features['games_played'] + 1)
+        features['rush_usage'] = features['rushing_attempts'] / (features.get('games_played', 0) + 1)
+        features['target_usage'] = features['targets'] / (features.get('games_played', 0) + 1)
+        features['touch_usage'] = features['total_touches'] / (features.get('games_played', 0) + 1)
         
         # Efficiency tiers
         features['high_efficiency'] = (features['yards_per_touch'] > 6.0).astype(int)
@@ -119,64 +150,102 @@ class EnhancedCrossSeasonValidator:
         return features
     
     def get_enhanced_feature_columns(self) -> List[str]:
-        """Get enhanced feature set for modeling."""
+        """Get enhanced feature set for modeling with advanced metrics."""
         return [
             # Core features
             'age', 'age_squared', 'age_cubed', 'is_prime', 'is_veteran', 'is_rookie',
             'games_played', 'position_encoded',
             
-            # Usage features
+            # Usage features  
             'rushing_attempts', 'yards_per_attempt', 'rush_usage',
             'receptions', 'targets', 'receptions_per_target', 'target_usage',
             'total_touches', 'touch_usage',
             
             # Efficiency features
             'yards_per_touch', 'high_efficiency', 'low_efficiency',
-            'efficiency_x_volume',
+            'efficiency_x_volume', 'yards_per_target', 'targets_per_snap',
+            'snap_penetration', 'high_usage_games',
             
             # Historical features
             'rushing_yards_prev', 'receiving_yards_prev', 'total_touches_prev',
             'rushing_yards_career_avg', 'receiving_yards_career_avg', 'total_touches_career_avg',
             'rushing_yards_momentum', 'receiving_yards_momentum',
             
-            # Team context
-            'offensive_strength',
+            # Team context and matchup
+            'offensive_strength', 'defensive_strength', 'matchup_quality',
+            'team_offensive_efficiency', 'offensive_momentum',
+            'weak_defensive_matchup', 'strong_defensive_matchup',
+            
+            # Market and coaching features
+            'market_efficiency', 'line_movement_indicator', 'coaching_quality',
+            
+            # Advanced breakout features
+            'target_share_trend', 'durability_score', 'breakout_potential', 'breakout_percentile',
             
             # Interaction features
             'age_x_usage', 'prime_x_efficiency'
         ]
     
     def create_ensemble_model(self, optimized_params: Optional[Dict] = None) -> StackingRegressor:
-        """Create optimized ensemble model."""
+        """Create enhanced ensemble model with optimized hyperparameters and LightGBM."""
         
         # Base models with optimized parameters
         if optimized_params:
             gb_params = optimized_params.get('gradient_boosting', {})
             rf_params = optimized_params.get('random_forest', {})
+            lgb_params = optimized_params.get('lightgbm', {})
         else:
-            # Default optimized parameters
+            # Default optimized parameters from enhanced tuning
             gb_params = {
-                'n_estimators': 300, 'max_depth': 8, 'learning_rate': 0.08,
-                'subsample': 0.85, 'min_samples_split': 5, 'min_samples_leaf': 2
+                'n_estimators': 500, 'max_depth': 12, 'learning_rate': 0.05,
+                'subsample': 0.8, 'min_samples_split': 8, 'min_samples_leaf': 3,
+                'max_features': 0.8, 'tol': 1e-6, 'ccp_alpha': 0.01
             }
             rf_params = {
-                'n_estimators': 250, 'max_depth': 15, 'min_samples_split': 5,
-                'min_samples_leaf': 2, 'max_features': 'sqrt'
+                'n_estimators': 500, 'max_depth': 20, 'min_samples_split': 15,
+                'min_samples_leaf': 4, 'max_features': 0.8, 'bootstrap': True,
+                'min_impurity_decrease': 0.01, 'max_samples': 0.85
+            }
+            lgb_params = {
+                'objective': 'regression', 'metric': 'mae', 'verbose': -1,
+                'learning_rate': 0.05, 'num_leaves': 127, 'max_depth': 12,
+                'min_data_in_leaf': 25, 'min_sum_hessian_in_leaf': 2.0,
+                'lambda_l1': 0.1, 'lambda_l2': 0.1, 'feature_fraction': 0.8,
+                'bagging_fraction': 0.8, 'bagging_freq': 3
             }
         
-        base_models = [
-            ('gb', GradientBoostingRegressor(random_state=42, **gb_params)),
-            ('rf', RandomForestRegressor(random_state=42, **rf_params)),
-            ('lr', LinearRegression())
-        ]
-        
-        # Meta-learner
-        meta_learner = LinearRegression()
+        try:
+            import lightgbm as lgb
+            base_models = [
+                ('gb', GradientBoostingRegressor(random_state=42, **gb_params)),
+                ('rf', RandomForestRegressor(random_state=42, **rf_params)),
+                ('lgb', lgb.LGBMRegressor(random_state=42, **lgb_params)),
+                ('ridge', LinearRegression())
+            ]
+            
+            # Use LightGBM as meta-learner for better performance
+            meta_params = {
+                'objective': 'regression', 'metric': 'mae', 'verbose': -1,
+                'learning_rate': 0.03, 'num_leaves': 31, 'max_depth': 8,
+                'min_data_in_leaf': 10, 'feature_fraction': 0.9,
+                'bagging_fraction': 0.9, 'bagging_freq': 1
+            }
+            meta_learner = lgb.LGBMRegressor(random_state=42, **meta_params)
+            
+        except ImportError:
+            # Fallback if LightGBM not available
+            base_models = [
+                ('gb', GradientBoostingRegressor(random_state=42, **gb_params)),
+                ('rf', RandomForestRegressor(random_state=42, **rf_params)),
+                ('ridge', LinearRegression())
+            ]
+            meta_learner = LinearRegression()
         
         return StackingRegressor(
             estimators=base_models,
             final_estimator=meta_learner,
-            cv=3
+            cv=5,  # Increased CV folds for better robustness
+            n_jobs=-1  # Use all available cores
         )
     
     def validate_k_fold_seasons(self, k: int = 5) -> List[Dict]:
@@ -196,74 +265,137 @@ class EnhancedCrossSeasonValidator:
         
         seasons = sorted(features_df['season'].unique())
         results = []
-        
-        # K-fold cross-validation across seasons
-        n_splits = min(k, len(seasons) - 1)  # Ensure we don't exceed available seasons
-        tscv = TimeSeriesSplit(n_splits=n_splits)
-        season_indices = np.arange(len(seasons))
-        
-        for fold, (train_idx, test_idx) in enumerate(tscv.split(season_indices)):
-            train_seasons = [seasons[i] for i in train_idx]
-            test_seasons = [seasons[i] for i in test_idx]
+
+        # Choose CV strategy based on available seasons
+        if len(seasons) >= 3:
+            # K-fold cross-validation across seasons
+            n_splits = min(k, len(seasons) - 1)  # Ensure we don't exceed available seasons
+            n_splits = max(2, n_splits)  # Ensure at least 2 splits
+            tscv = TimeSeriesSplit(n_splits=n_splits)
+            season_indices = np.arange(len(seasons))
+
+            for fold, (train_idx, test_idx) in enumerate(tscv.split(season_indices)):
+                train_seasons = [seasons[i] for i in train_idx]
+                test_seasons = [seasons[i] for i in test_idx]
+
+                logger.info(f"Fold {fold + 1}: Train on {train_seasons}, Test on {test_seasons}")
+
+                # Split data
+                train_data = features_df[features_df['season'].isin(train_seasons)]
+                test_data = features_df[features_df['season'].isin(test_seasons)]
+
+                if train_data.empty or test_data.empty:
+                    continue
+                
+                # Prepare features and targets
+                X_train = train_data[available_features].fillna(0)
+                X_test = test_data[available_features].fillna(0)
+                
+                y_rush_train = train_data['rushing_yards']
+                y_rush_test = test_data['rushing_yards']
+                y_rec_train = train_data['receiving_yards']
+                y_rec_test = test_data['receiving_yards']
+
+                # Train models
+                rush_model = self.create_ensemble_model()
+                rec_model = self.create_ensemble_model()
+
+                rush_model.fit(X_train, y_rush_train)
+                rec_model.fit(X_train, y_rec_train)
+
+                # Make predictions
+                rush_pred = rush_model.predict(X_test)
+                rec_pred = rec_model.predict(X_test)
+
+                # Calculate metrics
+                rush_metrics = {
+                    'mae': mean_absolute_error(y_rush_test, rush_pred),
+                    'rmse': np.sqrt(mean_squared_error(y_rush_test, rush_pred)),
+                    'r2': r2_score(y_rush_test, rush_pred)
+                }
+
+                rec_metrics = {
+                    'mae': mean_absolute_error(y_rec_test, rec_pred),
+                    'rmse': np.sqrt(mean_squared_error(y_rec_test, rec_pred)),
+                    'r2': r2_score(y_rec_test, rec_pred)
+                }
+
+                result = {
+                    'fold': fold + 1,
+                    'train_seasons': train_seasons,
+                    'test_seasons': test_seasons,
+                    'train_samples': len(train_data),
+                    'test_samples': len(test_data),
+                    'rushing_metrics': rush_metrics,
+                    'receiving_metrics': rec_metrics,
+                    'meets_target': rush_metrics['mae'] <= self.target_mae
+                }
+
+                results.append(result)
+
+                logger.info(f"Fold {fold + 1} Results:")
+                logger.info(f"  Rushing MAE: {rush_metrics['mae']:.3f} (Target: ≤{self.target_mae})")
+                logger.info(f"  Receiving MAE: {rec_metrics['mae']:.3f}")
+        else:
+            # Fallback: single-season data — do row-wise time series CV
+            logger.info("Not enough seasons for fold validation; using row-wise TimeSeriesSplit")
+            # Ensure chronological ordering
+            order_cols = [c for c in ['season', 'week', 'player_id'] if c in features_df.columns]
+            if order_cols:
+                features_df = features_df.sort_values(order_cols).reset_index(drop=True)
+            # Use conservative splits based on data size
+            n_splits = min(k, 3) if len(features_df) > 100 else 2
+            if n_splits < 2:
+                logger.error("Not enough samples to perform time series split")
+                return []
+            tscv = TimeSeriesSplit(n_splits=n_splits)
+
+            for fold, (train_idx, test_idx) in enumerate(tscv.split(features_df)):
+                train_data = features_df.iloc[train_idx]
+                test_data = features_df.iloc[test_idx]
+
+                X_train = train_data[available_features].fillna(0)
+                X_test = test_data[available_features].fillna(0)
+
+                y_rush_train = train_data['rushing_yards']
+                y_rush_test = test_data['rushing_yards']
+                y_rec_train = train_data['receiving_yards']
+                y_rec_test = test_data['receiving_yards']
+
+                rush_model = self.create_ensemble_model()
+                rec_model = self.create_ensemble_model()
+                rush_model.fit(X_train, y_rush_train)
+                rec_model.fit(X_train, y_rec_train)
+
+                rush_pred = rush_model.predict(X_test)
+                rec_pred = rec_model.predict(X_test)
+
+                rush_metrics = {
+                    'mae': mean_absolute_error(y_rush_test, rush_pred),
+                    'rmse': np.sqrt(mean_squared_error(y_rush_test, rush_pred)),
+                    'r2': r2_score(y_rush_test, rush_pred)
+                }
+                rec_metrics = {
+                    'mae': mean_absolute_error(y_rec_test, rec_pred),
+                    'rmse': np.sqrt(mean_squared_error(y_rec_test, rec_pred)),
+                    'r2': r2_score(y_rec_test, rec_pred)
+                }
+
+                result = {
+                    'fold': fold + 1,
+                    'train_seasons': list(sorted(train_data['season'].unique())),
+                    'test_seasons': list(sorted(test_data['season'].unique())),
+                    'train_samples': len(train_data),
+                    'test_samples': len(test_data),
+                    'rushing_metrics': rush_metrics,
+                    'receiving_metrics': rec_metrics,
+                    'meets_target': rush_metrics['mae'] <= self.target_mae
+                }
+                results.append(result)
+                logger.info(f"Fold {fold + 1} Results (row-wise):")
+                logger.info(f"  Rushing MAE: {rush_metrics['mae']:.3f} (Target: ≤{self.target_mae})")
+                logger.info(f"  Receiving MAE: {rec_metrics['mae']:.3f}")
             
-            logger.info(f"Fold {fold + 1}: Train on {train_seasons}, Test on {test_seasons}")
-            
-            # Split data
-            train_data = features_df[features_df['season'].isin(train_seasons)]
-            test_data = features_df[features_df['season'].isin(test_seasons)]
-            
-            if train_data.empty or test_data.empty:
-                continue
-            
-            # Prepare features and targets
-            X_train = train_data[available_features].fillna(0)
-            X_test = test_data[available_features].fillna(0)
-            
-            y_rush_train = train_data['rushing_yards']
-            y_rush_test = test_data['rushing_yards']
-            y_rec_train = train_data['receiving_yards']
-            y_rec_test = test_data['receiving_yards']
-            
-            # Train models
-            rush_model = self.create_ensemble_model()
-            rec_model = self.create_ensemble_model()
-            
-            rush_model.fit(X_train, y_rush_train)
-            rec_model.fit(X_train, y_rec_train)
-            
-            # Make predictions
-            rush_pred = rush_model.predict(X_test)
-            rec_pred = rec_model.predict(X_test)
-            
-            # Calculate metrics
-            rush_metrics = {
-                'mae': mean_absolute_error(y_rush_test, rush_pred),
-                'rmse': np.sqrt(mean_squared_error(y_rush_test, rush_pred)),
-                'r2': r2_score(y_rush_test, rush_pred)
-            }
-            
-            rec_metrics = {
-                'mae': mean_absolute_error(y_rec_test, rec_pred),
-                'rmse': np.sqrt(mean_squared_error(y_rec_test, rec_pred)),
-                'r2': r2_score(y_rec_test, rec_pred)
-            }
-            
-            result = {
-                'fold': fold + 1,
-                'train_seasons': train_seasons,
-                'test_seasons': test_seasons,
-                'train_samples': len(train_data),
-                'test_samples': len(test_data),
-                'rushing_metrics': rush_metrics,
-                'receiving_metrics': rec_metrics,
-                'meets_target': rush_metrics['mae'] <= self.target_mae
-            }
-            
-            results.append(result)
-            
-            logger.info(f"Fold {fold + 1} Results:")
-            logger.info(f"  Rushing MAE: {rush_metrics['mae']:.3f} (Target: ≤{self.target_mae})")
-            logger.info(f"  Receiving MAE: {rec_metrics['mae']:.3f}")
         
         self.results = results
         return results

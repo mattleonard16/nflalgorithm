@@ -1,0 +1,330 @@
+{
+  "created_at": "2025-10-31T18:45:04.105157+00:00",
+  "elapsed": 0.202575,
+  "encoding": "utf-8",
+  "expires": "2025-10-31T19:15:04.105050+00:00",
+  "headers": {
+    "Apigw-Requestid": "TU2DjhsmoAMEPug=",
+    "Connection": "keep-alive",
+    "Content-Length": "631",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Fri, 31 Oct 2025 18:45:04 GMT",
+    "X-Requests-Last": "1",
+    "X-Requests-Remaining": "386",
+    "X-Requests-Used": "114",
+    "content-encoding": "gzip",
+    "vary": "Accept-Encoding"
+  },
+  "reason": "OK",
+  "request": {
+    "body": "",
+    "headers": {
+      "Accept": "*/*",
+      "Accept-Encoding": "gzip, deflate",
+      "Connection": "keep-alive",
+      "User-Agent": "python-requests/2.32.4"
+    },
+    "method": "GET",
+    "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/6dd3b8a705ed0db85d59fa19b9062cc8/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us"
+  },
+  "status_code": 200,
+  "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/6dd3b8a705ed0db85d59fa19b9062cc8/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us",
+  "_decoded_content": {
+    "id": "6dd3b8a705ed0db85d59fa19b9062cc8",
+    "sport_key": "americanfootball_nfl",
+    "sport_title": "NFL",
+    "commence_time": "2025-11-02T18:00:00Z",
+    "home_team": "New England Patriots",
+    "away_team": "Atlanta Falcons",
+    "bookmakers": [
+      {
+        "key": "draftkings",
+        "title": "DraftKings",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:01Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Bijan Robinson",
+                "price": -111,
+                "point": 62.5
+              },
+              {
+                "name": "Under",
+                "description": "Bijan Robinson",
+                "price": -113,
+                "point": 62.5
+              },
+              {
+                "name": "Over",
+                "description": "Drake Maye",
+                "price": -112,
+                "point": 30.5
+              },
+              {
+                "name": "Under",
+                "description": "Drake Maye",
+                "price": -112,
+                "point": 30.5
+              },
+              {
+                "name": "Over",
+                "description": "Tyler Allgeier",
+                "price": -114,
+                "point": 22.5
+              },
+              {
+                "name": "Under",
+                "description": "Tyler Allgeier",
+                "price": -110,
+                "point": 22.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "fanduel",
+        "title": "FanDuel",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:44Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Bijan Robinson",
+                "price": -114,
+                "point": 63.5
+              },
+              {
+                "name": "Under",
+                "description": "Bijan Robinson",
+                "price": -114,
+                "point": 63.5
+              },
+              {
+                "name": "Over",
+                "description": "Drake Maye",
+                "price": -114,
+                "point": 30.5
+              },
+              {
+                "name": "Under",
+                "description": "Drake Maye",
+                "price": -114,
+                "point": 30.5
+              },
+              {
+                "name": "Over",
+                "description": "TreVeyon Henderson",
+                "price": -114,
+                "point": 55.5
+              },
+              {
+                "name": "Under",
+                "description": "TreVeyon Henderson",
+                "price": -114,
+                "point": 55.5
+              },
+              {
+                "name": "Over",
+                "description": "Tyler Allgeier",
+                "price": -114,
+                "point": 24.5
+              },
+              {
+                "name": "Under",
+                "description": "Tyler Allgeier",
+                "price": -114,
+                "point": 24.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betonlineag",
+        "title": "BetOnline.ag",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:46Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Tyler Allgeier",
+                "price": -114,
+                "point": 24.5
+              },
+              {
+                "name": "Under",
+                "description": "Tyler Allgeier",
+                "price": -114,
+                "point": 24.5
+              },
+              {
+                "name": "Over",
+                "description": "Bijan Robinson",
+                "price": -114,
+                "point": 63.5
+              },
+              {
+                "name": "Under",
+                "description": "Bijan Robinson",
+                "price": -114,
+                "point": 63.5
+              },
+              {
+                "name": "Over",
+                "description": "Drake Maye",
+                "price": -114,
+                "point": 30.5
+              },
+              {
+                "name": "Under",
+                "description": "Drake Maye",
+                "price": -114,
+                "point": 30.5
+              },
+              {
+                "name": "Over",
+                "description": "TreVeyon Henderson",
+                "price": -115,
+                "point": 56.5
+              },
+              {
+                "name": "Under",
+                "description": "TreVeyon Henderson",
+                "price": -112,
+                "point": 56.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betrivers",
+        "title": "BetRivers",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:09Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Bijan Robinson",
+                "price": -117,
+                "point": 65.5
+              },
+              {
+                "name": "Under",
+                "description": "Bijan Robinson",
+                "price": -114,
+                "point": 65.5
+              },
+              {
+                "name": "Over",
+                "description": "Tyler Allgeier",
+                "price": -118,
+                "point": 23.5
+              },
+              {
+                "name": "Under",
+                "description": "Tyler Allgeier",
+                "price": -113,
+                "point": 23.5
+              },
+              {
+                "name": "Over",
+                "description": "Drake Maye",
+                "price": -120,
+                "point": 30.5
+              },
+              {
+                "name": "Under",
+                "description": "Drake Maye",
+                "price": -112,
+                "point": 30.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betmgm",
+        "title": "BetMGM",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:12Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Tyler Allgeier",
+                "price": -118,
+                "point": 25.5
+              },
+              {
+                "name": "Under",
+                "description": "Tyler Allgeier",
+                "price": -115,
+                "point": 25.5
+              },
+              {
+                "name": "Over",
+                "description": "Drake Maye",
+                "price": -115,
+                "point": 29.5
+              },
+              {
+                "name": "Under",
+                "description": "Drake Maye",
+                "price": -115,
+                "point": 29.5
+              },
+              {
+                "name": "Over",
+                "description": "Bijan Robinson",
+                "price": -115,
+                "point": 65.5
+              },
+              {
+                "name": "Under",
+                "description": "Bijan Robinson",
+                "price": -115,
+                "point": 65.5
+              },
+              {
+                "name": "Over",
+                "description": "TreVeyon Henderson",
+                "price": -110,
+                "point": 55.5
+              },
+              {
+                "name": "Under",
+                "description": "TreVeyon Henderson",
+                "price": -118,
+                "point": 55.5
+              },
+              {
+                "name": "Over",
+                "description": "Michael Penix Jr.",
+                "price": -105,
+                "point": 5.5
+              },
+              {
+                "name": "Under",
+                "description": "Michael Penix Jr.",
+                "price": -125,
+                "point": 5.5
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

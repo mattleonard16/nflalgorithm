@@ -25,6 +25,9 @@ validate_migration.py
 
 # Database files
 *.db
+nfl_data.db
+nfl_prop_lines.db
+optuna.db
 
 # Large debug files
 debug_page.html

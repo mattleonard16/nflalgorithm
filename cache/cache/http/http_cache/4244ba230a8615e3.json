@@ -1,0 +1,186 @@
+{
+  "created_at": "2025-10-31T01:54:39.019849+00:00",
+  "elapsed": 0.127702,
+  "encoding": "utf-8",
+  "expires": "2025-10-31T02:24:39.019800+00:00",
+  "headers": {
+    "Apigw-Requestid": "TSiC5jx0oAMEZfg=",
+    "Connection": "keep-alive",
+    "Content-Length": "460",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Fri, 31 Oct 2025 01:54:38 GMT",
+    "X-Requests-Last": "1",
+    "X-Requests-Remaining": "425",
+    "X-Requests-Used": "75",
+    "content-encoding": "gzip",
+    "vary": "Accept-Encoding"
+  },
+  "reason": "OK",
+  "request": {
+    "body": "",
+    "headers": {
+      "Accept": "*/*",
+      "Accept-Encoding": "gzip, deflate",
+      "Connection": "keep-alive",
+      "User-Agent": "python-requests/2.32.3"
+    },
+    "method": "GET",
+    "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/677dbbb6ad96fc5f5b36bb20b43139dd/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_pass_yds&oddsFormat=american&regions=us"
+  },
+  "status_code": 200,
+  "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/677dbbb6ad96fc5f5b36bb20b43139dd/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_pass_yds&oddsFormat=american&regions=us",
+  "_decoded_content": {
+    "id": "677dbbb6ad96fc5f5b36bb20b43139dd",
+    "sport_key": "americanfootball_nfl",
+    "sport_title": "NFL",
+    "commence_time": "2025-10-31T00:16:07Z",
+    "home_team": "Miami Dolphins",
+    "away_team": "Baltimore Ravens",
+    "bookmakers": [
+      {
+        "key": "draftkings",
+        "title": "DraftKings",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T01:54:12Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Tua Tagovailoa",
+                "price": -108,
+                "point": 272.5
+              },
+              {
+                "name": "Under",
+                "description": "Tua Tagovailoa",
+                "price": -112,
+                "point": 272.5
+              },
+              {
+                "name": "Over",
+                "description": "Lamar Jackson",
+                "price": -112,
+                "point": 187.5
+              },
+              {
+                "name": "Under",
+                "description": "Lamar Jackson",
+                "price": -108,
+                "point": 187.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "fanduel",
+        "title": "FanDuel",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T01:54:12Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Tua Tagovailoa",
+                "price": -112,
+                "point": 276.5
+              },
+              {
+                "name": "Under",
+                "description": "Tua Tagovailoa",
+                "price": -118,
+                "point": 276.5
+              },
+              {
+                "name": "Over",
+                "description": "Lamar Jackson",
+                "price": -118,
+                "point": 189.5
+              },
+              {
+                "name": "Under",
+                "description": "Lamar Jackson",
+                "price": -112,
+                "point": 189.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betrivers",
+        "title": "BetRivers",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T01:54:19Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Tua Tagovailoa",
+                "price": -124,
+                "point": 276.5
+              },
+              {
+                "name": "Under",
+                "description": "Tua Tagovailoa",
+                "price": -121,
+                "point": 276.5
+              },
+              {
+                "name": "Over",
+                "description": "Lamar Jackson",
+                "price": -121,
+                "point": 183.5
+              },
+              {
+                "name": "Under",
+                "description": "Lamar Jackson",
+                "price": -124,
+                "point": 183.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "bovada",
+        "title": "Bovada",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T01:54:27Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Lamar Jackson",
+                "price": -120,
+                "point": 187.5
+              },
+              {
+                "name": "Under",
+                "description": "Lamar Jackson",
+                "price": -110,
+                "point": 187.5
+              },
+              {
+                "name": "Over",
+                "description": "Tua Tagovailoa",
+                "price": -115,
+                "point": 272.5
+              },
+              {
+                "name": "Under",
+                "description": "Tua Tagovailoa",
+                "price": -115,
+                "point": 272.5
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

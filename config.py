@@ -5,6 +5,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # If python-dotenv not installed, try to load manually
+    env_path = Path(__file__).parent / '.env'
+    if env_path.exists():
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ.setdefault(key.strip(), value.strip())
+
 @dataclass
 class DatabaseConfig:
     path: str = "nfl_data.db"
@@ -18,9 +33,9 @@ class CacheConfig:
     http_cache_dir: str = "cache/http"
     http_cache_expire_after: int = 1800  # 30 minutes default
     
-    # Database Cache TTL (seconds)
-    odds_cache_ttl_season: int = 1800      # 30 minutes during season
-    odds_cache_ttl_offseason: int = 21600  # 6 hours off-season
+    # Database Cache TTL (seconds) - AGGRESSIVE CACHING to preserve API credits
+    odds_cache_ttl_season: int = 172800    # 48 hours during season (preserve API credits)
+    odds_cache_ttl_offseason: int = 604800  # 7 days off-season
     weather_cache_ttl: int = 3600          # 60 minutes
     weather_cache_ttl_dome: int = 21600    # 360 minutes for dome stadiums
     player_cache_ttl: int = 14400          # 4 hours
@@ -72,10 +87,22 @@ class BettingConfig:
     max_kelly_fraction: float = 0.25
     min_expected_roi: float = 0.12
     sportsbooks: List[str] = None
+    max_bankroll_fraction: float = 0.02
+    kelly_fraction_default: float = 0.5
+    daily_loss_stop: float = 0.06
+    per_market_unit_cap: float = 0.75
     
     def __post_init__(self):
         if self.sportsbooks is None:
             self.sportsbooks = ["DraftKings", "FanDuel", "BetMGM", "Caesars"]
+
+@dataclass
+class FreshnessConfig:
+    odds_minutes: int = 2
+    injuries_minutes: int = 10
+    weather_minutes: int = 30
+    player_stats_minutes: int = 60
+    projections_minutes: int = 30
 
 @dataclass
 class PipelineConfig:
@@ -93,6 +120,7 @@ class Config:
     model: ModelConfig = field(default_factory=ModelConfig)
     betting: BettingConfig = field(default_factory=BettingConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
+    freshness: FreshnessConfig = field(default_factory=FreshnessConfig)
     
     # Paths
     project_root: Path = Path(__file__).parent

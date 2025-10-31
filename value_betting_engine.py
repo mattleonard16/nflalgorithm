@@ -2,20 +2,20 @@
 Enhanced value betting engine with multi-sportsbook comparison and CLV tracking.
 """
 
+import json
+import math
 import sqlite3
 import logging
-import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, asdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import uuid
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Dict, List, Optional
 
-import pandas as pd
 import numpy as np
-from scipy import stats
+import pandas as pd
 
 from config import config
+from prop_integration import join_odds_projections
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,6 +26,14 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+
+def _american_to_decimal(odds: int) -> float:
+    """Convert American odds to decimal odds."""
+    if odds >= 0:
+        return (odds / 100) + 1
+    return (100 / abs(odds)) + 1
+
 
 @dataclass
 class ValueBet:
@@ -67,36 +75,182 @@ class CLVResult:
     market_move_direction: str
     sharp_money_indicator: bool
 
+
+def prob_over(mu: float, sigma: float, line: float) -> float:
+    """Probability the true result clears the posted line under normal assumption."""
+    if sigma <= 0:
+        return float(mu > line)
+    z_score = (mu - line) / sigma
+    return float(0.5 * (1 + math.erf(z_score / math.sqrt(2))))
+
+
+def kelly_fraction(p: float, price: int) -> float:
+    """Full Kelly fraction without bankroll caps."""
+    decimal_odds = _american_to_decimal(price)
+    b = decimal_odds - 1
+    if b <= 0:
+        return 0.0
+    p = min(max(p, 0.0), 1.0)
+    q = 1 - p
+    fraction = (b * p - q) / b
+    return max(0.0, fraction)
+
+
+def rank_weekly_value(
+    season: int,
+    week: int,
+    min_edge: float,
+    place: bool = False,
+    bankroll: float = 1000.0
+) -> pd.DataFrame:
+    """Rank weekly value opportunities and optionally persist bets."""
+
+    engine = ValueBettingEngine()
+    joined = join_odds_projections(season, week)
+    if joined.empty:
+        logger.warning(
+            "rank_weekly_value: no data to rank for season=%s week=%s",
+            season,
+            week
+        )
+        return pd.DataFrame()
+
+    df = joined.copy()
+
+    # Ensure season and week are present and not null
+    if 'season' not in df.columns or 'week' not in df.columns:
+        logger.error(
+            "rank_weekly_value: joined data missing season/week columns for season=%s week=%s",
+            season,
+            week
+        )
+        return pd.DataFrame()
+    
+    # Fill any missing season/week values
+    missing_season = df['season'].isna().sum()
+    missing_week = df['week'].isna().sum()
+    if missing_season > 0 or missing_week > 0:
+        logger.warning(
+            "rank_weekly_value: filling %d missing season and %d missing week values for season=%s week=%s",
+            missing_season,
+            missing_week,
+            season,
+            week
+        )
+    df['season'] = df['season'].fillna(season).astype(int)
+    df['week'] = df['week'].fillna(week).astype(int)
+
+    df['p_win'] = df.apply(lambda row: prob_over(row['mu'], row['sigma'], row['line']), axis=1)
+    df['decimal_odds'] = df['price'].apply(_american_to_decimal)
+    df['implied_prob'] = 1 / df['decimal_odds']
+    df['edge_percentage'] = df['p_win'] - df['implied_prob']
+    df['expected_roi'] = df['decimal_odds'] * df['p_win'] - 1
+    df['kelly_fraction'] = df.apply(
+        lambda row: min(
+            engine.calculate_fractional_kelly(row['p_win'], int(row['price'])),
+            engine.max_bankroll_fraction
+        ),
+        axis=1
+    )
+    df['stake'] = df['kelly_fraction'] * bankroll
+    df['recommendation'] = np.where(df['edge_percentage'] >= min_edge, 'BET', 'PASS')
+    df['generated_at'] = datetime.utcnow().isoformat()
+
+    if place:
+        bets = df[df['recommendation'] == 'BET']
+        if not bets.empty:
+            _persist_weekly_bets(engine, bets, bankroll)
+            logger.info(
+                "Placed %s weekly bets for season %s week %s",
+                len(bets),
+                season,
+                week
+            )
+
+    df = df.drop(columns=['decimal_odds', 'implied_prob'])
+
+    columns = [
+        'season', 'week', 'player_id', 'player_name', 'team', 'opponent', 'position', 'market',
+        'sportsbook', 'line', 'price', 'mu', 'sigma', 'p_win', 'edge_percentage', 'expected_roi',
+        'kelly_fraction', 'stake', 'recommendation', 'model_version', 'as_of', 'event_id'
+    ]
+
+    return df.reindex(columns=columns + ['generated_at']).sort_values(
+        ['edge_percentage', 'expected_roi'], ascending=False
+    ).reset_index(drop=True)
+
+
+def _persist_weekly_bets(engine: 'ValueBettingEngine', bets: pd.DataFrame, bankroll: float) -> None:
+    payload = bets.copy()
+    payload['bet_id'] = [str(uuid.uuid4()) for _ in range(len(payload))]
+    payload['placed_at'] = datetime.utcnow().isoformat()
+
+    sql = (
+        """
+        INSERT INTO bets_weekly (
+            bet_id, season, week, event_id, player_id, market, sportsbook, side, line, price,
+            p_win, kelly_fraction, stake, bankroll_before, placed_at, model_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(bet_id) DO NOTHING
+        """
+    )
+
+    tuples = []
+    for row in payload.itertuples():
+        tuples.append((
+            row.bet_id,
+            int(row.season),
+            int(row.week),
+            row.event_id,
+            row.player_id,
+            row.market,
+            row.sportsbook,
+            'OVER',
+            float(row.line),
+            int(row.price),
+            float(row.p_win),
+            float(row.kelly_fraction),
+            float(row.stake),
+            float(bankroll),
+            row.placed_at,
+            row.model_version
+        ))
+
+    with sqlite3.connect(engine.db_path) as conn:
+        conn.executemany(sql, tuples)
+        conn.commit()
+
 class ValueBettingEngine:
     """Enhanced value betting engine with professional features."""
-    
-    def __init__(self):
-        self.db_path = config.database.path
+
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = db_path or config.database.path
         self.min_edge = config.betting.min_edge_threshold
         self.min_confidence = config.betting.min_confidence
         self.max_kelly = config.betting.max_kelly_fraction
         self.min_roi = config.betting.min_expected_roi
+        self.max_bankroll_fraction = config.betting.max_bankroll_fraction
+        self.daily_loss_stop = config.betting.daily_loss_stop
+        self.per_market_unit_cap = config.betting.per_market_unit_cap
         
-    def calculate_fractional_kelly(self, win_prob: float, odds: int, fraction: float = 0.5) -> float:
+    def calculate_fractional_kelly(self, win_prob: float, odds: int, fraction: float | None = None) -> float:
         """Calculate fractional Kelly criterion for conservative betting."""
-        # Convert American odds to decimal
-        if odds > 0:
-            decimal_odds = (odds / 100) + 1
-        else:
-            decimal_odds = (100 / abs(odds)) + 1
-        
-        # Kelly formula: f = (bp - q) / b
+        fraction = fraction if fraction is not None else config.betting.kelly_fraction_default
+        decimal_odds = _american_to_decimal(odds)
         b = decimal_odds - 1
-        p = win_prob
+        p = max(0.0, min(1.0, win_prob))
         q = 1 - p
-        
         kelly_fraction = (b * p - q) / b
-        
-        # Apply fractional Kelly
+        if kelly_fraction <= 0:
+            return 0.0
         fractional_kelly = kelly_fraction * fraction
-        
-        # Cap at maximum
         return min(fractional_kelly, self.max_kelly)
+
+    def _fair_price_probability(self, projection: float, line: float, sigma: float) -> float:
+        if sigma <= 0:
+            return float(projection >= line)
+        z_score = (projection - line) / sigma
+        return float(0.5 * (1 + math.erf(z_score / math.sqrt(2))))
     
     def assess_correlation_risk(self, bets: List[ValueBet]) -> Dict[str, str]:
         """Assess correlation risk between potential bets."""
@@ -166,27 +320,90 @@ class ValueBettingEngine:
         return percentile
     
     def find_value_opportunities(self, predictions_df: pd.DataFrame) -> List[ValueBet]:
-        """Find value opportunities with breakout re-ranking."""
-        value_bets = super().find_value_opportunities(predictions_df)
-        
-        # Load player stats for breakout calc
-        conn = sqlite3.connect(self.db_path)
-        stats_df = pd.read_sql("SELECT * FROM player_stats_enhanced", conn)
-        conn.close()
-        
-        # Calculate breakout percentile for each
-        for bet in value_bets:
-            player_stats = stats_df[stats_df['player_id'] == bet.player_id].iloc[-1]
-            breakout_perc = self.calculate_breakout_percentile(player_stats)
-            
-            # Re-rank by breakout × edge
-            bet.edge_percentage *= breakout_perc
-        
-        # Sort by new adjusted edge
-        value_bets.sort(key=lambda b: b.edge_percentage, reverse=True)
-        
-        logger.info(f"Found {len(value_bets)} value opportunities after breakout re-ranking")
-        return value_bets
+        """Find value bets using EV, calibrated probability, and bankroll rules."""
+        if predictions_df is None or predictions_df.empty:
+            return []
+
+        required_columns = ['player_id', 'player_name', 'position', 'team']
+        for column in required_columns:
+            if column not in predictions_df.columns:
+                raise ValueError(f"Predictions missing required column: {column}")
+
+        bets: List[ValueBet] = []
+        stats_map = self._load_latest_player_stats()
+        for _, row in predictions_df.iterrows():
+            projection = float(row.get('projection', 0.0))
+            line = float(row.get('line', projection))
+            odds = int(row.get('odds', -110))
+            sigma = float(row.get('sigma', 5))
+            win_probability = self._fair_price_probability(projection, line, sigma)
+            kelly_fraction = self.calculate_fractional_kelly(win_probability, odds, fraction=config.betting.kelly_fraction_default)
+            fractional_kelly = min(kelly_fraction, self.max_bankroll_fraction)
+            expected_roi = self._calculate_expected_roi(win_probability, odds)
+
+            if expected_roi < self.min_roi or fractional_kelly <= 0:
+                continue
+
+            value_bet = ValueBet(
+                bet_id=str(uuid.uuid4()),
+                player_id=row['player_id'],
+                player_name=row['player_name'],
+                position=row['position'],
+                team=row['team'],
+                prop_type=row.get('market', 'unknown_market'),
+                sportsbook=row.get('sportsbook', 'Unknown'),
+                line=line,
+                best_line=line,
+                over_odds=odds,
+                under_odds=0,
+                model_prediction=projection,
+                prediction_lower=float(row.get('prediction_lower', projection - sigma)),
+                prediction_upper=float(row.get('prediction_upper', projection + sigma)),
+                model_confidence=float(win_probability),
+                edge_yards=float(projection - line),
+                edge_percentage=float(max(abs(projection - line) / max(line, 1e-6), 0)),
+                kelly_fraction=float(kelly_fraction),
+                fractional_kelly=float(fractional_kelly),
+                expected_roi=float(expected_roi),
+                risk_level='PENDING',
+                recommendation='OVER' if row['projection'] > row['line'] else 'UNDER',
+                bet_size_units=float(min(fractional_kelly * 100, self.per_market_unit_cap)),
+                correlation_risk='PENDING',
+                market_efficiency=0.0,
+                timestamp=datetime.now()
+            )
+
+            if stats_map:
+                player_row = stats_map.get(row['player_id'])
+                if player_row is not None:
+                    breakout_percentile = self.calculate_breakout_percentile(player_row)
+                    value_bet.edge_percentage *= breakout_percentile
+
+            bets.append(value_bet)
+
+        correlation_map = self.assess_correlation_risk(bets)
+        for bet in bets:
+            bet.correlation_risk = correlation_map.get(bet.bet_id, 'LOW')
+            bet.risk_level = self._assess_risk_level(bet.edge_percentage, bet.model_confidence, bet.kelly_fraction)
+        bets.sort(key=lambda bet: bet.edge_percentage, reverse=True)
+        return bets
+
+    def _load_latest_player_stats(self) -> Dict[str, pd.Series]:
+        try:
+            conn = sqlite3.connect(self.db_path)
+            query = """
+                SELECT *
+                FROM player_stats_enhanced
+                ORDER BY player_id, season DESC, week DESC
+            """
+            df = pd.read_sql_query(query, conn)
+            conn.close()
+            if df.empty:
+                return {}
+            latest = df.sort_values(['player_id', 'season', 'week']).groupby('player_id').tail(1)
+            return {row['player_id']: row for _, row in latest.iterrows()}
+        except Exception:
+            return {}
     
     def _analyze_single_opportunity(self, prediction: pd.Series, line_data: pd.Series) -> Optional[ValueBet]:
         """Analyze a single betting opportunity."""

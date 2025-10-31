@@ -1,0 +1,474 @@
+{
+  "created_at": "2025-10-31T18:45:14.058206+00:00",
+  "elapsed": 0.195572,
+  "encoding": "utf-8",
+  "expires": "2025-10-31T19:15:14.058168+00:00",
+  "headers": {
+    "Apigw-Requestid": "TU2FHhs3oAMEZ9g=",
+    "Connection": "keep-alive",
+    "Content-Length": "743",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Fri, 31 Oct 2025 18:45:13 GMT",
+    "X-Requests-Last": "1",
+    "X-Requests-Remaining": "378",
+    "X-Requests-Used": "122",
+    "content-encoding": "gzip",
+    "vary": "Accept-Encoding"
+  },
+  "reason": "OK",
+  "request": {
+    "body": "",
+    "headers": {
+      "Accept": "*/*",
+      "Accept-Encoding": "gzip, deflate",
+      "Connection": "keep-alive",
+      "User-Agent": "python-requests/2.32.4"
+    },
+    "method": "GET",
+    "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/cf95657d78ab3e515203df1d19c3b0c2/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us"
+  },
+  "status_code": 200,
+  "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/cf95657d78ab3e515203df1d19c3b0c2/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_rush_yds&oddsFormat=american&regions=us",
+  "_decoded_content": {
+    "id": "cf95657d78ab3e515203df1d19c3b0c2",
+    "sport_key": "americanfootball_nfl",
+    "sport_title": "NFL",
+    "commence_time": "2025-11-02T18:00:00Z",
+    "home_team": "Detroit Lions",
+    "away_team": "Minnesota Vikings",
+    "bookmakers": [
+      {
+        "key": "draftkings",
+        "title": "DraftKings",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:57Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Jahmyr Gibbs",
+                "price": -112,
+                "point": 72.5
+              },
+              {
+                "name": "Under",
+                "description": "Jahmyr Gibbs",
+                "price": -112,
+                "point": 72.5
+              },
+              {
+                "name": "Over",
+                "description": "David Montgomery",
+                "price": -114,
+                "point": 48.5
+              },
+              {
+                "name": "Under",
+                "description": "David Montgomery",
+                "price": -110,
+                "point": 48.5
+              },
+              {
+                "name": "Over",
+                "description": "Jordan Mason",
+                "price": -109,
+                "point": 38.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Mason",
+                "price": -115,
+                "point": 38.5
+              },
+              {
+                "name": "Over",
+                "description": "Aaron Jones",
+                "price": -110,
+                "point": 32.5
+              },
+              {
+                "name": "Under",
+                "description": "Aaron Jones",
+                "price": -115,
+                "point": 32.5
+              },
+              {
+                "name": "Over",
+                "description": "J.J. McCarthy",
+                "price": -109,
+                "point": 21.5
+              },
+              {
+                "name": "Under",
+                "description": "J.J. McCarthy",
+                "price": -115,
+                "point": 21.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betmgm",
+        "title": "BetMGM",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:22Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Jordan Mason",
+                "price": -115,
+                "point": 36.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Mason",
+                "price": -115,
+                "point": 36.5
+              },
+              {
+                "name": "Over",
+                "description": "Aaron Jones",
+                "price": -110,
+                "point": 32.5
+              },
+              {
+                "name": "Under",
+                "description": "Aaron Jones",
+                "price": -118,
+                "point": 32.5
+              },
+              {
+                "name": "Over",
+                "description": "Jahmyr Gibbs",
+                "price": -118,
+                "point": 72.5
+              },
+              {
+                "name": "Under",
+                "description": "Jahmyr Gibbs",
+                "price": -110,
+                "point": 72.5
+              },
+              {
+                "name": "Over",
+                "description": "David Montgomery",
+                "price": -110,
+                "point": 48.5
+              },
+              {
+                "name": "Under",
+                "description": "David Montgomery",
+                "price": -118,
+                "point": 48.5
+              },
+              {
+                "name": "Over",
+                "description": "J.J. McCarthy",
+                "price": -115,
+                "point": 20.5
+              },
+              {
+                "name": "Under",
+                "description": "J.J. McCarthy",
+                "price": -115,
+                "point": 20.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "fanduel",
+        "title": "FanDuel",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:56Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "J.J. McCarthy",
+                "price": -114,
+                "point": 21.5
+              },
+              {
+                "name": "Under",
+                "description": "J.J. McCarthy",
+                "price": -114,
+                "point": 21.5
+              },
+              {
+                "name": "Over",
+                "description": "David Montgomery",
+                "price": -114,
+                "point": 49.5
+              },
+              {
+                "name": "Under",
+                "description": "David Montgomery",
+                "price": -114,
+                "point": 49.5
+              },
+              {
+                "name": "Over",
+                "description": "Jordan Mason",
+                "price": -114,
+                "point": 37.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Mason",
+                "price": -114,
+                "point": 37.5
+              },
+              {
+                "name": "Over",
+                "description": "Aaron Jones",
+                "price": -114,
+                "point": 31.5
+              },
+              {
+                "name": "Under",
+                "description": "Aaron Jones",
+                "price": -114,
+                "point": 31.5
+              },
+              {
+                "name": "Over",
+                "description": "Jahmyr Gibbs",
+                "price": -114,
+                "point": 74.5
+              },
+              {
+                "name": "Under",
+                "description": "Jahmyr Gibbs",
+                "price": -114,
+                "point": 74.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betonlineag",
+        "title": "BetOnline.ag",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:30Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Aaron Jones",
+                "price": -111,
+                "point": 31.5
+              },
+              {
+                "name": "Under",
+                "description": "Aaron Jones",
+                "price": -116,
+                "point": 31.5
+              },
+              {
+                "name": "Over",
+                "description": "Jordan Mason",
+                "price": -114,
+                "point": 36.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Mason",
+                "price": -114,
+                "point": 36.5
+              },
+              {
+                "name": "Over",
+                "description": "David Montgomery",
+                "price": -116,
+                "point": 48.5
+              },
+              {
+                "name": "Under",
+                "description": "David Montgomery",
+                "price": -111,
+                "point": 48.5
+              },
+              {
+                "name": "Over",
+                "description": "Jahmyr Gibbs",
+                "price": -114,
+                "point": 74.5
+              },
+              {
+                "name": "Under",
+                "description": "Jahmyr Gibbs",
+                "price": -114,
+                "point": 74.5
+              },
+              {
+                "name": "Over",
+                "description": "J.J. McCarthy",
+                "price": -115,
+                "point": 21.5
+              },
+              {
+                "name": "Under",
+                "description": "J.J. McCarthy",
+                "price": -112,
+                "point": 21.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betrivers",
+        "title": "BetRivers",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:44:31Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Jahmyr Gibbs",
+                "price": -114,
+                "point": 73.5
+              },
+              {
+                "name": "Under",
+                "description": "Jahmyr Gibbs",
+                "price": -117,
+                "point": 73.5
+              },
+              {
+                "name": "Over",
+                "description": "Jordan Mason",
+                "price": -118,
+                "point": 36.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Mason",
+                "price": -113,
+                "point": 36.5
+              },
+              {
+                "name": "Over",
+                "description": "David Montgomery",
+                "price": -113,
+                "point": 49.5
+              },
+              {
+                "name": "Under",
+                "description": "David Montgomery",
+                "price": -118,
+                "point": 49.5
+              },
+              {
+                "name": "Over",
+                "description": "Aaron Jones",
+                "price": -114,
+                "point": 31.5
+              },
+              {
+                "name": "Under",
+                "description": "Aaron Jones",
+                "price": -117,
+                "point": 31.5
+              },
+              {
+                "name": "Over",
+                "description": "J.J. McCarthy",
+                "price": -120,
+                "point": 19.5
+              },
+              {
+                "name": "Under",
+                "description": "J.J. McCarthy",
+                "price": -112,
+                "point": 19.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "bovada",
+        "title": "Bovada",
+        "markets": [
+          {
+            "key": "player_rush_yds",
+            "last_update": "2025-10-31T18:45:01Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Aaron Jones",
+                "price": -110,
+                "point": 31.5
+              },
+              {
+                "name": "Under",
+                "description": "Aaron Jones",
+                "price": -120,
+                "point": 31.5
+              },
+              {
+                "name": "Over",
+                "description": "David Montgomery",
+                "price": -110,
+                "point": 46.5
+              },
+              {
+                "name": "Under",
+                "description": "David Montgomery",
+                "price": -120,
+                "point": 46.5
+              },
+              {
+                "name": "Over",
+                "description": "J.J. McCarthy",
+                "price": -115,
+                "point": 19.5
+              },
+              {
+                "name": "Under",
+                "description": "J.J. McCarthy",
+                "price": -115,
+                "point": 19.5
+              },
+              {
+                "name": "Over",
+                "description": "Jahmyr Gibbs",
+                "price": -145,
+                "point": 71.5
+              },
+              {
+                "name": "Under",
+                "description": "Jahmyr Gibbs",
+                "price": 110,
+                "point": 71.5
+              },
+              {
+                "name": "Over",
+                "description": "Jordan Mason",
+                "price": -105,
+                "point": 37.5
+              },
+              {
+                "name": "Under",
+                "description": "Jordan Mason",
+                "price": -125,
+                "point": 37.5
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

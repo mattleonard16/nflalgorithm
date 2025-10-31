@@ -1,0 +1,222 @@
+{
+  "created_at": "2025-10-31T18:45:22.646732+00:00",
+  "elapsed": 0.132454,
+  "encoding": "utf-8",
+  "expires": "2025-10-31T19:15:22.646644+00:00",
+  "headers": {
+    "Apigw-Requestid": "TU2Geg8zoAMEZ2w=",
+    "Connection": "keep-alive",
+    "Content-Length": "514",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Fri, 31 Oct 2025 18:45:22 GMT",
+    "X-Requests-Last": "1",
+    "X-Requests-Remaining": "373",
+    "X-Requests-Used": "127",
+    "content-encoding": "gzip",
+    "vary": "Accept-Encoding"
+  },
+  "reason": "OK",
+  "request": {
+    "body": "",
+    "headers": {
+      "Accept": "*/*",
+      "Accept-Encoding": "gzip, deflate",
+      "Connection": "keep-alive",
+      "User-Agent": "python-requests/2.32.4"
+    },
+    "method": "GET",
+    "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/b60025aea576e2e89ef7bc7303f847ec/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_pass_yds&oddsFormat=american&regions=us"
+  },
+  "status_code": 200,
+  "url": "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events/b60025aea576e2e89ef7bc7303f847ec/odds?apiKey=4d184f31ebdc045bab9f024375a51e44&dateFormat=iso&markets=player_pass_yds&oddsFormat=american&regions=us",
+  "_decoded_content": {
+    "id": "b60025aea576e2e89ef7bc7303f847ec",
+    "sport_key": "americanfootball_nfl",
+    "sport_title": "NFL",
+    "commence_time": "2025-11-02T18:00:00Z",
+    "home_team": "Tennessee Titans",
+    "away_team": "Los Angeles Chargers",
+    "bookmakers": [
+      {
+        "key": "draftkings",
+        "title": "DraftKings",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:45:18Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Justin Herbert",
+                "price": -111,
+                "point": 246.5
+              },
+              {
+                "name": "Under",
+                "description": "Justin Herbert",
+                "price": -113,
+                "point": 246.5
+              },
+              {
+                "name": "Over",
+                "description": "Cameron Ward",
+                "price": -112,
+                "point": 208.5
+              },
+              {
+                "name": "Under",
+                "description": "Cameron Ward",
+                "price": -112,
+                "point": 208.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "fanduel",
+        "title": "FanDuel",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:45:10Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Cam Ward",
+                "price": -114,
+                "point": 205.5
+              },
+              {
+                "name": "Under",
+                "description": "Cam Ward",
+                "price": -114,
+                "point": 205.5
+              },
+              {
+                "name": "Over",
+                "description": "Justin Herbert",
+                "price": -114,
+                "point": 242.5
+              },
+              {
+                "name": "Under",
+                "description": "Justin Herbert",
+                "price": -114,
+                "point": 242.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betonlineag",
+        "title": "BetOnline.ag",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:45:08Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Cameron Ward",
+                "price": -115,
+                "point": 206.5
+              },
+              {
+                "name": "Under",
+                "description": "Cameron Ward",
+                "price": -112,
+                "point": 206.5
+              },
+              {
+                "name": "Over",
+                "description": "Justin Herbert",
+                "price": -116,
+                "point": 246.5
+              },
+              {
+                "name": "Under",
+                "description": "Justin Herbert",
+                "price": -111,
+                "point": 246.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betrivers",
+        "title": "BetRivers",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:44:42Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Cameron Ward",
+                "price": -117,
+                "point": 203.5
+              },
+              {
+                "name": "Under",
+                "description": "Cameron Ward",
+                "price": -114,
+                "point": 203.5
+              },
+              {
+                "name": "Over",
+                "description": "Justin Herbert",
+                "price": -115,
+                "point": 242.5
+              },
+              {
+                "name": "Under",
+                "description": "Justin Herbert",
+                "price": -115,
+                "point": 242.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betmgm",
+        "title": "BetMGM",
+        "markets": [
+          {
+            "key": "player_pass_yds",
+            "last_update": "2025-10-31T18:44:14Z",
+            "outcomes": [
+              {
+                "name": "Over",
+                "description": "Justin Herbert",
+                "price": -115,
+                "point": 246.5
+              },
+              {
+                "name": "Under",
+                "description": "Justin Herbert",
+                "price": -115,
+                "point": 246.5
+              },
+              {
+                "name": "Over",
+                "description": "Cam Ward",
+                "price": -115,
+                "point": 206.5
+              },
+              {
+                "name": "Under",
+                "description": "Cam Ward",
+                "price": -115,
+                "point": 206.5
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
