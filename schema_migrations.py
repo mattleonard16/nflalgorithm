@@ -130,6 +130,74 @@ class MigrationManager:
                 PRIMARY KEY (player_id_canonical, player_id_odds)
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS games (
+                game_id TEXT PRIMARY KEY,
+                season INTEGER NOT NULL,
+                week INTEGER NOT NULL,
+                home_team TEXT NOT NULL,
+                away_team TEXT NOT NULL,
+                kickoff_utc TEXT,
+                game_date DATE NOT NULL,
+                venue TEXT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS player_stats_enhanced (
+                player_id TEXT NOT NULL,
+                season INTEGER NOT NULL,
+                week INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                team TEXT NOT NULL,
+                position TEXT NOT NULL,
+                age INTEGER NOT NULL,
+                games_played INTEGER NOT NULL DEFAULT 0,
+                snap_count INTEGER NOT NULL DEFAULT 0,
+                snap_percentage REAL NOT NULL DEFAULT 0,
+                rushing_yards REAL NOT NULL DEFAULT 0,
+                rushing_attempts REAL NOT NULL DEFAULT 0,
+                receiving_yards REAL NOT NULL DEFAULT 0,
+                receptions REAL NOT NULL DEFAULT 0,
+                targets REAL NOT NULL DEFAULT 0,
+                red_zone_touches REAL NOT NULL DEFAULT 0,
+                target_share REAL NOT NULL DEFAULT 0,
+                air_yards REAL NOT NULL DEFAULT 0,
+                yac_yards REAL NOT NULL DEFAULT 0,
+                game_script REAL NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (player_id, season, week)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS weather_data (
+                game_id TEXT PRIMARY KEY,
+                home_team TEXT NOT NULL,
+                away_team TEXT NOT NULL,
+                game_date DATE NOT NULL,
+                temperature REAL NOT NULL,
+                wind_speed REAL NOT NULL,
+                precipitation REAL NOT NULL,
+                humidity REAL NOT NULL,
+                is_dome INTEGER NOT NULL,
+                weather_description TEXT,
+                last_updated DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS injury_data (
+                player_id TEXT NOT NULL,
+                season INTEGER NOT NULL,
+                week INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                practice_participation TEXT NOT NULL,
+                injury_type TEXT,
+                days_since_injury INTEGER NOT NULL DEFAULT 0,
+                last_updated DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (player_id, season, week)
+            )
+            """,
         )
 
     def _ensure_columns(self, cursor: sqlite3.Cursor) -> None:
@@ -156,6 +224,15 @@ class MigrationManager:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_player_mappings_canonical ON player_mappings(player_id_canonical)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_player_stats_enhanced_lookup ON player_stats_enhanced(season, week, player_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_injury_data_lookup ON injury_data(season, week, player_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_games_lookup ON games(season, week)"
         )
 
     @staticmethod
