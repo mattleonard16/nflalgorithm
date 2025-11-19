@@ -17,15 +17,14 @@ from schema_migrations import MigrationManager
 @pytest.fixture
 def temp_db_with_data():
     """Create a temporary database with test data."""
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    tmp_path = tmp.name
-    
+    # Use isolated temporary database file
+    tmp = Path(tempfile.mkstemp(suffix=".db")[1])
+
     # Setup schema
-    MigrationManager(tmp_path).run()
+    MigrationManager(tmp).run()
     
     # Insert test data that would trigger merge suffixes
-    with sqlite3.connect(tmp_path) as conn:
+    with sqlite3.connect(tmp) as conn:
         # Create player_stats_enhanced table (required by join_odds_projections)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS player_stats_enhanced (
@@ -77,15 +76,7 @@ def temp_db_with_data():
         
         conn.commit()
     
-    # Temporarily override config
-    original_path = config.database.path
-    config.database.path = tmp_path
-    
-    yield tmp_path
-    
-    # Cleanup
-    config.database.path = original_path
-    Path(tmp_path).unlink(missing_ok=True)
+    yield str(tmp)
 
 
 def test_join_odds_projections_handles_merge_suffixes(temp_db_with_data):

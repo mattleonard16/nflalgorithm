@@ -3,8 +3,8 @@ Professional data pipeline for NFL algorithm.
 Handles real-time data ingestion, feature engineering, and persistence.
 """
 
-import sqlite3
 import logging
+import sqlite3
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -18,6 +18,7 @@ import numpy as np
 
 from config import config
 from schema_migrations import MigrationManager
+from utils.db import column_exists, get_connection, get_table_columns
 from utils.player_id_utils import make_player_id
 
 GOLDEN_SEASON = 2024
@@ -77,9 +78,12 @@ class DataPipeline:
         
     def setup_enhanced_database(self) -> None:
         """Create or update all deterministic schema objects used by the pipeline."""
-        conn = self._connect()
-        try:
-            cursor = conn.cursor()
+        with get_connection() as conn:
+            # Handle both SQLite and Postgres connections
+            if hasattr(conn, 'cursor'):
+                cursor = conn.cursor()
+            else:
+                cursor = conn.execute() # Should not happen with standard DBAPI
 
             for ddl in self._schema_definitions():
                 cursor.execute(ddl)
@@ -87,32 +91,17 @@ class DataPipeline:
             self._ensure_player_enhancements(cursor)
             self._ensure_prop_tables(cursor)
             conn.commit()
-        finally:
-            conn.close()
         MigrationManager(self.db_path).run()
         logger.info("Enhanced database schema verified")
 
     def _get_columns(self, table_name: str) -> Dict[str, Dict[str, object]]:
         if table_name in self._column_cache:
             return self._column_cache[table_name]
-        conn = self._connect()
-        try:
-            cursor = conn.execute(f"PRAGMA table_info({table_name})")
-            columns: Dict[str, Dict[str, object]] = {}
-            for column in cursor.fetchall():
-                columns[column[1]] = {
-                    "type": column[2],
-                    "notnull": bool(column[3]),
-                    "default": column[4],
-                    "pk": bool(column[5])
-                }
-            self._column_cache[table_name] = columns
-            return columns
-        finally:
-            conn.close()
+        columns = get_table_columns(table_name)
+        self._column_cache[table_name] = columns
+        return columns
 
-    def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES)
+    # _connect method removed as we use utils.db.get_connection directly
 
     def _schema_definitions(self) -> Iterable[str]:
         """Return DDL statements required for the project schema."""
@@ -124,8 +113,8 @@ class DataPipeline:
                 team TEXT NOT NULL,
                 position TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'ACTIVE',
-                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
             """
@@ -138,7 +127,7 @@ class DataPipeline:
                 kickoff_utc TEXT,
                 game_date DATE NOT NULL,
                 venue TEXT,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
             """
@@ -163,8 +152,8 @@ class DataPipeline:
                 air_yards REAL NOT NULL DEFAULT 0,
                 yac_yards REAL NOT NULL DEFAULT 0,
                 game_script REAL NOT NULL DEFAULT 0,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (player_id, season, week)
             )
             """,
@@ -180,7 +169,7 @@ class DataPipeline:
                 humidity REAL NOT NULL,
                 is_dome INTEGER NOT NULL,
                 weather_description TEXT,
-                last_updated DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
             """
@@ -192,13 +181,13 @@ class DataPipeline:
                 practice_participation TEXT NOT NULL,
                 injury_type TEXT,
                 days_since_injury INTEGER NOT NULL DEFAULT 0,
-                last_updated DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (player_id, season, week)
             )
             """,
             """
             CREATE TABLE IF NOT EXISTS odds_data (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id INTEGER PRIMARY KEY,
                 player_id TEXT NOT NULL,
                 market TEXT NOT NULL,
                 sportsbook TEXT NOT NULL,
@@ -208,8 +197,8 @@ class DataPipeline:
                 season INTEGER NOT NULL,
                 week INTEGER NOT NULL,
                 game_date DATE NOT NULL,
-                as_of DATETIME NOT NULL,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                as_of TIMESTAMP NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(player_id, market, sportsbook, season, week, as_of)
             )
             """,
@@ -225,7 +214,7 @@ class DataPipeline:
                 turnover_differential INTEGER,
                 oline_rank INTEGER,
                 pass_rush_rank INTEGER,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (team, season, week)
             )
             """,
@@ -240,7 +229,7 @@ class DataPipeline:
                 sigma REAL NOT NULL,
                 model_version TEXT NOT NULL,
                 features_used TEXT NOT NULL,
-                generated_at DATETIME NOT NULL,
+                generated_at TIMESTAMP NOT NULL,
                 UNIQUE(player_id, season, week, market, model_version)
             )
             """,
@@ -264,7 +253,7 @@ class DataPipeline:
                 bet_size_units REAL NOT NULL,
                 correlation_risk TEXT NOT NULL,
                 market_efficiency REAL NOT NULL,
-                date_identified DATETIME NOT NULL
+                date_identified TIMESTAMP NOT NULL
             )
             """,
             """
@@ -272,11 +261,11 @@ class DataPipeline:
                 bet_id TEXT PRIMARY KEY,
                 stake REAL NOT NULL,
                 bankroll REAL NOT NULL,
-                placed_at DATETIME NOT NULL,
+                placed_at TIMESTAMP NOT NULL,
                 status TEXT NOT NULL DEFAULT 'PENDING',
                 result TEXT,
                 profit_loss REAL,
-                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
             """
@@ -297,18 +286,15 @@ class DataPipeline:
             """
             CREATE TABLE IF NOT EXISTS freshness (
                 feed_name TEXT PRIMARY KEY,
-                as_of DATETIME NOT NULL,
-                source TEXT NOT NULL,
-                recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                as_of TIMESTAMP NOT NULL,
+                recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         ]
 
     def _ensure_player_enhancements(self, cursor: sqlite3.Cursor) -> None:
         """Ensure enhanced columns exist on player stats table."""
-        existing = {
-            row[1]: row for row in cursor.execute("PRAGMA table_info(player_stats_enhanced)").fetchall()
-        }
+        existing = get_table_columns("player_stats_enhanced")
 
         required_columns = {
             'usage_delta': "REAL NOT NULL DEFAULT 0",
@@ -358,8 +344,8 @@ class DataPipeline:
                 season INTEGER NOT NULL,
                 week INTEGER NOT NULL,
                 game_date DATE NOT NULL,
-                as_of DATETIME NOT NULL,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                as_of TIMESTAMP NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(player_id, market, sportsbook, season, week, as_of)
             )
             """
@@ -380,8 +366,8 @@ class DataPipeline:
                 season INTEGER NOT NULL,
                 week INTEGER NOT NULL,
                 game_date DATE NOT NULL,
-                as_of DATETIME NOT NULL,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                as_of TIMESTAMP NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(player_id, market, sportsbook, season, week)
             )
             """
@@ -397,7 +383,7 @@ class DataPipeline:
                 projection REAL NOT NULL,
                 sigma REAL NOT NULL,
                 model_version TEXT NOT NULL,
-                generated_at DATETIME NOT NULL,
+                generated_at TIMESTAMP NOT NULL,
                 source TEXT NOT NULL,
                 UNIQUE(player_id, season, week, market, model_version, source)
             )
@@ -522,10 +508,10 @@ class DataPipeline:
     def _augment_baseline_with_historical_players(self, baseline: pd.DataFrame, season: int, week: int) -> pd.DataFrame:
         """Add players from historical stats who aren't in the baseline CSV."""
         try:
-            conn = self._connect()
+            from utils.db import read_dataframe
             # Get recent historical stats for active players
             # Include current season data for rookies and new players
-            historical = pd.read_sql_query(
+            historical = read_dataframe(
                 """
                 SELECT name, team, position, 
                        AVG(rushing_yards) * 17 as hist_rush,
@@ -536,10 +522,8 @@ class DataPipeline:
                 GROUP BY name, team, position
                 HAVING COUNT(*) >= 2
                 """,
-                conn,
                 params=(season, week)
             )
-            conn.close()
             
             if historical.empty:
                 return baseline
@@ -903,72 +887,73 @@ class DataPipeline:
 
     def apply_weekly_bundle(self, bundle: WeekIngestionBundle) -> None:
         """Persist synthesized weekly data with idempotent upserts."""
-        conn = self._connect()
-        try:
+        with get_connection() as conn:
             cursor = conn.cursor()
-            self._upsert_dataframe(
-                cursor,
-                table='games',
-                df=bundle.games,
-                conflict_columns=['game_id'],
-                update_columns=['season', 'week', 'home_team', 'away_team', 'kickoff_utc', 'game_date', 'venue']
-            )
-            self._upsert_dataframe(
-                cursor,
-                table='player_stats_enhanced',
-                df=bundle.player_stats,
-                conflict_columns=['player_id', 'season', 'week'],
-                update_columns=[
-                    'name', 'team', 'position', 'age', 'games_played', 'snap_count', 'snap_percentage',
-                    'rushing_yards', 'rushing_attempts', 'receiving_yards', 'receptions', 'targets',
-                    'red_zone_touches', 'target_share', 'air_yards', 'yac_yards', 'game_script',
-                    'usage_delta', 'age_curve', 'oc_change', 'injury_recovery', 'preseason_buzz',
-                    'rolling_targets', 'rolling_routes', 'rolling_air_yards', 'age_squared',
-                    'injury_games_missed', 'team_context_flag', 'breakout_percentile', 'updated_at'
-                ]
-            )
-            self._upsert_dataframe(
-                cursor,
-                table='team_context',
-                df=bundle.team_context,
-                conflict_columns=['team', 'season', 'week'],
-                update_columns=[
-                    'offensive_rank', 'defensive_rank', 'pace_rank', 'red_zone_efficiency',
-                    'turnover_differential', 'oline_rank', 'pass_rush_rank'
-                ]
-            )
-            self._upsert_dataframe(
-                cursor,
-                table='injury_data',
-                df=bundle.injuries,
-                conflict_columns=['player_id', 'season', 'week'],
-                update_columns=['status', 'practice_participation', 'injury_type', 'days_since_injury', 'last_updated']
-            )
-            self._upsert_dataframe(
-                cursor,
-                table='weather_data',
-                df=bundle.weather,
-                conflict_columns=['game_id'],
-                update_columns=[
-                    'home_team', 'away_team', 'game_date', 'temperature', 'wind_speed', 'precipitation',
-                    'humidity', 'is_dome', 'weather_description', 'last_updated'
-                ]
-            )
-            self._upsert_dataframe(
-                cursor,
-                table='weekly_odds',
-                df=bundle.weekly_odds,
-                conflict_columns=['event_id', 'player_id', 'market', 'sportsbook', 'as_of'],
-                update_columns=['line', 'price']
-            )
-            self._update_feed_freshness(cursor, bundle.season, bundle.week, bundle.freshness)
-            conn.commit()
-        finally:
-            conn.close()
+            try:
+                self._upsert_dataframe(
+                    cursor,
+                    table='games',
+                    df=bundle.games,
+                    conflict_columns=['game_id'],
+                    update_columns=['season', 'week', 'home_team', 'away_team', 'kickoff_utc', 'game_date', 'venue']
+                )
+                self._upsert_dataframe(
+                    cursor,
+                    table='player_stats_enhanced',
+                    df=bundle.player_stats,
+                    conflict_columns=['player_id', 'season', 'week'],
+                    update_columns=[
+                        'name', 'team', 'position', 'age', 'games_played', 'snap_count', 'snap_percentage',
+                        'rushing_yards', 'rushing_attempts', 'receiving_yards', 'receptions', 'targets',
+                        'red_zone_touches', 'target_share', 'air_yards', 'yac_yards', 'game_script',
+                        'usage_delta', 'age_curve', 'oc_change', 'injury_recovery', 'preseason_buzz',
+                        'rolling_targets', 'rolling_routes', 'rolling_air_yards', 'age_squared',
+                        'injury_games_missed', 'team_context_flag', 'breakout_percentile', 'updated_at'
+                    ]
+                )
+                self._upsert_dataframe(
+                    cursor,
+                    table='team_context',
+                    df=bundle.team_context,
+                    conflict_columns=['team', 'season', 'week'],
+                    update_columns=[
+                        'offensive_rank', 'defensive_rank', 'pace_rank', 'red_zone_efficiency',
+                        'turnover_differential', 'oline_rank', 'pass_rush_rank'
+                    ]
+                )
+                self._upsert_dataframe(
+                    cursor,
+                    table='injury_data',
+                    df=bundle.injuries,
+                    conflict_columns=['player_id', 'season', 'week'],
+                    update_columns=['status', 'practice_participation', 'injury_type', 'days_since_injury', 'last_updated']
+                )
+                self._upsert_dataframe(
+                    cursor,
+                    table='weather_data',
+                    df=bundle.weather,
+                    conflict_columns=['game_id'],
+                    update_columns=[
+                        'home_team', 'away_team', 'game_date', 'temperature', 'wind_speed', 'precipitation',
+                        'humidity', 'is_dome', 'weather_description', 'last_updated'
+                    ]
+                )
+                self._upsert_dataframe(
+                    cursor,
+                    table='weekly_odds',
+                    df=bundle.weekly_odds,
+                    conflict_columns=['event_id', 'player_id', 'market', 'sportsbook', 'as_of'],
+                    update_columns=['line', 'price']
+                )
+                self._update_feed_freshness(cursor, bundle.season, bundle.week, bundle.freshness)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     def _upsert_dataframe(
         self,
-        cursor: sqlite3.Cursor,
+        cursor,
         table: str,
         df: pd.DataFrame,
         conflict_columns: List[str],
@@ -982,12 +967,18 @@ class DataPipeline:
         if not available_columns:
             return
 
-        placeholders = ','.join(['?'] * len(available_columns))
+        placeholders = ','.join(['%s'] * len(available_columns)) # Use %s for Postgres (normalized in DB util but here we construct manually)
+        
+        # Check backend
+        is_sqlite = 'sqlite' in str(type(cursor.connection)).lower()
+        if is_sqlite:
+            placeholders = ','.join(['?'] * len(available_columns))
+
         update_clause = ', '.join(
             f"{col}=excluded.{col}" for col in update_columns if col in table_columns
         )
 
-        # Try ON CONFLICT first, fall back to DELETE + INSERT if constraint doesn't exist
+        # Postgres/SQLite compatible UPSERT syntax
         sql = f"INSERT INTO {table} ({','.join(available_columns)}) VALUES ({placeholders})"
         if update_clause:
             sql += f" ON CONFLICT({','.join(conflict_columns)}) DO UPDATE SET {update_clause}"
@@ -996,20 +987,12 @@ class DataPipeline:
         
         try:
             cursor.executemany(sql, df[available_columns].itertuples(index=False, name=None))
-        except sqlite3.OperationalError as e:
-            if "ON CONFLICT clause" in str(e):
-                # Fallback: Delete existing rows matching conflict columns, then insert
-                if update_clause:
-                    # Delete duplicates first
-                    delete_sql = f"DELETE FROM {table} WHERE {' AND '.join([f'{col} = ?' for col in conflict_columns])}"
-                    unique_conflicts = df[conflict_columns].drop_duplicates()
-                    for row in unique_conflicts.itertuples(index=False, name=None):
-                        cursor.execute(delete_sql, row)
-                # Now insert all rows
-                insert_sql = f"INSERT INTO {table} ({','.join(available_columns)}) VALUES ({placeholders})"
-                cursor.executemany(insert_sql, df[available_columns].itertuples(index=False, name=None))
-            else:
+        except Exception as e: # Generic exception to catch both sqlite3 and psycopg2 errors
+            if "ON CONFLICT" in str(e) or "syntax error" in str(e).lower():
+                # Fallback logic mainly for older SQLite if needed, but keeping it simple here
+                # Assuming Postgres or modern SQLite
                 raise
+            raise
 
     def _update_feed_freshness(
         self,
@@ -1172,6 +1155,7 @@ class DataPipeline:
     def _compute_market_mu(self, row: object, market: str, season: int, week: int) -> float:
         """Compute market-specific mu_prior using rolling averages, historical stats, or baseline projections."""
         try:
+            from utils.db import read_dataframe
             # Strategy 1: Use rolling averages from previous weeks if available
             if market == 'rushing_yards':
                 # Try rolling averages from recent weeks first
@@ -1181,29 +1165,25 @@ class DataPipeline:
                 
                 # If current week stats are 0 (future week), use historical rolling average
                 # Try to get latest historical stats for this player
-                conn = self._connect()
-                try:
-                    historical = pd.read_sql_query(
-                        """
-                        SELECT rushing_yards, rushing_attempts, rolling_targets
-                        FROM player_stats_enhanced
-                        WHERE player_id = ? AND ((season = ? AND week < ?) OR (season < ?))
-                        ORDER BY season DESC, week DESC
-                        LIMIT 3
-                        """,
-                        conn,
-                        params=(getattr(row, 'player_id', ''), season, week, season)
-                    )
-                    if not historical.empty:
-                        # Use weighted rolling average (most recent gets higher weight)
-                        recent_yards = historical['rushing_yards'].values
-                        if len(recent_yards) > 0:
-                            weights = [0.6, 0.3, 0.1][:len(recent_yards)]
-                            weighted_avg = sum(y * w for y, w in zip(recent_yards, weights)) / sum(weights)
-                            if weighted_avg > 0:
-                                return float(weighted_avg)
-                finally:
-                    conn.close()
+                
+                historical = read_dataframe(
+                    """
+                    SELECT rushing_yards, rushing_attempts, rolling_targets
+                    FROM player_stats_enhanced
+                    WHERE player_id = ? AND ((season = ? AND week < ?) OR (season < ?))
+                    ORDER BY season DESC, week DESC
+                    LIMIT 3
+                    """,
+                    params=(getattr(row, 'player_id', ''), season, week, season)
+                )
+                if not historical.empty:
+                    # Use weighted rolling average (most recent gets higher weight)
+                    recent_yards = historical['rushing_yards'].values
+                    if len(recent_yards) > 0:
+                        weights = [0.6, 0.3, 0.1][:len(recent_yards)]
+                        weighted_avg = sum(y * w for y, w in zip(recent_yards, weights)) / sum(weights)
+                        if weighted_avg > 0:
+                            return float(weighted_avg)
                 
             elif market == 'receiving_yards':
                 current_rec = float(getattr(row, 'receiving_yards', 0.0))
@@ -1211,28 +1191,23 @@ class DataPipeline:
                     return current_rec
                 
                 # Use historical receiving yards
-                conn = self._connect()
-                try:
-                    historical = pd.read_sql_query(
-                        """
-                        SELECT receiving_yards, targets, rolling_targets, rolling_air_yards
-                        FROM player_stats_enhanced
-                        WHERE player_id = ? AND ((season = ? AND week < ?) OR (season < ?))
-                        ORDER BY season DESC, week DESC
-                        LIMIT 3
-                        """,
-                        conn,
-                        params=(getattr(row, 'player_id', ''), season, week, season)
-                    )
-                    if not historical.empty:
-                        recent_yards = historical['receiving_yards'].values
-                        if len(recent_yards) > 0:
-                            weights = [0.6, 0.3, 0.1][:len(recent_yards)]
-                            weighted_avg = sum(y * w for y, w in zip(recent_yards, weights)) / sum(weights)
-                            if weighted_avg > 0:
-                                return float(weighted_avg)
-                finally:
-                    conn.close()
+                historical = read_dataframe(
+                    """
+                    SELECT receiving_yards, targets, rolling_targets, rolling_air_yards
+                    FROM player_stats_enhanced
+                    WHERE player_id = ? AND ((season = ? AND week < ?) OR (season < ?))
+                    ORDER BY season DESC, week DESC
+                    LIMIT 3
+                    """,
+                    params=(getattr(row, 'player_id', ''), season, week, season)
+                )
+                if not historical.empty:
+                    recent_yards = historical['receiving_yards'].values
+                    if len(recent_yards) > 0:
+                        weights = [0.6, 0.3, 0.1][:len(recent_yards)]
+                        weighted_avg = sum(y * w for y, w in zip(recent_yards, weights)) / sum(weights)
+                        if weighted_avg > 0:
+                            return float(weighted_avg)
                 
             elif market == 'passing_yards':
                 # For QBs, use rolling_air_yards or historical passing
@@ -1241,25 +1216,20 @@ class DataPipeline:
                     return float(rolling_air * 1.5)
                 
                 # Try historical passing yards
-                conn = self._connect()
-                try:
-                    historical = pd.read_sql_query(
-                        """
-                        SELECT receiving_yards, rolling_air_yards
-                        FROM player_stats_enhanced
-                        WHERE player_id = ? AND ((season = ? AND week < ?) OR (season < ?))
-                        ORDER BY season DESC, week DESC
-                        LIMIT 1
-                        """,
-                        conn,
-                        params=(getattr(row, 'player_id', ''), season, week, season)
-                    )
-                    if not historical.empty and 'rolling_air_yards' in historical.columns:
-                        air_yards = historical['rolling_air_yards'].iloc[0]
-                        if pd.notna(air_yards) and air_yards > 0:
-                            return float(air_yards * 1.5)
-                finally:
-                    conn.close()
+                historical = read_dataframe(
+                    """
+                    SELECT receiving_yards, rolling_air_yards
+                    FROM player_stats_enhanced
+                    WHERE player_id = ? AND ((season = ? AND week < ?) OR (season < ?))
+                    ORDER BY season DESC, week DESC
+                    LIMIT 1
+                    """,
+                    params=(getattr(row, 'player_id', ''), season, week, season)
+                )
+                if not historical.empty and 'rolling_air_yards' in historical.columns:
+                    air_yards = historical['rolling_air_yards'].iloc[0]
+                    if pd.notna(air_yards) and air_yards > 0:
+                        return float(air_yards * 1.5)
             
             # Fallback: Use baseline projections from CSV if available
             baseline = self._load_projection_baseline()

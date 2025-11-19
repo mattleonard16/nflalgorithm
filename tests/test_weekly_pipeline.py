@@ -6,7 +6,6 @@ import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
-
 from config import config
 from data_pipeline import compute_week_features, update_week
 from materialized_value_view import materialize_week

@@ -35,10 +35,17 @@ def test_basic_caching():
     expires_at = datetime.now() + timedelta(hours=1)
     
     # Insert test data
-    conn.execute("""
-        INSERT OR REPLACE INTO test_cache (cache_key, data, expires_at)
+    conn.execute(
+        """
+        INSERT INTO test_cache (cache_key, data, expires_at)
         VALUES (?, ?, ?)
-    """, (test_key, json.dumps(test_data), expires_at.isoformat()))
+        ON CONFLICT(cache_key) DO UPDATE SET
+            data = excluded.data,
+            expires_at = excluded.expires_at,
+            created_at = CURRENT_TIMESTAMP
+        """,
+        (test_key, json.dumps(test_data), expires_at.isoformat()),
+    )
     conn.commit()
     
     # Retrieve test data

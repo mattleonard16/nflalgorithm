@@ -18,15 +18,14 @@ from value_betting_engine import rank_weekly_value
 @pytest.fixture
 def temp_db():
     """Create a temporary database for testing."""
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    tmp_path = tmp.name
-    
+    tmp = Path(tempfile.mkstemp(suffix=".db")[1])
+
     # Setup schema
+    MigrationManager(tmp).run()
     MigrationManager(tmp_path).run()
-    
+
     # Insert test data
-    with sqlite3.connect(tmp_path) as conn:
+    with sqlite3.connect(tmp) as conn:
         # Create required tables for join_odds_projections
         conn.execute("""
             CREATE TABLE IF NOT EXISTS player_stats_enhanced (
@@ -77,15 +76,7 @@ def temp_db():
         
         conn.commit()
     
-    # Temporarily override config
-    original_path = config.database.path
-    config.database.path = tmp_path
-    
-    yield tmp_path
-    
-    # Cleanup
-    config.database.path = original_path
-    Path(tmp_path).unlink(missing_ok=True)
+    yield str(tmp)
 
 
 def test_rank_weekly_value_with_valid_data(temp_db):

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
+
+from utils.db import column_exists, get_connection, table_exists
 
 
 @dataclass
@@ -15,7 +16,7 @@ class MigrationManager:
     db_path: Path | str
 
     def run(self) -> None:
-        with sqlite3.connect(self._db_path_str()) as conn:
+        with get_connection() as conn:
             cursor = conn.cursor()
             for ddl in self._ddl_statements():
                 cursor.execute(ddl)
@@ -101,6 +102,8 @@ class MigrationManager:
                 week INTEGER NOT NULL,
                 player_id TEXT NOT NULL,
                 event_id TEXT NOT NULL,
+                team TEXT,
+                team_odds TEXT,
                 market TEXT NOT NULL,
                 sportsbook TEXT NOT NULL,
                 line REAL NOT NULL,
@@ -126,7 +129,7 @@ class MigrationManager:
                 team_odds TEXT,
                 match_type TEXT,
                 confidence_score REAL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (player_id_canonical, player_id_odds)
             )
             """,
@@ -140,7 +143,7 @@ class MigrationManager:
                 kickoff_utc TEXT,
                 game_date DATE NOT NULL,
                 venue TEXT,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
             """
@@ -151,7 +154,7 @@ class MigrationManager:
                 name TEXT NOT NULL,
                 team TEXT NOT NULL,
                 position TEXT NOT NULL,
-                age INTEGER NOT NULL,
+                age INTEGER NOT NULL DEFAULT 26,
                 games_played INTEGER NOT NULL DEFAULT 0,
                 snap_count INTEGER NOT NULL DEFAULT 0,
                 snap_percentage REAL NOT NULL DEFAULT 0,
@@ -165,8 +168,8 @@ class MigrationManager:
                 air_yards REAL NOT NULL DEFAULT 0,
                 yac_yards REAL NOT NULL DEFAULT 0,
                 game_script REAL NOT NULL DEFAULT 0,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (player_id, season, week)
             )
             """,
@@ -182,7 +185,7 @@ class MigrationManager:
                 humidity REAL NOT NULL,
                 is_dome INTEGER NOT NULL,
                 weather_description TEXT,
-                last_updated DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
             """
@@ -194,19 +197,25 @@ class MigrationManager:
                 practice_participation TEXT NOT NULL,
                 injury_type TEXT,
                 days_since_injury INTEGER NOT NULL DEFAULT 0,
-                last_updated DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (player_id, season, week)
             )
             """,
         )
 
-    def _ensure_columns(self, cursor: sqlite3.Cursor) -> None:
+    def _ensure_columns(self, cursor) -> None:
         # Check if games table exists before altering it
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='games'")
-        if cursor.fetchone() and not self._column_exists(cursor, "games", "kickoff_utc"):
+        if table_exists("games", conn=cursor.connection) and not column_exists("games", "kickoff_utc", conn=cursor.connection):
             cursor.execute("ALTER TABLE games ADD COLUMN kickoff_utc TEXT")
 
-    def _ensure_indexes(self, cursor: sqlite3.Cursor) -> None:
+        # Backfill new columns on existing materialized_value_view tables
+        if table_exists("materialized_value_view", conn=cursor.connection):
+            if not column_exists("materialized_value_view", "team", conn=cursor.connection):
+                cursor.execute("ALTER TABLE materialized_value_view ADD COLUMN team TEXT")
+            if not column_exists("materialized_value_view", "team_odds", conn=cursor.connection):
+                cursor.execute("ALTER TABLE materialized_value_view ADD COLUMN team_odds TEXT")
+
+    def _ensure_indexes(self, cursor: Any) -> None:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_weekly_odds_lookup ON weekly_odds(season, week, player_id, market)"
         )
@@ -235,8 +244,4 @@ class MigrationManager:
             "CREATE INDEX IF NOT EXISTS idx_games_lookup ON games(season, week)"
         )
 
-    @staticmethod
-    def _column_exists(cursor: sqlite3.Cursor, table: str, column: str) -> bool:
-        cursor.execute(f"PRAGMA table_info({table})")
-        return any(row[1] == column for row in cursor.fetchall())
 

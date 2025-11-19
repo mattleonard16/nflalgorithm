@@ -1,8 +1,6 @@
 """Week-by-week Streamlit dashboard for NFL algorithm."""
 
 from __future__ import annotations
-
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 
@@ -17,7 +15,9 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent))
 
 from config import config
+from utils.db import get_connection, read_dataframe
 from materialized_value_view import materialize_week
+from utils.player_id_utils import canonicalize_team
 
 
 st.set_page_config(
@@ -34,7 +34,7 @@ FRESHNESS_THRESHOLDS = {
 
 
 def get_available_seasons_weeks() -> tuple[list[int], dict[int, list[int]]]:
-    with sqlite3.connect(config.database.path) as conn:
+    with get_connection() as conn:
         rows = conn.execute(
             "SELECT DISTINCT season, week FROM weekly_projections ORDER BY season DESC, week DESC"
         ).fetchall()
@@ -56,8 +56,8 @@ def get_available_seasons_weeks() -> tuple[list[int], dict[int, list[int]]]:
 
 def load_weekly_value(season: int, week: int) -> pd.DataFrame:
     query = """
-        SELECT mv.*, wp.team, wp.opponent, wp.model_version,
-               ps.name AS player_name, ps.position
+        SELECT mv.*, wp.team AS team_projection, wp.opponent, wp.model_version,
+               ps.name AS player_name, ps.position, ps.team AS team_stats
         FROM materialized_value_view mv
         LEFT JOIN weekly_projections wp
           ON mv.season = wp.season
@@ -71,11 +71,36 @@ def load_weekly_value(season: int, week: int) -> pd.DataFrame:
         WHERE mv.season = ? AND mv.week = ?
     """
 
-    with sqlite3.connect(config.database.path) as conn:
-        df = pd.read_sql_query(query, conn, params=(season, week))
+    df = read_dataframe(query, params=(season, week))
 
     if df.empty:
         return df
+
+    # Team reconciliation for display: stats > projections > odds
+    df['team_stats_canon'] = df.get('team_stats').apply(canonicalize_team) if 'team_stats' in df.columns else ''
+    df['team_proj_canon'] = df.get('team_projection').apply(canonicalize_team) if 'team_projection' in df.columns else ''
+    df['team_odds_canon'] = df.get('team_odds').apply(canonicalize_team) if 'team_odds' in df.columns else ''
+
+    team_effective = df['team_stats_canon']
+    mask_missing = team_effective == ''
+    team_effective = team_effective.where(~mask_missing, df['team_proj_canon'])
+    mask_missing = team_effective == ''
+    team_effective = team_effective.where(~mask_missing, df['team_odds_canon'])
+
+    df['team'] = team_effective
+    df['team_mismatch_flag'] = (
+        (df['team_odds_canon'] != '')
+        & (df['team'] != '')
+        & (df['team_odds_canon'] != df['team'])
+    )
+    df['team_display'] = np.where(
+        df['team_mismatch_flag'],
+        df.apply(
+            lambda r: f"{r['team']} [proj={r['team_proj_canon'] or '-'}, odds={r['team_odds_canon'] or '-'}]",
+            axis=1,
+        ),
+        df['team'],
+    )
 
     df['player_name'] = df['player_name'].fillna(df['player_id'])
     df['position'] = df['position'].fillna('FLEX')
@@ -95,12 +120,10 @@ def load_weekly_value(season: int, week: int) -> pd.DataFrame:
 
 
 def load_feed_freshness(season: int, week: int) -> pd.DataFrame:
-    with sqlite3.connect(config.database.path) as conn:
-        df = pd.read_sql_query(
-            "SELECT feed, as_of FROM feed_freshness WHERE season = ? AND week = ?",
-            conn,
-            params=(season, week)
-        )
+    df = read_dataframe(
+        "SELECT feed, as_of FROM feed_freshness WHERE season = ? AND week = ?",
+        params=(season, week),
+    )
     if df.empty:
         return df
     df['as_of'] = pd.to_datetime(df['as_of'])
@@ -111,21 +134,18 @@ def load_feed_freshness(season: int, week: int) -> pd.DataFrame:
 
 
 def load_weekly_clv(season: int, week: int) -> pd.DataFrame:
-    with sqlite3.connect(config.database.path) as conn:
-        try:
-            df = pd.read_sql_query(
-                """
-                SELECT cw.*, bw.sportsbook
-                FROM clv_weekly cw
-                LEFT JOIN bets_weekly bw ON cw.bet_id = bw.bet_id
-                WHERE bw.season = ? AND bw.week = ?
-                """,
-                conn,
-                params=(season, week)
-            )
-        except Exception:
-            return pd.DataFrame()
-    return df
+    try:
+        return read_dataframe(
+            """
+            SELECT cw.*, bw.sportsbook
+            FROM clv_weekly cw
+            LEFT JOIN bets_weekly bw ON cw.bet_id = bw.bet_id
+            WHERE bw.season = ? AND bw.week = ?
+            """,
+            params=(season, week),
+        )
+    except Exception:
+        return pd.DataFrame()
 
 
 def main() -> None:
@@ -184,7 +204,7 @@ def main() -> None:
                 st.dataframe(display[quick_cols], use_container_width=True)
             else:
                 columns = [
-                    'player_name', 'position', 'team', 'opponent', 'prop_type', 'sportsbook',
+                    'player_name', 'position', 'team_display', 'opponent', 'prop_type', 'sportsbook',
                     'line', 'price', 'model_prediction', 'sigma', 'p_win_pct', 'edge_pct',
                     'roi_pct', 'kelly_pct', 'stake', 'recommendation'
                 ]

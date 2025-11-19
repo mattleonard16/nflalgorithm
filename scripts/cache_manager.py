@@ -16,6 +16,7 @@ import sqlite3
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional, Tuple, Union, List
+import threading
 import requests
 import requests_cache
 from dataclasses import asdict
@@ -219,15 +220,25 @@ class DatabaseCache:
         
         conn = sqlite3.connect(self.db_path)
         try:
-            conn.execute("""
-                INSERT OR REPLACE INTO api_cache 
+            conn.execute(
+                """
+                INSERT INTO api_cache 
                 (cache_key, endpoint, params_hash, data, content_type, expires_at)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (cache_key, endpoint, params_hash, data_str, content_type, expires_at.isoformat()))
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    endpoint = excluded.endpoint,
+                    params_hash = excluded.params_hash,
+                    data = excluded.data,
+                    content_type = excluded.content_type,
+                    expires_at = excluded.expires_at,
+                    last_accessed = CURRENT_TIMESTAMP
+                """,
+                (cache_key, endpoint, params_hash, data_str, content_type, expires_at.isoformat()),
+            )
             conn.commit()
-            
+
             self._record_metric('refresh', cache_key, endpoint)
-            
+
         finally:
             conn.close()
     
@@ -260,10 +271,13 @@ class DatabaseCache:
         
         conn = sqlite3.connect(self.db_path)
         try:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 DELETE FROM api_cache 
                 WHERE expires_at < ?
-            """, (cutoff.isoformat(),))
+                """,
+                (cutoff.isoformat(),),
+            )
             
             deleted_count = cursor.rowcount
             conn.commit()
@@ -405,14 +419,19 @@ class CachedAPIClient:
                     return response
                 
                 if cached_data and is_stale and allow_stale:
-                    # Stale data available - try to refresh in background, serve stale now
-                    logger.info(f"Serving stale data for {url}, will refresh in background")
+                    # Stale data available - refresh in background, serve stale now
+                    logger.info(f"Serving stale data for {url}, scheduling background refresh")
                     response = requests.Response()
                     response._content = json.dumps(cached_data).encode() if isinstance(cached_data, (dict, list)) else str(cached_data).encode()
                     response.status_code = 200
                     response.headers['X-Cache'] = 'STALE-WHILE-REVALIDATE'
-                    
-                    # TODO: Implement background refresh
+
+                    # Fire-and-forget background refresh so caller isn't blocked
+                    threading.Thread(
+                        target=self._refresh_background,
+                        args=(url, params, api_type),
+                        daemon=True,
+                    ).start()
                     return response
             
             # Make HTTP request with requests-cache
@@ -459,17 +478,56 @@ class CachedAPIClient:
             raise
     
     def _get_ttl_for_api(self, api_type: str, url: str) -> int:
-        """Get appropriate TTL based on API type and current season"""
+        """Get appropriate TTL based on API type and simple season/venue heuristics.
+
+        Odds:
+            - Use shorter TTL in-season, longer TTL in the off-season.
+        Weather:
+            - Use longer TTL for dome stadium forecasts when identifiable from the URL.
+        """
         if api_type == 'odds':
-            # TODO: Detect if in season or off-season
-            return self.api_settings['odds']['ttl_season']
+            if self._is_in_season(datetime.utcnow()):
+                return self.api_settings['odds']['ttl_season']
+            return self.api_settings['odds']['ttl_offseason']
         elif api_type == 'weather':
-            # TODO: Detect if dome stadium
+            # Very lightweight heuristic: if caller encodes dome in the URL path or query,
+            # prefer the dome TTL; otherwise fall back to the default weather TTL.
+            url_lower = url.lower()
+            if 'dome=1' in url_lower or '/dome/' in url_lower:
+                return self.api_settings['weather']['ttl_dome']
             return self.api_settings['weather']['ttl']
         elif api_type == 'player':
             return self.api_settings['player']['ttl']
         else:
             return config.cache.http_cache_expire_after
+
+    def _is_in_season(self, when: datetime) -> bool:
+        """Determine whether we're roughly in the NFL regular/post-season.
+
+        This avoids another config surface by using calendar months only:
+        treat September through February as "in-season" for cache tightening.
+        """
+        month = when.month
+        return month >= 9 or month <= 2
+
+    def _refresh_background(self, url: str, params: Dict[str, Any], api_type: str) -> None:
+        """Background refresh helper used for stale-while-revalidate.
+
+        Errors are logged but never raised to the original caller.
+        """
+        try:
+            logger.info(f"Background cache refresh started for {url}")
+            resp = self.session.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+            ttl = self._get_ttl_for_api(api_type, url)
+            try:
+                data = resp.json()
+            except (ValueError, json.JSONDecodeError):
+                data = resp.text
+            self.db_cache.set(url, data, ttl, params)
+            logger.info(f"Background cache refresh completed for {url}")
+        except Exception as exc:
+            logger.warning(f"Background cache refresh failed for {url}: {exc}")
     
     def _store_raw_odds(self, url: str, response: requests.Response, 
                        params: Dict[str, Any] = None):

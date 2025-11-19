@@ -519,13 +519,29 @@ class NFLDataPopulator:
             for _, row in player_df.iterrows():
                 try:
                     self.connection.execute("""
-                        INSERT OR REPLACE INTO player_stats 
+                        INSERT INTO player_stats 
                         (player_id, player_name, team, position, season, week,
                          rushing_attempts, rushing_yards, rushing_tds, 
                          receiving_targets, receiving_receptions, receiving_yards, receiving_tds,
                          passing_attempts, passing_completions, passing_yards, passing_tds,
                          fantasy_points)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(player_id, season, week) DO UPDATE SET
+                            player_name = excluded.player_name,
+                            team = excluded.team,
+                            position = excluded.position,
+                            rushing_attempts = excluded.rushing_attempts,
+                            rushing_yards = excluded.rushing_yards,
+                            rushing_tds = excluded.rushing_tds,
+                            receiving_targets = excluded.receiving_targets,
+                            receiving_receptions = excluded.receiving_receptions,
+                            receiving_yards = excluded.receiving_yards,
+                            receiving_tds = excluded.receiving_tds,
+                            passing_attempts = excluded.passing_attempts,
+                            passing_completions = excluded.passing_completions,
+                            passing_yards = excluded.passing_yards,
+                            passing_tds = excluded.passing_tds,
+                            fantasy_points = excluded.fantasy_points
                     """, (
                         row['player_id'], row['player_name'], row['team'], row['position'],
                         row['season'], row['week'], row['rushing_attempts'], row['rushing_yards'],
@@ -545,13 +561,34 @@ class NFLDataPopulator:
             for _, row in enhanced_df.iterrows():
                 try:
                     self.connection.execute("""
-                        INSERT OR REPLACE INTO enhanced_features
+                        INSERT INTO enhanced_features
                         (player_id, player_name, position, season, snap_share, target_share,
                          carry_share, redzone_usage, yards_per_carry, yards_per_target, catch_rate,
                          air_yards_share, expected_fantasy_points, fantasy_points_per_game,
                          consistency_score, ceiling_score, floor_score, recent_trend, momentum_score,
                          over_under_record, prop_hit_rate, value_score)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(player_id, season) DO UPDATE SET
+                            player_name = excluded.player_name,
+                            position = excluded.position,
+                            snap_share = excluded.snap_share,
+                            target_share = excluded.target_share,
+                            carry_share = excluded.carry_share,
+                            redzone_usage = excluded.redzone_usage,
+                            yards_per_carry = excluded.yards_per_carry,
+                            yards_per_target = excluded.yards_per_target,
+                            catch_rate = excluded.catch_rate,
+                            air_yards_share = excluded.air_yards_share,
+                            expected_fantasy_points = excluded.expected_fantasy_points,
+                            fantasy_points_per_game = excluded.fantasy_points_per_game,
+                            consistency_score = excluded.consistency_score,
+                            ceiling_score = excluded.ceiling_score,
+                            floor_score = excluded.floor_score,
+                            recent_trend = excluded.recent_trend,
+                            momentum_score = excluded.momentum_score,
+                            over_under_record = excluded.over_under_record,
+                            prop_hit_rate = excluded.prop_hit_rate,
+                            value_score = excluded.value_score
                     """, (
                         row['player_id'], row['player_name'], row['position'], row['season'],
                         row['snap_share'], row['target_share'], row['carry_share'], row['redzone_usage'],

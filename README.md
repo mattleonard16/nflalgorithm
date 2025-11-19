@@ -17,9 +17,11 @@ This is a comprehensive NFL betting algorithm that combines:
 
 ## Quick Start
 
+> **Windows Users**: See [INSTALL_WINDOWS.md](INSTALL_WINDOWS.md) for Windows-specific installation instructions.
+
 ```bash
 # Clone and setup
-git clone <repository-url>
+git clone https://github.com/mattleonard16/nflalgorithm.git
 cd nflalgorithm
 
 # Install dependencies

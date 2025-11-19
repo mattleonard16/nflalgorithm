@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -11,6 +10,7 @@ from typing import Optional
 import pandas as pd
 
 from config import config
+from utils.db import get_connection
 from value_betting_engine import rank_weekly_value
 
 
@@ -20,10 +20,10 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
     threshold = min_edge if min_edge is not None else config.betting.min_edge_threshold
     ranked = rank_weekly_value(season, week, threshold, place=False)
 
-    with sqlite3.connect(config.database.path) as conn:
+    with get_connection() as conn:
         conn.execute(
             "DELETE FROM materialized_value_view WHERE season = ? AND week = ?",
-            (season, week)
+            (season, week),
         )
 
         if ranked.empty:
@@ -48,11 +48,13 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
         sql = (
             """
             INSERT INTO materialized_value_view (
-                season, week, player_id, event_id, market, sportsbook, line, price,
+                season, week, player_id, event_id, team, team_odds, market, sportsbook, line, price,
                 mu, sigma, p_win, edge_percentage, expected_roi, kelly_fraction, stake, generated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(season, week, player_id, market, sportsbook, event_id)
             DO UPDATE SET
+                team=excluded.team,
+                team_odds=excluded.team_odds,
                 line=excluded.line,
                 price=excluded.price,
                 mu=excluded.mu,
@@ -68,9 +70,13 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
 
         conn.executemany(
             sql,
-            payload[['season', 'week', 'player_id', 'event_id', 'market', 'sportsbook', 'line', 'price',
-                     'mu', 'sigma', 'p_win', 'edge_percentage', 'expected_roi', 'kelly_fraction', 'stake', 'generated_at']]
-            .itertuples(index=False, name=None)
+            payload[
+                [
+                    'season', 'week', 'player_id', 'event_id', 'team', 'team_odds', 'market',
+                    'sportsbook', 'line', 'price', 'mu', 'sigma', 'p_win', 'edge_percentage',
+                    'expected_roi', 'kelly_fraction', 'stake', 'generated_at',
+                ]
+            ].itertuples(index=False, name=None)
         )
         conn.commit()
 

@@ -130,8 +130,22 @@ def main():
     )
     """)
     
-    # Insert value bets
-    value_df.to_sql('enhanced_value_bets', conn, if_exists='replace', index=False)
+    # Insert value bets (replace semantics for simplicity)
+    conn.execute("DELETE FROM enhanced_value_bets")
+    conn.executemany(
+        """
+        INSERT INTO enhanced_value_bets (
+            bet_id, player_name, position, prop_type, sportsbook, line,
+            model_prediction, edge_yards, edge_percentage, value_level,
+            recommendation, confidence, bet_size, expected_roi, date_identified
+        ) VALUES (
+            :bet_id, :player_name, :position, :prop_type, :sportsbook, :line,
+            :model_prediction, :edge_yards, :edge_percentage, :value_level,
+            :recommendation, :confidence, :bet_size, :expected_roi, :date_identified
+        )
+        """,
+        value_df.to_dict(orient="records"),
+    )
     
     # Also create a simpler table for the dashboard
     conn.execute("""
@@ -154,15 +168,32 @@ def main():
     
     # Insert simplified format
     for _, bet in value_df.iterrows():
-        conn.execute("""
-        INSERT OR REPLACE INTO value_bets 
-        (player_name, position, prop_type, sportsbook, line, prediction, edge, edge_pct, recommendation, confidence)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            bet['player_name'], bet['position'], bet['prop_type'], bet['sportsbook'],
-            bet['line'], bet['model_prediction'], bet['edge_yards'], bet['edge_percentage'],
-            bet['recommendation'], bet['confidence']
-        ))
+        conn.execute(
+            """
+            INSERT INTO value_bets 
+            (player_name, position, prop_type, sportsbook, line, prediction, edge, edge_pct, recommendation, confidence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(player_name, prop_type, sportsbook, line) DO UPDATE SET
+                position = excluded.position,
+                prediction = excluded.prediction,
+                edge = excluded.edge,
+                edge_pct = excluded.edge_pct,
+                recommendation = excluded.recommendation,
+                confidence = excluded.confidence
+            """,
+            (
+                bet['player_name'],
+                bet['position'],
+                bet['prop_type'],
+                bet['sportsbook'],
+                bet['line'],
+                bet['model_prediction'],
+                bet['edge_yards'],
+                bet['edge_percentage'],
+                bet['recommendation'],
+                bet['confidence'],
+            ),
+        )
     
     conn.commit()
     conn.close()

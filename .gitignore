@@ -60,6 +60,10 @@ htmlcov/
 *.temp
 temp_validation_test.py
 
+# HTTP cache artifacts
+cache/cache/http/http_cache/
+cache/cache/http/redirects.sqlite
+
 # Logs
 *.log
 logs/*.log

@@ -79,12 +79,23 @@ def main():
         inserted = 0
         for _, row in df.iterrows():
             try:
-                conn.execute("""
-                INSERT OR REPLACE INTO player_stats 
-                (player_id, player_name, position, team, season, week, fantasy_points,
-                 rushing_yards, receiving_yards, passing_yards, rushing_tds, receiving_tds, passing_tds)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
+        conn.execute("""
+        INSERT INTO player_stats 
+        (player_id, player_name, position, team, season, week, fantasy_points,
+         rushing_yards, receiving_yards, passing_yards, rushing_tds, receiving_tds, passing_tds)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(player_id, season, week) DO UPDATE SET
+            player_name = excluded.player_name,
+            position = excluded.position,
+            team = excluded.team,
+            fantasy_points = excluded.fantasy_points,
+            rushing_yards = excluded.rushing_yards,
+            receiving_yards = excluded.receiving_yards,
+            passing_yards = excluded.passing_yards,
+            rushing_tds = excluded.rushing_tds,
+            receiving_tds = excluded.receiving_tds,
+            passing_tds = excluded.passing_tds
+        """, (
                     row.get('player_id', 'unknown'),
                     row.get('player_name', 'Unknown'),
                     row.get('position', 'UNK'),
@@ -127,9 +138,15 @@ def main():
         consistency = max(0.1, 1.0 - (total_fp / games / max(avg_fp, 1)))  # Simple consistency
         
         conn.execute("""
-        INSERT OR REPLACE INTO enhanced_features 
+        INSERT INTO enhanced_features 
         (player_id, player_name, position, season, fantasy_points_per_game, value_score, consistency_score)
         VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(player_id, season) DO UPDATE SET
+            player_name = excluded.player_name,
+            position = excluded.position,
+            fantasy_points_per_game = excluded.fantasy_points_per_game,
+            value_score = excluded.value_score,
+            consistency_score = excluded.consistency_score
         """, (player_id, name, pos, 2024, round(avg_fp, 2), round(value_score, 3), round(consistency, 3)))
     
     conn.commit()

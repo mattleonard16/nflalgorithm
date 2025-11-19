@@ -12,8 +12,8 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union
 import logging
 from dataclasses import dataclass, asdict
-import sqlite3
 import os
+import sqlite3
 from pathlib import Path
 
 # Import simplified caching system and validation
@@ -76,6 +76,8 @@ class NFLPropScraper:
         
     def init_database(self):
         """Initialize SQLite database for storing prop lines"""
+        from utils.db import get_connection
+
         conn = sqlite3.connect(self.db_path)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS prop_lines (
@@ -414,21 +416,45 @@ class NFLPropScraper:
     def save_weekly_prop_lines(self, rows: List[Dict], week: int, season: int):
         if not rows:
             return
-        conn = sqlite3.connect(self.db_path)
-        for r in rows:
-            try:
-                conn.execute('''
-                    INSERT OR REPLACE INTO weekly_prop_lines
-                    (week, season, player, team, position, book, stat, line, over_odds, under_odds, game_date, home_team, away_team, last_updated)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    week, season, r['player'], r['team'], r['position'], r['book'], r['stat'],
-                    r['line'], r.get('over_odds'), r.get('under_odds'), r.get('game_date'), r.get('home_team'), r.get('away_team'), datetime.now().isoformat()
-                ))
-            except Exception as e:
-                logger.warning(f"Save weekly row failed for {r.get('player')}: {e}")
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            for r in rows:
+                try:
+                    conn.execute(
+                        '''
+                        INSERT INTO weekly_prop_lines
+                        (week, season, player, team, position, book, stat, line, over_odds, under_odds, game_date, home_team, away_team, last_updated)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(player, book, stat, week, season)
+                        DO UPDATE SET
+                            team = excluded.team,
+                            position = excluded.position,
+                            line = excluded.line,
+                            over_odds = excluded.over_odds,
+                            under_odds = excluded.under_odds,
+                            game_date = excluded.game_date,
+                            home_team = excluded.home_team,
+                            away_team = excluded.away_team,
+                            last_updated = excluded.last_updated
+                        ''',
+                        (
+                            week,
+                            season,
+                            r['player'],
+                            r['team'],
+                            r['position'],
+                            r['book'],
+                            r['stat'],
+                            r['line'],
+                            r.get('over_odds'),
+                            r.get('under_odds'),
+                            r.get('game_date'),
+                            r.get('home_team'),
+                            r.get('away_team'),
+                            datetime.now().isoformat(),
+                        ),
+                    )
+                except Exception as e:
+                    logger.warning(f"Save weekly row failed for {r.get('player')}: {e}")
 
     def run_weekly_update(self, week: int, season: int) -> pd.DataFrame:
         logger.info(f"Starting weekly prop line update for week={week}, season={season}...")
@@ -538,25 +564,40 @@ class NFLPropScraper:
             logger.warning("No prop lines to save")
             return
         
-        conn = sqlite3.connect(self.db_path)
+        with sqlite3.connect(self.db_path) as conn:
+            for prop_line in prop_lines:
+                try:
+                    conn.execute(
+                        '''
+                        INSERT INTO prop_lines 
+                        (player, team, position, book, stat, line, over_odds, under_odds, last_updated, season)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(player, book, stat, season)
+                        DO UPDATE SET
+                            team = excluded.team,
+                            position = excluded.position,
+                            line = excluded.line,
+                            over_odds = excluded.over_odds,
+                            under_odds = excluded.under_odds,
+                            last_updated = excluded.last_updated
+                        ''',
+                        (
+                            prop_line.player,
+                            prop_line.team,
+                            prop_line.position,
+                            prop_line.book,
+                            prop_line.stat,
+                            prop_line.line,
+                            prop_line.over_odds,
+                            prop_line.under_odds,
+                            prop_line.last_updated,
+                            prop_line.season,
+                        ),
+                    )
+                except Exception as e:
+                    logger.error(f"Error saving prop line for {prop_line.player}: {e}")
+                    continue
         
-        for prop_line in prop_lines:
-            try:
-                conn.execute('''
-                    INSERT OR REPLACE INTO prop_lines 
-                    (player, team, position, book, stat, line, over_odds, under_odds, last_updated, season)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    prop_line.player, prop_line.team, prop_line.position, prop_line.book,
-                    prop_line.stat, prop_line.line, prop_line.over_odds, prop_line.under_odds,
-                    prop_line.last_updated, prop_line.season
-                ))
-            except Exception as e:
-                logger.error(f"Error saving prop line for {prop_line.player}: {e}")
-                continue
-        
-        conn.commit()
-        conn.close()
         logger.info(f"Saved {len(prop_lines)} prop lines to database")
     
     def get_prop_lines_dataframe(self) -> pd.DataFrame:

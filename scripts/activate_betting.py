@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import sys
 import os
-import sqlite3
 import uuid
 from datetime import datetime
 from typing import List
@@ -30,20 +29,15 @@ from config import config
 from scripts.prop_line_scraper import NFLPropScraper
 from prop_integration import PropIntegration
 from value_betting_engine import ValueBettingEngine
+from utils.db import get_connection, column_exists
 
 
-def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
-    cur = conn.execute(f"PRAGMA table_info({table})")
-    return {row[1] for row in cur.fetchall()}
-
-
-def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
-    cols = _table_columns(conn, table)
-    if column not in cols:
+def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
+    if not column_exists(table, column, conn=conn):
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
-def ensure_tables(conn: sqlite3.Connection) -> None:
+def ensure_tables(conn) -> None:
     """Create the dashboard tables if they do not already exist."""
     conn.execute(
         """
@@ -230,8 +224,7 @@ def persist_value_bets(df: pd.DataFrame) -> int:
     if df is None or df.empty:
         return 0
 
-    conn = sqlite3.connect(config.database.path)
-    try:
+    with get_connection() as conn:
         ensure_tables(conn)
 
         # Insert enhanced value bets
@@ -242,7 +235,7 @@ def persist_value_bets(df: pd.DataFrame) -> int:
 
         insert_sql = (
             """
-            INSERT OR REPLACE INTO enhanced_value_bets (
+            INSERT INTO enhanced_value_bets (
                 bet_id, player_name, position, team, prop_type, sportsbook, line,
                 model_prediction, model_confidence, edge_yards, edge_percentage, kelly_fraction,
                 expected_roi, risk_level, recommendation, bet_size_units,
@@ -253,6 +246,25 @@ def persist_value_bets(df: pd.DataFrame) -> int:
                 :expected_roi, :risk_level, :recommendation, :bet_size_units,
                 :correlation_risk, :market_efficiency, :date_identified
             )
+            ON CONFLICT(bet_id) DO UPDATE SET
+                player_name = excluded.player_name,
+                position = excluded.position,
+                team = excluded.team,
+                prop_type = excluded.prop_type,
+                sportsbook = excluded.sportsbook,
+                line = excluded.line,
+                model_prediction = excluded.model_prediction,
+                model_confidence = excluded.model_confidence,
+                edge_yards = excluded.edge_yards,
+                edge_percentage = excluded.edge_percentage,
+                kelly_fraction = excluded.kelly_fraction,
+                expected_roi = excluded.expected_roi,
+                risk_level = excluded.risk_level,
+                recommendation = excluded.recommendation,
+                bet_size_units = excluded.bet_size_units,
+                correlation_risk = excluded.correlation_risk,
+                market_efficiency = excluded.market_efficiency,
+                date_identified = excluded.date_identified
             """
         )
 
@@ -273,18 +285,23 @@ def persist_value_bets(df: pd.DataFrame) -> int:
         ]
         conn.executemany(
             """
-            INSERT OR REPLACE INTO clv_tracking
+            INSERT INTO clv_tracking
                 (bet_id, player_id, prop_type, sportsbook, bet_line, date_placed)
             VALUES
                 (:bet_id, :player_id, :prop_type, :sportsbook, :bet_line, :date_placed)
+            ON CONFLICT(bet_id)
+            DO UPDATE SET
+                player_id = excluded.player_id,
+                prop_type = excluded.prop_type,
+                sportsbook = excluded.sportsbook,
+                bet_line = excluded.bet_line,
+                date_placed = excluded.date_placed
             """,
             clv_rows,
         )
 
         conn.commit()
         return len(df)
-    finally:
-        conn.close()
 
 
 def main() -> int:

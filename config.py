@@ -22,9 +22,11 @@ except ImportError:
 
 @dataclass
 class DatabaseConfig:
-    path: str = "nfl_data.db"
+    path: str = os.getenv("SQLITE_DB_PATH", "nfl_data.db")
     backup_path: str = "data/backups/"
     max_connections: int = 10
+    backend: str = os.getenv("DB_BACKEND", "sqlite")
+    supabase_dsn: str = os.getenv("SUPABASE_DB_URL", "")
 
 @dataclass
 class CacheConfig:

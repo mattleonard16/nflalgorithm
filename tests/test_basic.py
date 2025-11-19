@@ -5,8 +5,6 @@ Basic test suite for NFL algorithm components.
 import pytest
 import pandas as pd
 import numpy as np
-import sqlite3
-import tempfile
 import os
 from unittest.mock import Mock, patch
 
@@ -24,33 +22,28 @@ class TestDataPipeline:
     
     def test_database_setup(self):
         """Test database schema creation."""
-        # Use temporary database
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-            pipeline = DataPipeline()
-            pipeline.db_path = tmp.name
-            
-            # Setup should not raise exceptions
-            pipeline.setup_enhanced_database()
-            
-            # Verify tables exist
-            conn = sqlite3.connect(tmp.name)
-            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tables = [row[0] for row in cursor.fetchall()]
-            
-            expected_tables = [
-                'player_stats_enhanced',
-                'weather_data',
-                'injury_data',
-                'odds_data',
-                'team_context',
-                'clv_tracking'
-            ]
-            
-            for table in expected_tables:
-                assert table in tables, f"Table {table} not created"
-            
-            conn.close()
-            os.unlink(tmp.name)
+        pipeline = DataPipeline(db_path=":memory:")
+        pipeline.setup_enhanced_database()
+
+        from utils.db import get_connection
+
+        with get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()"
+            )
+            tables = {row[0] for row in cursor.fetchall()}
+
+        expected_tables = {
+            'player_stats_enhanced',
+            'weather_data',
+            'injury_data',
+            'odds_data',
+            'team_context',
+            'clv_tracking'
+        }
+
+        missing = expected_tables - tables
+        assert not missing, f"Missing tables: {missing}"
     
     def test_feature_engineering(self):
         """Test basic feature engineering."""
@@ -70,11 +63,9 @@ class TestDataPipeline:
         }
         
         df = pd.DataFrame(data)
-        
-        # Mock pipeline for testing
-        pipeline = DataPipeline()
-        
-        # Test that feature engineering doesn't crash
+
+        pipeline = DataPipeline(db_path=":memory:")
+
         try:
             result = pipeline._engineer_weather_features(df)
             assert 'cold_weather' in result.columns
@@ -165,18 +156,11 @@ class TestIntegration:
         mock_response.raise_for_status.return_value = None
         mock_requests.return_value = mock_response
         
-        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
-            pipeline = DataPipeline()
-            pipeline.db_path = tmp.name
-            
-            try:
-                pipeline.setup_enhanced_database()
-                # Basic pipeline operations should not crash
-                assert True
-            except Exception as e:
-                pytest.fail(f"Pipeline integration failed: {e}")
-            finally:
-                os.unlink(tmp.name)
+        pipeline = DataPipeline(db_path=":memory:")
+        try:
+            pipeline.setup_enhanced_database()
+        except Exception as e:
+            pytest.fail(f"Pipeline integration failed: {e}")
 
 # Performance tests
 class TestPerformance:

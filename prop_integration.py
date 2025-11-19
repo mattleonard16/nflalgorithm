@@ -2,9 +2,9 @@
 """
 Integration module to connect prop line scraper with existing NFL prediction system
 """
+"""Integration module to connect prop line scraper with existing NFL prediction system"""
 
 import logging
-import sqlite3
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple
 
@@ -16,6 +16,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from config import config
+from utils.db import read_dataframe
 from utils.player_id_utils import (
     canonicalize_team,
     normalize_name,
@@ -45,67 +46,60 @@ def _sequence_ratio(a: str, b: str) -> float:
 
 def join_odds_projections(season: int, week: int) -> pd.DataFrame:
     """Join weekly odds snapshots with model projections."""
+    projections = read_dataframe(
+        """
+        SELECT season, week, player_id, team, opponent, market, mu, sigma, model_version,
+               featureset_hash, generated_at
+        FROM weekly_projections
+        WHERE season = ? AND week = ?
+        """,
+        params=(season, week),
+    )
 
-    with sqlite3.connect(config.database.path) as conn:
-        projections = pd.read_sql_query(
+    odds = read_dataframe(
+        """
+        SELECT event_id, season, week, player_id, market, sportsbook, line, price, as_of
+        FROM weekly_odds
+        WHERE season = ? AND week = ?
+        """,
+        params=(season, week),
+    )
+
+    players = read_dataframe(
+        """
+        SELECT player_id, name AS player_name, position, team AS team_stats
+        FROM player_stats_enhanced
+        WHERE season = ? AND week = ?
+        """,
+        params=(season, week),
+    )
+
+    injuries = read_dataframe(
+        """
+        SELECT player_id, status, practice_participation
+        FROM injury_data
+        WHERE season = ? AND week = ?
+        """,
+        params=(season, week),
+    )
+
+    try:
+        player_mappings_df = read_dataframe(
             """
-            SELECT season, week, player_id, team, opponent, market, mu, sigma, model_version,
-                   featureset_hash, generated_at
-            FROM weekly_projections
-            WHERE season = ? AND week = ?
+            SELECT player_id_canonical, player_id_odds, player_id_projections, match_type, confidence_score
+            FROM player_mappings
             """,
-            conn,
-            params=(season, week)
         )
-
-        odds = pd.read_sql_query(
-            """
-            SELECT event_id, season, week, player_id, market, sportsbook, line, price, as_of
-            FROM weekly_odds
-            WHERE season = ? AND week = ?
-            """,
-            conn,
-            params=(season, week)
+    except Exception:
+        player_mappings_df = pd.DataFrame(
+            columns=[
+                'player_id_canonical',
+                'player_id_odds',
+                'player_id_projections',
+                'match_type',
+                'confidence_score',
+            ]
         )
-
-        players = pd.read_sql_query(
-            """
-            SELECT player_id, name AS player_name, position
-            FROM player_stats_enhanced
-            WHERE season = ? AND week = ?
-            """,
-            conn,
-            params=(season, week)
-        )
-
-        injuries = pd.read_sql_query(
-            """
-            SELECT player_id, status, practice_participation
-            FROM injury_data
-            WHERE season = ? AND week = ?
-            """,
-            conn,
-            params=(season, week)
-        )
-
-        try:
-            player_mappings_df = pd.read_sql_query(
-                """
-                SELECT player_id_canonical, player_id_odds, player_id_projections, match_type, confidence_score
-                FROM player_mappings
-                """,
-                conn,
-            )
-        except Exception:
-            player_mappings_df = pd.DataFrame(
-                columns=[
-                    'player_id_canonical',
-                    'player_id_odds',
-                    'player_id_projections',
-                    'match_type',
-                    'confidence_score',
-                ]
-            )
 
     if projections.empty or odds.empty:
         logger.warning(
@@ -341,18 +335,6 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
     merged['season'] = merged['season'].fillna(season).astype(int)
     merged['week'] = merged['week'].fillna(week).astype(int)
 
-    merged['team_match_flag'] = merged['team'].fillna('').eq(merged['team_odds'].fillna(''))
-
-    mismatch_mask = ~merged['team_match_flag']
-    team_mismatch_count = int(mismatch_mask.sum())
-    team_mismatch_sample: List[Dict[str, str]] = []
-    if team_mismatch_count:
-        team_mismatch_sample = (
-            merged.loc[mismatch_mask, ['player_id', 'player_id_odds', 'team', 'team_odds']]
-            .head(5)
-            .to_dict(orient='records')
-        )
-
     match_breakdown = {
         key: int(value) for key, value in merged['match_type'].value_counts().to_dict().items()
     }
@@ -361,6 +343,58 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
     matched_odds_players = set(merged['player_id_odds'].dropna())
     unmatched_projection_players = list(proj_players - matched_projection_players)[:15]
     unmatched_odds_players = list(odds_players_original - matched_odds_players)[:15]
+
+    merged = merged.merge(players, on='player_id', how='left', suffixes=('', '_stats'))
+    merged = merged.merge(injuries, on='player_id', how='left')
+
+    # Fill player descriptors from stats when available
+    if 'player_name_stats' in merged.columns:
+        merged['player_name'] = merged['player_name'].fillna(merged['player_name_stats'])
+    merged['player_name'] = merged['player_name'].fillna(merged['player_id'])
+
+    if 'position_stats' in merged.columns:
+        merged['position'] = merged['position'].fillna(merged['position_stats'])
+    merged['position'] = merged['position'].fillna('FLEX')
+    merged['status'] = merged['status'].fillna('ACTIVE')
+    merged['practice_participation'] = merged['practice_participation'].fillna('FULL')
+
+    # Team reconciliation: stats > projections > odds
+    stats_team = merged.get('team_stats')
+    proj_team = merged.get('team')
+    odds_team = merged.get('team_odds')
+
+    merged['team_stats_canon'] = stats_team.apply(canonicalize_team) if stats_team is not None else ''
+    merged['team_proj_canon'] = proj_team.apply(canonicalize_team) if proj_team is not None else ''
+    merged['team_odds_canon'] = odds_team.apply(canonicalize_team) if odds_team is not None else ''
+
+    merged['team_effective'] = merged['team_stats_canon']
+    mask_missing = merged['team_effective'] == ''
+    merged.loc[mask_missing, 'team_effective'] = merged.loc[mask_missing, 'team_proj_canon']
+    mask_missing = merged['team_effective'] == ''
+    merged.loc[mask_missing, 'team_effective'] = merged.loc[mask_missing, 'team_odds_canon']
+
+    merged['team'] = merged['team_effective']
+
+    merged['team_match_flag'] = merged['team'].fillna('').eq(merged['team_odds_canon'].fillna(''))
+
+    mismatch_mask = ~merged['team_match_flag']
+    team_mismatch_count = int(mismatch_mask.sum())
+    team_mismatch_sample: List[Dict[str, str]] = []
+    if team_mismatch_count:
+        team_mismatch_sample = (
+            merged.loc[
+                mismatch_mask,
+                ['player_id', 'player_id_odds', 'team_stats_canon', 'team_proj_canon', 'team_odds_canon', 'season', 'week'],
+            ]
+            .head(5)
+            .to_dict(orient='records')
+        )
+
+    merged['price'] = merged['price'].astype(int)
+    merged['line'] = merged['line'].astype(float)
+    merged['mu'] = merged['mu'].astype(float)
+    merged['sigma'] = merged['sigma'].astype(float)
+    merged['match_confidence'] = merged['match_score']
 
     logger.info(
         "join_odds_projections: matched_rows=%d matched_players=%d match_breakdown=%s team_mismatches=%d unmatched_projection_players=%d unmatched_odds_players=%d",
@@ -386,23 +420,9 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
 
     if team_mismatch_count:
         logger.warning(
-            "join_odds_projections: team mismatch sample=%s",
+            "join_odds_projections: team mismatches sample=%s",
             team_mismatch_sample,
         )
-
-    merged = merged.merge(players, on='player_id', how='left')
-    merged = merged.merge(injuries, on='player_id', how='left')
-
-    merged['player_name'] = merged['player_name'].fillna(merged['player_id'])
-    merged['position'] = merged['position'].fillna('FLEX')
-    merged['status'] = merged['status'].fillna('ACTIVE')
-    merged['practice_participation'] = merged['practice_participation'].fillna('FULL')
-
-    merged['price'] = merged['price'].astype(int)
-    merged['line'] = merged['line'].astype(float)
-    merged['mu'] = merged['mu'].astype(float)
-    merged['sigma'] = merged['sigma'].astype(float)
-    merged['match_confidence'] = merged['match_score']
 
     merged.sort_values(['market', 'player_id', 'sportsbook', 'as_of'], inplace=True)
     merged.reset_index(drop=True, inplace=True)
@@ -855,9 +875,10 @@ class PropIntegration:
         conn = sqlite3.connect(self.prediction_db_path)
         
         # Create or update prop_opportunities table
-        conn.execute('''
+        conn.execute(
+            '''
             CREATE TABLE IF NOT EXISTS prop_opportunities (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id INTEGER PRIMARY KEY,
                 player TEXT NOT NULL,
                 team TEXT NOT NULL,
                 position TEXT NOT NULL,
@@ -873,7 +894,7 @@ class PropIntegration:
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(player, book, stat)
             )
-        ''')
+            ''')
         
         # Clear old opportunities
         conn.execute('DELETE FROM prop_opportunities')

@@ -1,10 +1,7 @@
-"""
-Enhanced value betting engine with multi-sportsbook comparison and CLV tracking.
-"""
+"""Enhanced value betting engine with multi-sportsbook comparison and CLV tracking."""
 
 import json
 import math
-import sqlite3
 import logging
 import uuid
 from dataclasses import dataclass
@@ -15,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from config import config
+from utils.db import get_connection, read_dataframe
 from prop_integration import join_odds_projections
 
 logging.basicConfig(
@@ -170,9 +168,10 @@ def rank_weekly_value(
     df = df.drop(columns=['decimal_odds', 'implied_prob'])
 
     columns = [
-        'season', 'week', 'player_id', 'player_name', 'team', 'opponent', 'position', 'market',
-        'sportsbook', 'line', 'price', 'mu', 'sigma', 'p_win', 'edge_percentage', 'expected_roi',
-        'kelly_fraction', 'stake', 'recommendation', 'model_version', 'as_of', 'event_id'
+        'season', 'week', 'player_id', 'player_name', 'team', 'team_odds', 'opponent', 'position',
+        'market', 'sportsbook', 'line', 'price', 'mu', 'sigma', 'p_win', 'edge_percentage',
+        'expected_roi', 'kelly_fraction', 'stake', 'recommendation', 'model_version', 'as_of',
+        'event_id'
     ]
 
     return df.reindex(columns=columns + ['generated_at']).sort_values(
@@ -181,6 +180,8 @@ def rank_weekly_value(
 
 
 def _persist_weekly_bets(engine: 'ValueBettingEngine', bets: pd.DataFrame, bankroll: float) -> None:
+    from utils.db import executemany
+    
     payload = bets.copy()
     payload['bet_id'] = [str(uuid.uuid4()) for _ in range(len(payload))]
     payload['placed_at'] = datetime.utcnow().isoformat()
@@ -216,9 +217,7 @@ def _persist_weekly_bets(engine: 'ValueBettingEngine', bets: pd.DataFrame, bankr
             row.model_version
         ))
 
-    with sqlite3.connect(engine.db_path) as conn:
-        conn.executemany(sql, tuples)
-        conn.commit()
+    executemany(sql, tuples)
 
 class ValueBettingEngine:
     """Enhanced value betting engine with professional features."""
@@ -390,14 +389,13 @@ class ValueBettingEngine:
 
     def _load_latest_player_stats(self) -> Dict[str, pd.Series]:
         try:
-            conn = sqlite3.connect(self.db_path)
-            query = """
+            df = read_dataframe(
+                """
                 SELECT *
                 FROM player_stats_enhanced
                 ORDER BY player_id, season DESC, week DESC
-            """
-            df = pd.read_sql_query(query, conn)
-            conn.close()
+                """,
+            )
             if df.empty:
                 return {}
             latest = df.sort_values(['player_id', 'season', 'week']).groupby('player_id').tail(1)
@@ -505,20 +503,24 @@ class ValueBettingEngine:
     
     def track_closing_line_value(self, bet_id: str, closing_odds: Dict) -> CLVResult:
         """Track closing line value for placed bets."""
-        conn = sqlite3.connect(self.db_path)
+        from utils.db import execute
         
-        # Get original bet details
-        cursor = conn.execute(
-            "SELECT bet_line, sportsbook, prop_type FROM clv_tracking WHERE bet_id = ?",
-            (bet_id,)
-        )
-        bet_data = cursor.fetchone()
+        try:
+            # Use read_dataframe since get_connection returns raw connection
+            bet_data = read_dataframe(
+                "SELECT bet_line, sportsbook, prop_type FROM clv_tracking WHERE bet_id = ?",
+                params=(bet_id,)
+            )
+            
+            if bet_data.empty:
+                logger.warning(f"Bet {bet_id} not found in CLV tracking")
+                return None
+                
+            opening_line = bet_data.iloc[0]['bet_line']
+        except Exception as e:
+             logger.error(f"Error reading CLV data: {e}")
+             return None
         
-        if not bet_data:
-            logger.warning(f"Bet {bet_id} not found in CLV tracking")
-            return None
-        
-        opening_line = bet_data[0]
         closing_line = closing_odds.get('line', opening_line)
         
         # Calculate CLV
@@ -535,15 +537,17 @@ class ValueBettingEngine:
         # Sharp money indicator (simplified)
         sharp_money = abs(clv_percentage) > 3  # 3%+ move indicates sharp action
         
-        # Update CLV tracking
-        conn.execute('''
-            UPDATE clv_tracking 
-            SET closing_line = ?, clv_percentage = ?
-            WHERE bet_id = ?
-        ''', (closing_line, clv_percentage, bet_id))
-        
-        conn.commit()
-        conn.close()
+        try:
+            execute(
+                '''
+                UPDATE clv_tracking 
+                SET closing_line = ?, clv_percentage = ?
+                WHERE bet_id = ?
+                ''',
+                params=(closing_line, clv_percentage, bet_id)
+            )
+        except Exception as e:
+            logger.error(f"Error updating CLV: {e}")
         
         return CLVResult(
             bet_id=bet_id,
@@ -558,44 +562,99 @@ class ValueBettingEngine:
         """Save value bets to database with CLV tracking."""
         if not value_bets:
             return
+            
+        from utils.db import executemany
         
-        conn = sqlite3.connect(self.db_path)
-        
+        # Prepare data for enhanced_value_bets
+        bet_tuples = []
         for bet in value_bets:
-            # Save to enhanced value bets table
-            conn.execute('''
-                INSERT OR REPLACE INTO enhanced_value_bets 
-                (bet_id, player_name, position, team, prop_type, sportsbook, line, 
-                 model_prediction, model_confidence, edge_yards, edge_percentage,
-                 kelly_fraction, expected_roi, risk_level, recommendation, bet_size_units,
-                 correlation_risk, market_efficiency, date_identified)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                bet.bet_id, bet.player_name, bet.position, bet.team, bet.prop_type,
-                bet.sportsbook, bet.line, bet.model_prediction, bet.model_confidence,
-                bet.edge_yards, bet.edge_percentage, bet.kelly_fraction, bet.expected_roi,
-                bet.risk_level, bet.recommendation, bet.bet_size_units,
-                bet.correlation_risk, bet.market_efficiency, bet.timestamp
+            bet_tuples.append((
+                bet.bet_id, bet.player_name, bet.position, bet.team, bet.prop_type, bet.sportsbook, bet.line, 
+                bet.model_prediction, bet.model_confidence, bet.edge_yards, bet.edge_percentage,
+                bet.kelly_fraction, bet.expected_roi, bet.risk_level, bet.recommendation, bet.bet_size_units,
+                bet.correlation_risk, bet.market_efficiency, bet.timestamp,
+                
+                # Conflict update values (repeated for Postgres standard ON CONFLICT DO UPDATE logic which usually requires named parameters or specific order)
+                # But utils.db.executemany uses executemany which is for INSERTs usually.
+                # Doing complex UPSERT with executemany across backends is hard.
+                # However, `data_pipeline.py` handles this manually.
+                # Here we can use `INSERT ... ON CONFLICT DO UPDATE ...`
+                
+                # Actually, let's simplify. We use proper UPSERT query.
+                # For Postgres/SQLite compatibility, we rely on the SQL string.
+            ))
+
+        # We can't easily use executemany for complex UPSERTs if we need to pass parameters twice (once for insert, once for update) 
+        # unless we use the `excluded` table alias which both Postgres and SQLite support!
+        # So we just need to pass parameters ONCE.
+        
+        upsert_sql = '''
+            INSERT INTO enhanced_value_bets 
+            (bet_id, player_name, position, team, prop_type, sportsbook, line, 
+             model_prediction, model_confidence, edge_yards, edge_percentage,
+             kelly_fraction, expected_roi, risk_level, recommendation, bet_size_units,
+             correlation_risk, market_efficiency, date_identified)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT(bet_id) DO UPDATE SET
+                player_name = excluded.player_name,
+                position = excluded.position,
+                team = excluded.team,
+                prop_type = excluded.prop_type,
+                sportsbook = excluded.sportsbook,
+                line = excluded.line,
+                model_prediction = excluded.model_prediction,
+                model_confidence = excluded.model_confidence,
+                edge_yards = excluded.edge_yards,
+                edge_percentage = excluded.edge_percentage,
+                kelly_fraction = excluded.kelly_fraction,
+                expected_roi = excluded.expected_roi,
+                risk_level = excluded.risk_level,
+                recommendation = excluded.recommendation,
+                bet_size_units = excluded.bet_size_units,
+                correlation_risk = excluded.correlation_risk,
+                market_efficiency = excluded.market_efficiency,
+                date_identified = excluded.date_identified
+        '''
+        
+        # Prepare data for clv_tracking
+        clv_tuples = []
+        for bet in value_bets:
+            clv_tuples.append((
+                bet.bet_id, bet.player_id, bet.prop_type, bet.sportsbook, bet.line, bet.timestamp.date()
             ))
             
-            # Initialize CLV tracking
-            conn.execute('''
-                INSERT OR REPLACE INTO clv_tracking
-                (bet_id, player_id, prop_type, sportsbook, bet_line, date_placed)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                bet.bet_id, bet.player_id, bet.prop_type, bet.sportsbook,
-                bet.line, bet.timestamp.date()
-            ))
+        clv_sql = '''
+            INSERT INTO clv_tracking
+            (bet_id, player_id, prop_type, sportsbook, bet_line, date_placed)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT(bet_id) DO UPDATE SET
+                player_id = excluded.player_id,
+                prop_type = excluded.prop_type,
+                sportsbook = excluded.sportsbook,
+                bet_line = excluded.bet_line,
+                date_placed = excluded.date_placed
+        '''
+
+        # Note: utils.db handles ? vs %s conversion. So we should use ? in the SQL string if we want it to work for SQLite too,
+        # or rely on _normalize_sql_for_backend.
+        # Since utils.db _normalize_sql_for_backend converts ? to %s for Postgres, 
+        # we should write SQL with ? here to be backend-agnostic in the source code (though this file is mostly migration target).
+        # But wait, data_pipeline used %s manually.
+        # utils.db functions expect us to provide SQL.
+        # If I use ?, utils.db will convert to %s for Postgres.
         
-        conn.commit()
-        conn.close()
-        logger.info(f"Saved {len(value_bets)} value bets to database")
+        upsert_sql = upsert_sql.replace('%s', '?')
+        clv_sql = clv_sql.replace('%s', '?')
+
+        try:
+            executemany(upsert_sql, bet_tuples)
+            executemany(clv_sql, clv_tuples)
+            logger.info(f"Saved {len(value_bets)} value bets to database")
+        except Exception as e:
+            logger.error(f"Error saving value bets: {e}")
     
     def generate_clv_report(self) -> pd.DataFrame:
         """Generate closing line value report."""
-        conn = sqlite3.connect(self.db_path)
-        
         query = '''
         SELECT 
             bet_id,
@@ -613,9 +672,8 @@ class ValueBettingEngine:
         WHERE clv_percentage IS NOT NULL
         ORDER BY date_placed DESC
         '''
-        
-        clv_df = pd.read_sql_query(query, conn)
-        conn.close()
+
+        clv_df = read_dataframe(query)
         
         if not clv_df.empty:
             # Add summary statistics
