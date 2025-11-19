@@ -1510,9 +1510,17 @@ class DataPipeline:
             logger.info("Pipeline update completed successfully")
             
             # Load data and engineer features
-            df = pd.read_sql("SELECT * FROM player_stats_enhanced", sqlite3.connect(self.db_path))
+            # Use utils.db for backend-agnostic connection
+            from utils.db import get_connection, read_dataframe, write_dataframe
+            
+            # Read existing data
+            df = read_dataframe("SELECT * FROM player_stats_enhanced")
+            
+            # Engineer features
             df_enhanced = self.engineer_breakout_features(df)
-            df_enhanced.to_sql('player_stats_enhanced', sqlite3.connect(self.db_path), if_exists='replace', index=False)
+            
+            # Write back results using robust utils.db helper
+            write_dataframe(df_enhanced, 'player_stats_enhanced', if_exists='replace', index=False)
             
             logger.info("Breakout features engineered successfully")
             

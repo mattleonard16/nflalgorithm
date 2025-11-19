@@ -7,6 +7,7 @@ whether the backend is a local SQLite file or a remote Postgres DB.
 from __future__ import annotations
 
 import contextlib
+import warnings
 from typing import Iterator, Optional, Iterable, Any, Union, Dict
 from urllib.parse import urlparse
 
@@ -22,6 +23,9 @@ except ImportError:
     psycopg2_connection = None  # type: ignore
 
 from config import config
+
+# Suppress pandas UserWarning about raw DBAPI connections
+warnings.filterwarnings("ignore", message=".*pandas only supports SQLAlchemy connectable.*")
 
 # Union type for database connections
 DBConnection = Union[sqlite3.Connection, psycopg2_connection] if PSYCOPG2_AVAILABLE else sqlite3.Connection
@@ -68,7 +72,9 @@ def _create_postgres_connection() -> psycopg2_connection:
         raise RuntimeError(f"Invalid Supabase DSN format: {e}")
     
     try:
-        conn = psycopg2.connect(supabase_dsn)
+        # Connect to Supabase
+        # options="-c client_min_messages=ERROR" suppresses notices like "supautils.disable_program"
+        conn = psycopg2.connect(supabase_dsn, options="-c client_min_messages=ERROR")
         return conn
     except psycopg2.Error as e:
         raise RuntimeError(f"Failed to connect to Supabase: {e}")
@@ -182,6 +188,42 @@ def executemany(sql: str, seq_of_params: Iterable[tuple[Any, ...]], conn: Option
             with tmp_conn.cursor() as cursor:
                 cursor.executemany(normalized_sql, params_list)
             tmp_conn.commit()
+
+
+def write_dataframe(df: pd.DataFrame, table_name: str, if_exists: str = 'fail', index: bool = False) -> None:
+    """Write a DataFrame to the database using the configured backend.
+    
+    Args:
+        df: DataFrame to write
+        table_name: Target table name
+        if_exists: How to behave if the table already exists.
+                   User 'fail', 'replace', or 'append'.
+        index: Write DataFrame index as a column.
+    """
+    backend = _get_backend()
+    
+    if backend in ("postgresql", "supabase"):
+        # Use SQLAlchemy for robust Postgres support (handles types/schema correctly)
+        try:
+            from sqlalchemy import create_engine
+            # Create engine (pool is managed by SQLAlchemy)
+            supabase_dsn = getattr(config.database, "supabase_dsn", "")
+            if not supabase_dsn:
+                raise RuntimeError("SUPABASE_DB_URL not set")
+                
+            # options="-c client_min_messages=ERROR" suppresses notices like "supautils.disable_program"
+            engine = create_engine(supabase_dsn, connect_args={'options': '-c client_min_messages=ERROR'})
+            with engine.begin() as conn:
+                df.to_sql(table_name, conn, if_exists=if_exists, index=index)
+        except ImportError:
+            raise RuntimeError("SQLAlchemy is required for writing DataFrames to PostgreSQL/Supabase")
+        except Exception as e:
+            raise RuntimeError(f"Failed to write dataframe to {table_name}: {e}")
+    else:
+        # SQLite
+        # Pandas handles SQLite correctly with raw connection
+        with get_connection() as conn:
+             df.to_sql(table_name, conn, if_exists=if_exists, index=index)
 
 
 def get_table_columns(table_name: str, conn: Optional[DBConnection] = None) -> Dict[str, Dict[str, Any]]:
