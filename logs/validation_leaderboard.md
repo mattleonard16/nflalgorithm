@@ -1,6 +1,6 @@
 # NFL Algorithm Cross-Season Validation Report
 
-Generated: 2025-10-30 16:33:46
+Generated: 2025-11-20 14:17:02
 
 ## Executive Summary
 
@@ -15,9 +15,9 @@ Generated: 2025-10-30 16:33:46
 
 | Fold | Test Seasons | Rushing MAE | Receiving MAE | Rushing R² | Receiving R² | Meets Target |
 |------|--------------|-------------|---------------|------------|--------------|--------------|
-| 1 | 2023 | 0.000 | 0.000 | 1.000 | 1.000 | YES |
-| 2 | 2023 | 0.000 | 0.000 | 1.000 | 1.000 | YES |
-| 3 | 2023, 2024 | 0.000 | 0.000 | 1.000 | 1.000 | YES |
+| 1 | 2024 | 0.000 | 0.000 | 1.000 | 1.000 | YES |
+| 2 | 2024 | 0.000 | 0.000 | 1.000 | 1.000 | YES |
+| 3 | 2024 | 0.000 | 0.000 | 1.000 | 1.000 | YES |
 
 ## Distribution
 

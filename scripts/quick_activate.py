@@ -5,26 +5,30 @@ Quick Betting Activation - Get Value Bets Showing
 Simple script to create value betting opportunities from our projections
 """
 
-import sqlite3
 import pandas as pd
 import numpy as np
 import random
 from datetime import datetime
 from rich.console import Console
+from utils.db import get_connection, read_dataframe, execute, executemany
 
 console = Console()
 
 def main():
     console.print("🚀 [bold blue]Activating Value Betting System[/]")
     
-    # Connect to database
-    conn = sqlite3.connect("nfl_data.db")
+    # Connect to database (via utils.db backend)
+    conn_cm = get_connection()
+    conn = conn_cm.__enter__()
     
     # Get our 2025 projections
-    projections = pd.read_sql_query("""
-    SELECT * FROM player_projections_2025
-    ORDER BY projected_fantasy_ppg DESC
-    """, conn)
+    projections = read_dataframe(
+        """
+        SELECT * FROM player_projections_2025
+        ORDER BY projected_fantasy_ppg DESC
+        """,
+        conn=conn,
+    )
     
     if projections.empty:
         console.print("❌ No projections found. Run training script first.")
@@ -110,7 +114,7 @@ def main():
     console.print(f"💰 Found {len(value_df)} value betting opportunities")
     
     # Create enhanced_value_bets table and insert data
-    conn.execute("""
+    execute("""
     CREATE TABLE IF NOT EXISTS enhanced_value_bets (
         bet_id TEXT PRIMARY KEY,
         player_name TEXT,
@@ -128,11 +132,11 @@ def main():
         expected_roi REAL,
         date_identified TIMESTAMP
     )
-    """)
+    """, conn=conn)
     
     # Insert value bets (replace semantics for simplicity)
-    conn.execute("DELETE FROM enhanced_value_bets")
-    conn.executemany(
+    execute("DELETE FROM enhanced_value_bets", conn=conn)
+    executemany(
         """
         INSERT INTO enhanced_value_bets (
             bet_id, player_name, position, prop_type, sportsbook, line,
@@ -145,10 +149,11 @@ def main():
         )
         """,
         value_df.to_dict(orient="records"),
+        conn=conn,
     )
     
     # Also create a simpler table for the dashboard
-    conn.execute("""
+    execute("""
     CREATE TABLE IF NOT EXISTS value_bets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         player_name TEXT,
@@ -164,11 +169,11 @@ def main():
         confidence REAL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-    """)
+    """, conn=conn)
     
     # Insert simplified format
     for _, bet in value_df.iterrows():
-        conn.execute(
+        execute(
             """
             INSERT INTO value_bets 
             (player_name, position, prop_type, sportsbook, line, prediction, edge, edge_pct, recommendation, confidence)
@@ -193,10 +198,11 @@ def main():
                 bet['recommendation'],
                 bet['confidence'],
             ),
+            conn=conn,
         )
     
     conn.commit()
-    conn.close()
+    conn_cm.__exit__(None, None, None)
     
     # Show summary
     console.print(f"\n📊 [bold]Value Betting Summary:[/]")

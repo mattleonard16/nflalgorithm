@@ -34,10 +34,13 @@ FRESHNESS_THRESHOLDS = {
 
 
 def get_available_seasons_weeks() -> tuple[list[int], dict[int, list[int]]]:
-    with get_connection() as conn:
-        rows = conn.execute(
+    try:
+        df = read_dataframe(
             "SELECT DISTINCT season, week FROM weekly_projections ORDER BY season DESC, week DESC"
-        ).fetchall()
+        )
+        rows = df.values.tolist()
+    except Exception:
+        rows = []
 
     if not rows:
         current_year = datetime.utcnow().year

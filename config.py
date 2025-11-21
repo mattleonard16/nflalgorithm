@@ -25,8 +25,9 @@ class DatabaseConfig:
     path: str = os.getenv("SQLITE_DB_PATH", "nfl_data.db")
     backup_path: str = "data/backups/"
     max_connections: int = 10
-    backend: str = os.getenv("DB_BACKEND", "sqlite")
-    supabase_dsn: str = os.getenv("SUPABASE_DB_URL", "")
+    # Force load from env if not set correctly by default
+    backend: str = field(default_factory=lambda: os.getenv("DB_BACKEND", "sqlite"))
+    db_url: str = field(default_factory=lambda: os.getenv("DB_URL", ""))
 
 @dataclass
 class CacheConfig:
@@ -144,4 +145,9 @@ class Config:
         http_cache_path.mkdir(exist_ok=True)
 
 # Global config instance
-config = Config() 
+# config = Config()
+
+def get_config():
+    return Config()
+
+config = get_config() 

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sqlite3
 import sys
 from pathlib import Path
 from typing import Iterable
@@ -19,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from config import config
 from prop_integration import join_odds_projections
 from schema_migrations import MigrationManager
+from utils.db import get_connection, executemany
 
 
 logger = logging.getLogger(__name__)
@@ -69,8 +69,8 @@ def _prepare_mapping(df: pd.DataFrame, min_confidence: float) -> pd.DataFrame:
 
 
 def _upsert_mappings(rows: Iterable[tuple]) -> None:
-    with sqlite3.connect(config.database.path) as conn:
-        conn.executemany(
+    with get_connection() as conn:
+        executemany(
             """
             INSERT INTO player_mappings (
                 player_id_canonical,
@@ -93,8 +93,8 @@ def _upsert_mappings(rows: Iterable[tuple]) -> None:
                 created_at=CURRENT_TIMESTAMP
             """,
             rows,
+            conn=conn,
         )
-        conn.commit()
 
 
 def main() -> None:

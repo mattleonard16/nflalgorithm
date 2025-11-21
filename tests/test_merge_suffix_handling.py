@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 from pathlib import Path
+import os
 
 import pandas as pd
 import pytest
@@ -19,6 +20,14 @@ def temp_db_with_data():
     """Create a temporary database with test data."""
     # Use isolated temporary database file
     tmp = Path(tempfile.mkstemp(suffix=".db")[1])
+    original_path = config.database.path
+    original_backend = config.database.backend
+    env_backend = os.environ.get("DB_BACKEND")
+    env_sqlite_path = os.environ.get("SQLITE_DB_PATH")
+    os.environ["DB_BACKEND"] = "sqlite"
+    os.environ["SQLITE_DB_PATH"] = str(tmp)
+    config.database.backend = "sqlite"
+    config.database.path = str(tmp)
 
     # Setup schema
     MigrationManager(tmp).run()
@@ -77,6 +86,18 @@ def temp_db_with_data():
         conn.commit()
     
     yield str(tmp)
+
+    config.database.path = original_path
+    config.database.backend = original_backend
+    if env_backend is not None:
+        os.environ["DB_BACKEND"] = env_backend
+    else:
+        os.environ.pop("DB_BACKEND", None)
+    if env_sqlite_path is not None:
+        os.environ["SQLITE_DB_PATH"] = env_sqlite_path
+    else:
+        os.environ.pop("SQLITE_DB_PATH", None)
+    tmp.unlink(missing_ok=True)
 
 
 def test_join_odds_projections_handles_merge_suffixes(temp_db_with_data):

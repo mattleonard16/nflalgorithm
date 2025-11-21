@@ -29,17 +29,17 @@ from config import config
 from scripts.prop_line_scraper import NFLPropScraper
 from prop_integration import PropIntegration
 from value_betting_engine import ValueBettingEngine
-from utils.db import get_connection, column_exists
+from utils.db import get_connection, column_exists, execute, executemany
 
 
 def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
     if not column_exists(table, column, conn=conn):
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+        execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}", conn=conn)
 
 
 def ensure_tables(conn) -> None:
     """Create the dashboard tables if they do not already exist."""
-    conn.execute(
+    execute(
         """
         CREATE TABLE IF NOT EXISTS enhanced_value_bets (
             bet_id TEXT PRIMARY KEY,
@@ -62,7 +62,8 @@ def ensure_tables(conn) -> None:
             market_efficiency REAL,
             date_identified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """
+        """,
+        conn=conn,
     )
 
     # Backfill/migrate columns if an older schema exists
@@ -89,11 +90,11 @@ def ensure_tables(conn) -> None:
     ]:
         try:
             _ensure_column(conn, "enhanced_value_bets", col, ddl)
-        except sqlite3.OperationalError:
+        except Exception:
             # Skip if table doesn't exist yet; it was just created above
             pass
 
-    conn.execute(
+    execute(
         """
         CREATE TABLE IF NOT EXISTS clv_tracking (
             bet_id TEXT PRIMARY KEY,
@@ -108,7 +109,8 @@ def ensure_tables(conn) -> None:
             date_placed DATE,
             date_settled DATE
         )
-        """
+        """,
+        conn=conn,
     )
 
     for col, ddl in [
@@ -126,7 +128,7 @@ def ensure_tables(conn) -> None:
     ]:
         try:
             _ensure_column(conn, "clv_tracking", col, ddl)
-        except sqlite3.OperationalError:
+        except Exception:
             pass
 
 
@@ -267,8 +269,7 @@ def persist_value_bets(df: pd.DataFrame) -> int:
                 date_identified = excluded.date_identified
             """
         )
-
-        conn.executemany(insert_sql, df.to_dict(orient="records"))
+        executemany(insert_sql, df.to_dict(orient="records"), conn=conn)
 
         # Initialize CLV tracking rows
         today_str = datetime.now().date().isoformat()
@@ -283,7 +284,7 @@ def persist_value_bets(df: pd.DataFrame) -> int:
             }
             for _, r in df.iterrows()
         ]
-        conn.executemany(
+        executemany(
             """
             INSERT INTO clv_tracking
                 (bet_id, player_id, prop_type, sportsbook, bet_line, date_placed)
@@ -298,6 +299,7 @@ def persist_value_bets(df: pd.DataFrame) -> int:
                 date_placed = excluded.date_placed
             """,
             clv_rows,
+            conn=conn,
         )
 
         conn.commit()

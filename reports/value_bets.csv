@@ -1,4 +1,1 @@
 player,team,position,book,stat,line,model_prediction,edge_yards,edge_percentage,over_odds,under_odds,value_rating
-CeeDee Lamb,DAL,WR,FanDuel,receiving_yards,1200.5,1742.0,541.5,45.106205747605166,-115,-105,HIGH_VALUE
-Tyreek Hill,MIA,WR,DraftKings,receiving_yards,1350.5,1675.0,324.5,24.028137726767866,-120,100,HIGH_VALUE
-Josh Jacobs,GB,RB,BetMGM,rushing_yards,950.5,862.0,-88.5,-9.310889005786429,-108,-112,MEDIUM_VALUE

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+import numpy as np
 
 from config import config
 from utils.db import get_connection
@@ -44,6 +45,19 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
             return ranked
         
         payload['generated_at'] = datetime.utcnow().isoformat()
+
+        # Sanity filters: drop obviously broken probabilities/edges before persisting
+        payload['sigma'] = payload['sigma'].astype(float).clip(lower=7.5)
+        payload['p_win'] = payload['p_win'].clip(0.01, 0.99)
+
+        large_gap_mask = (
+            payload['line'].notna()
+            & payload['mu'].notna()
+            & (np.abs(payload['mu'] - payload['line']) > (payload['sigma'] * 3.0))
+        )
+        payload = payload[~large_gap_mask]
+
+        payload = payload[payload['edge_percentage'].between(-0.5, 0.5)]
 
         sql = (
             """

@@ -11,7 +11,6 @@ Usage:
 """
 
 import argparse
-import sqlite3
 import sys
 import warnings
 from datetime import datetime, timedelta
@@ -22,6 +21,7 @@ import pandas as pd
 import requests
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from utils.db import execute, read_dataframe
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
@@ -34,7 +34,6 @@ class NFLDataPopulator:
     def __init__(self, db_path: str = "nfl_data.db"):
         self.db_path = db_path
         self.seasons = [2020, 2021, 2022, 2023, 2024]
-        self.connection = None
         
         # Position mapping for consistent data
         self.position_groups = {
@@ -57,16 +56,14 @@ class NFLDataPopulator:
         self.log(message, "green")
         
     def connect_db(self):
-        """Connect to SQLite database and create tables"""
-        self.log("🗄️ Connecting to database...")
-        
+        """Initialize database schema using utils.db backend"""
+        self.log("🗄️ Initializing database schema...")
         try:
-            self.connection = sqlite3.connect(self.db_path)
             self.create_tables()
-            self.success(f"✅ Connected to {self.db_path}")
+            self.success(f"✅ Database ready at {self.db_path}")
             return True
         except Exception as e:
-            self.error(f"❌ Database connection failed: {e}")
+            self.error(f"❌ Database initialization failed: {e}")
             return False
             
     def create_tables(self):
@@ -188,11 +185,9 @@ class NFLDataPopulator:
         )
         """
         
-        # Execute table creation
+        # Execute table creation via utils.db
         for sql in [player_stats_sql, enhanced_features_sql, team_stats_sql]:
-            self.connection.execute(sql)
-            
-        self.connection.commit()
+            execute(sql)
         self.log("📋 Database tables created/verified")
         
     def fetch_nfl_data_py(self, seasons: List[int]) -> pd.DataFrame:
@@ -518,7 +513,7 @@ class NFLDataPopulator:
             
             for _, row in player_df.iterrows():
                 try:
-                    self.connection.execute("""
+                    execute("""
                         INSERT INTO player_stats 
                         (player_id, player_name, team, position, season, week,
                          rushing_attempts, rushing_yards, rushing_tds, 
@@ -542,14 +537,16 @@ class NFLDataPopulator:
                             passing_yards = excluded.passing_yards,
                             passing_tds = excluded.passing_tds,
                             fantasy_points = excluded.fantasy_points
-                    """, (
+                    """,
+                    (
                         row['player_id'], row['player_name'], row['team'], row['position'],
                         row['season'], row['week'], row['rushing_attempts'], row['rushing_yards'],
                         row['rushing_tds'], row['receiving_targets'], row['receiving_receptions'],
                         row['receiving_yards'], row['receiving_tds'], row['passing_attempts'],
                         row['passing_completions'], row['passing_yards'], row['passing_tds'],
-                        row['fantasy_points']
-                    ))
+                        row['fantasy_points'],
+                    ),
+                )
                 except Exception as e:
                     self.log(f"Error inserting player stat: {e}", "yellow")
                     
@@ -560,7 +557,7 @@ class NFLDataPopulator:
             
             for _, row in enhanced_df.iterrows():
                 try:
-                    self.connection.execute("""
+                    execute("""
                         INSERT INTO enhanced_features
                         (player_id, player_name, position, season, snap_share, target_share,
                          carry_share, redzone_usage, yards_per_carry, yards_per_target, catch_rate,
@@ -589,52 +586,57 @@ class NFLDataPopulator:
                             over_under_record = excluded.over_under_record,
                             prop_hit_rate = excluded.prop_hit_rate,
                             value_score = excluded.value_score
-                    """, (
+                    """,
+                    (
                         row['player_id'], row['player_name'], row['position'], row['season'],
                         row['snap_share'], row['target_share'], row['carry_share'], row['redzone_usage'],
                         row['yards_per_carry'], row['yards_per_target'], row['catch_rate'],
                         row['air_yards_share'], row['expected_fantasy_points'], row['fantasy_points_per_game'],
                         row['consistency_score'], row['ceiling_score'], row['floor_score'],
                         row['recent_trend'], row['momentum_score'], row['over_under_record'],
-                        row['prop_hit_rate'], row['value_score']
-                    ))
+                        row['prop_hit_rate'], row['value_score'],
+                    ),
+                )
                 except Exception as e:
                     self.log(f"Error inserting enhanced feature: {e}", "yellow")
                     
                 progress.advance(task2)
-                
-        self.connection.commit()
         
     def generate_summary(self):
         """Generate data population summary"""
         self.log("📊 Generating population summary...")
         
         # Count records
-        player_count = self.connection.execute("SELECT COUNT(*) FROM player_stats").fetchone()[0]
-        enhanced_count = self.connection.execute("SELECT COUNT(*) FROM enhanced_features").fetchone()[0]
+        player_count = int(read_dataframe("SELECT COUNT(*) AS c FROM player_stats").iloc[0]["c"])
+        enhanced_count = int(read_dataframe("SELECT COUNT(*) AS c FROM enhanced_features").iloc[0]["c"])
         
         # Get season coverage
-        seasons = self.connection.execute("""
-            SELECT DISTINCT season FROM player_stats ORDER BY season
-        """).fetchall()
+        seasons_df = read_dataframe("SELECT DISTINCT season FROM player_stats ORDER BY season")
+        seasons = [(int(s),) for s in seasons_df['season'].tolist()]
         
         # Get position breakdown
-        positions = self.connection.execute("""
+        positions_df = read_dataframe(
+            """
             SELECT position, COUNT(*) as count 
             FROM enhanced_features 
             GROUP BY position 
             ORDER BY count DESC
-        """).fetchall()
+            """
+        )
+        positions = list(positions_df.itertuples(index=False, name=None))
         
         # Top performers by fantasy points
-        top_performers = self.connection.execute("""
+        top_performers_df = read_dataframe(
+            """
             SELECT player_name, position, season, 
                    ROUND(fantasy_points_per_game, 2) as fpg,
                    ROUND(value_score, 3) as value
             FROM enhanced_features
             ORDER BY fantasy_points_per_game DESC
             LIMIT 10
-        """).fetchall()
+            """
+        )
+        top_performers = list(top_performers_df.itertuples(index=False, name=None))
         
         # Print summary
         console.print("\n" + "="*60, style="bold blue")
@@ -707,8 +709,7 @@ class NFLDataPopulator:
             self.error(f"❌ Population failed: {e}")
             return False
         finally:
-            if self.connection:
-                self.connection.close()
+            pass
 
 
 def main():

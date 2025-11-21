@@ -5,10 +5,10 @@ Quick NFL Data Population - Get System Working Fast
 Simple script to populate database with real NFL data from nfl_data_py
 """
 
-import sqlite3
 import pandas as pd
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+from utils.db import get_connection, execute, read_dataframe
 
 console = Console()
 
@@ -25,11 +25,12 @@ def main():
         console.print(f"❌ Failed to install nfl_data_py: {e}")
         return
     
-    # Connect to database
-    conn = sqlite3.connect("nfl_data.db")
+    # Connect to database (utils.db backend)
+    conn_cm = get_connection()
+    conn = conn_cm.__enter__()
     
     # Create simple tables
-    conn.execute("""
+    execute("""
     CREATE TABLE IF NOT EXISTS player_stats (
         player_id TEXT,
         player_name TEXT,
@@ -46,9 +47,9 @@ def main():
         passing_tds INTEGER DEFAULT 0,
         PRIMARY KEY (player_id, season, week)
     )
-    """)
+    """, conn=conn)
     
-    conn.execute("""
+    execute("""
     CREATE TABLE IF NOT EXISTS enhanced_features (
         player_id TEXT,
         player_name TEXT,
@@ -59,7 +60,7 @@ def main():
         consistency_score REAL DEFAULT 0.5,
         PRIMARY KEY (player_id, season)
     )
-    """)
+    """, conn=conn)
     
     console.print("📊 Fetching NFL data for 2024...")
     
@@ -79,37 +80,41 @@ def main():
         inserted = 0
         for _, row in df.iterrows():
             try:
-        conn.execute("""
-        INSERT INTO player_stats 
-        (player_id, player_name, position, team, season, week, fantasy_points,
-         rushing_yards, receiving_yards, passing_yards, rushing_tds, receiving_tds, passing_tds)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(player_id, season, week) DO UPDATE SET
-            player_name = excluded.player_name,
-            position = excluded.position,
-            team = excluded.team,
-            fantasy_points = excluded.fantasy_points,
-            rushing_yards = excluded.rushing_yards,
-            receiving_yards = excluded.receiving_yards,
-            passing_yards = excluded.passing_yards,
-            rushing_tds = excluded.rushing_tds,
-            receiving_tds = excluded.receiving_tds,
-            passing_tds = excluded.passing_tds
-        """, (
-                    row.get('player_id', 'unknown'),
-                    row.get('player_name', 'Unknown'),
-                    row.get('position', 'UNK'),
-                    row.get('recent_team', 'UNK'),
-                    row.get('season', 2024),
-                    row.get('week', 1),
-                    row.get('fantasy_points_ppr', 0),
-                    int(row.get('rushing_yards', 0) or 0),
-                    int(row.get('receiving_yards', 0) or 0),
-                    int(row.get('passing_yards', 0) or 0),
-                    int(row.get('rushing_tds', 0) or 0),
-                    int(row.get('receiving_tds', 0) or 0),
-                    int(row.get('passing_tds', 0) or 0)
-                ))
+                execute(
+                    """
+                    INSERT INTO player_stats 
+                    (player_id, player_name, position, team, season, week, fantasy_points,
+                     rushing_yards, receiving_yards, passing_yards, rushing_tds, receiving_tds, passing_tds)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(player_id, season, week) DO UPDATE SET
+                        player_name = excluded.player_name,
+                        position = excluded.position,
+                        team = excluded.team,
+                        fantasy_points = excluded.fantasy_points,
+                        rushing_yards = excluded.rushing_yards,
+                        receiving_yards = excluded.receiving_yards,
+                        passing_yards = excluded.passing_yards,
+                        rushing_tds = excluded.rushing_tds,
+                        receiving_tds = excluded.receiving_tds,
+                        passing_tds = excluded.passing_tds
+                    """,
+                    (
+                        row.get('player_id', 'unknown'),
+                        row.get('player_name', 'Unknown'),
+                        row.get('position', 'UNK'),
+                        row.get('recent_team', 'UNK'),
+                        row.get('season', 2024),
+                        row.get('week', 1),
+                        row.get('fantasy_points_ppr', 0),
+                        int(row.get('rushing_yards', 0) or 0),
+                        int(row.get('receiving_yards', 0) or 0),
+                        int(row.get('passing_yards', 0) or 0),
+                        int(row.get('rushing_tds', 0) or 0),
+                        int(row.get('receiving_tds', 0) or 0),
+                        int(row.get('passing_tds', 0) or 0),
+                    ),
+                    conn=conn,
+                )
                 inserted += 1
             except Exception as e:
                 continue
@@ -137,7 +142,7 @@ def main():
         value_score = min(1.0, max(0.0, avg_fp / 15.0))  # Simple value score
         consistency = max(0.1, 1.0 - (total_fp / games / max(avg_fp, 1)))  # Simple consistency
         
-        conn.execute("""
+        execute("""
         INSERT INTO enhanced_features 
         (player_id, player_name, position, season, fantasy_points_per_game, value_score, consistency_score)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -147,7 +152,9 @@ def main():
             fantasy_points_per_game = excluded.fantasy_points_per_game,
             value_score = excluded.value_score,
             consistency_score = excluded.consistency_score
-        """, (player_id, name, pos, 2024, round(avg_fp, 2), round(value_score, 3), round(consistency, 3)))
+        """,
+        (player_id, name, pos, 2024, round(avg_fp, 2), round(value_score, 3), round(consistency, 3)),
+        conn=conn)
     
     conn.commit()
     
@@ -174,7 +181,7 @@ def main():
     for name, pos, fpg, value in top_players:
         console.print(f"   • {name} ({pos}): {fpg} FPG, {value} value")
     
-    conn.close()
+    conn_cm.__exit__(None, None, None)
     console.print(f"\n🚀 Ready for model training and dashboard!")
 
 if __name__ == "__main__":

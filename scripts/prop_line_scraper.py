@@ -4,23 +4,25 @@ NFL Player Prop Line Scraper for 2025-2026 Season
 Retrieves current season-long prop lines from multiple sportsbooks
 """
 
-import requests
-import pandas as pd
+import argparse
 import json
-import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union
 import logging
-from dataclasses import dataclass, asdict
 import os
-import sqlite3
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Dict, List, Optional, Union
+
+import pandas as pd
+import requests
 
 # Import simplified caching system and validation
 from scripts.simple_cache import simple_cached_client
 from scripts.data_validation import data_validator, api_error_handler
 from config import config
 from utils.player_id_utils import make_player_id
+from utils.db import get_connection, execute
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -46,7 +48,7 @@ class NFLPropScraper:
     def __init__(self, odds_api_key: Optional[str] = None):
         self.odds_api_key = odds_api_key or config.api.odds_api_key or os.getenv('ODDS_API_KEY')
         self.base_url = "https://api.the-odds-api.com/v4"
-        self.db_path = "nfl_prop_lines.db"
+        # Use the configured database backend via utils.db
         # Use cached client instead of plain requests.Session
         self.client = simple_cached_client
         
@@ -76,10 +78,8 @@ class NFLPropScraper:
         
     def init_database(self):
         """Initialize SQLite database for storing prop lines"""
-        from utils.db import get_connection
-
-        conn = sqlite3.connect(self.db_path)
-        conn.execute('''
+        with get_connection() as conn:
+            execute('''
             CREATE TABLE IF NOT EXISTS prop_lines (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 player TEXT NOT NULL,
@@ -95,9 +95,9 @@ class NFLPropScraper:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(player, book, stat, season)
             )
-        ''')
-        # Weekly prop lines (game-level markets)
-        conn.execute('''
+        ''', conn=conn)
+            # Weekly prop lines (game-level markets)
+            execute('''
             CREATE TABLE IF NOT EXISTS weekly_prop_lines (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 week INTEGER NOT NULL,
@@ -117,9 +117,29 @@ class NFLPropScraper:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(player, book, stat, week, season)
             )
-        ''')
-        conn.commit()
-        conn.close()
+        ''', conn=conn)
+
+    @staticmethod
+    def _save_snapshot(path: Path, snapshot: Dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(snapshot, indent=2))
+        logger.info("Saved odds snapshot to %s", path)
+
+    @staticmethod
+    def _load_snapshot(path: Optional[Path]) -> Optional[Dict]:
+        if not path:
+            return None
+        path = Path(path)
+        if not path.exists():
+            logger.warning("Snapshot path %s not found for fallback", path)
+            return None
+        try:
+            data = json.loads(path.read_text())
+            logger.info("Loaded odds snapshot from %s", path)
+            return data
+        except Exception as exc:
+            logger.error("Failed to load snapshot %s: %s", path, exc)
+            return None
     
     def get_odds_api_props(self) -> List[PropLine]:
         """Retrieve prop lines from The Odds API"""
@@ -258,13 +278,20 @@ class NFLPropScraper:
         return prop_lines
 
     # ------------------------ Weekly odds (Week N) ------------------------
-    def get_upcoming_week_props(self, week: int, season: int) -> List[Dict]:
+    def get_upcoming_week_props(
+        self,
+        week: int,
+        season: int,
+        save_json_path: Optional[Path] = None,
+        load_json_path: Optional[Path] = None,
+    ) -> List[Dict]:
         """Fetch weekly player props for a given NFL week.
         Returns list of dicts with keys: player, team, position, book, stat, line, over_odds, under_odds,
         game_date, home_team, away_team
         """
         markets = ['player_rush_yds', 'player_rec_yds', 'player_pass_yds']
         results: List[Dict] = []
+        fallback_snapshot = self._load_snapshot(load_json_path)
         if not self.odds_api_key:
             # Fallback: generate a larger synthetic sample for demo purposes
             import random
@@ -299,6 +326,14 @@ class NFLPropScraper:
                 })
             return rows
 
+        snapshot = {
+            "season": season,
+            "week": week,
+            "generated_at": datetime.utcnow().isoformat(),
+            "events": [],
+            "event_markets": {},
+        }
+
         # First, get all upcoming events
         try:
             events_url = f"{self.base_url}/sports/americanfootball_nfl/events"
@@ -308,8 +343,17 @@ class NFLPropScraper:
             events = events_response.json()
             logger.info(f"Found {len(events)} upcoming NFL games")
         except Exception as e:
-            logger.error(f"Failed to fetch NFL events: {e}")
-            return []
+            if fallback_snapshot:
+                logger.warning(
+                    "Failed to fetch NFL events (%s); using fallback snapshot",
+                    e,
+                )
+                events = fallback_snapshot.get("events", [])
+            else:
+                logger.error(f"Failed to fetch NFL events: {e}")
+                return []
+
+        snapshot["events"] = events
         
         stat_mapping = {
             'player_pass_yds': 'passing_yards',
@@ -333,12 +377,12 @@ class NFLPropScraper:
                     'oddsFormat': 'american',
                     'dateFormat': 'iso'
                 }
-                data = None
+                market_payload = None
                 for attempt in range(1, 4):
                     try:
                         response = self.client.get(url, params=params, api_type='odds')
                         response.raise_for_status()
-                        data = response.json()
+                        market_payload = response.json()
                         break
                     except Exception as e:
                         if attempt >= 3:
@@ -360,13 +404,28 @@ class NFLPropScraper:
                                 backoff,
                             )
                             time.sleep(backoff)
-                if data is None:
-                    continue
+                if market_payload is None:
+                    fallback_data = (
+                        fallback_snapshot.get("event_markets", {}).get(event_id, {}).get(market)
+                        if fallback_snapshot
+                        else None
+                    )
+                    if fallback_data is None:
+                        continue
+                    logger.warning(
+                        "Using fallback odds snapshot for event %s market %s",
+                        event_id,
+                        market,
+                    )
+                    market_payload = fallback_data
+                    snapshot.setdefault("event_markets", {}).setdefault(event_id, {})[market] = market_payload
+                else:
+                    snapshot.setdefault("event_markets", {}).setdefault(event_id, {})[market] = market_payload
 
                 stat_category = stat_mapping.get(market, market)
 
                 # Data structure: single event with bookmakers
-                for bookmaker in data.get('bookmakers', []):
+                for bookmaker in market_payload.get('bookmakers', []):
                     book_name = bookmaker.get('title', 'Unknown')
                     for market_data in bookmaker.get('markets', []):
                         if market_data.get('key') != market:
@@ -411,15 +470,17 @@ class NFLPropScraper:
                             })
 
                 time.sleep(0.2)
+        if save_json_path:
+            self._save_snapshot(Path(save_json_path), snapshot)
         return results
 
     def save_weekly_prop_lines(self, rows: List[Dict], week: int, season: int):
         if not rows:
             return
-        with sqlite3.connect(self.db_path) as conn:
+        with get_connection() as conn:
             for r in rows:
                 try:
-                    conn.execute(
+                    execute(
                         '''
                         INSERT INTO weekly_prop_lines
                         (week, season, player, team, position, book, stat, line, over_odds, under_odds, game_date, home_team, away_team, last_updated)
@@ -452,13 +513,29 @@ class NFLPropScraper:
                             r.get('away_team'),
                             datetime.now().isoformat(),
                         ),
+                        conn=conn,
                     )
                 except Exception as e:
                     logger.warning(f"Save weekly row failed for {r.get('player')}: {e}")
+            try:
+                conn.commit()
+            except Exception:
+                pass
 
-    def run_weekly_update(self, week: int, season: int) -> pd.DataFrame:
+    def run_weekly_update(
+        self,
+        week: int,
+        season: int,
+        save_json_path: Optional[Path] = None,
+        load_json_path: Optional[Path] = None,
+    ) -> pd.DataFrame:
         logger.info(f"Starting weekly prop line update for week={week}, season={season}...")
-        rows = self.get_upcoming_week_props(week, season)
+        rows = self.get_upcoming_week_props(
+            week,
+            season,
+            save_json_path=save_json_path,
+            load_json_path=load_json_path,
+        )
         self.save_weekly_prop_lines(rows, week, season)
         # Export CSV
         df = pd.DataFrame(rows)
@@ -564,10 +641,10 @@ class NFLPropScraper:
             logger.warning("No prop lines to save")
             return
         
-        with sqlite3.connect(self.db_path) as conn:
+        with get_connection() as conn:
             for prop_line in prop_lines:
                 try:
-                    conn.execute(
+                    execute(
                         '''
                         INSERT INTO prop_lines 
                         (player, team, position, book, stat, line, over_odds, under_odds, last_updated, season)
@@ -593,6 +670,7 @@ class NFLPropScraper:
                             prop_line.last_updated,
                             prop_line.season,
                         ),
+                        conn=conn,
                     )
                 except Exception as e:
                     logger.error(f"Error saving prop line for {prop_line.player}: {e}")
@@ -602,14 +680,13 @@ class NFLPropScraper:
     
     def get_prop_lines_dataframe(self) -> pd.DataFrame:
         """Get all prop lines as a DataFrame"""
-        conn = sqlite3.connect(self.db_path)
-        df = pd.read_sql_query('''
+        return read_dataframe(
+            '''
             SELECT player, team, position, book, stat, line, over_odds, under_odds, last_updated, season
             FROM prop_lines
             ORDER BY player, stat, book
-        ''', conn)
-        conn.close()
-        return df
+            '''
+        )
     
     def flag_suspicious_lines(self, df: pd.DataFrame) -> pd.DataFrame:
         """Flag players with suspiciously low lines compared to typical values"""
@@ -656,37 +733,52 @@ def run_season_update(self):
                 print(f"  {row['player']} - {row['stat']}: {row['line']} ({row.get('suspicious_reason', 'Unknown')})")
         return df
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="NFL weekly prop line scraper")
+    parser.add_argument("--season", type=int, default=2025, help="Season to fetch (default: 2025)")
+    parser.add_argument("--week", type=int, default=10, help="Week to fetch (default: 10)")
+    parser.add_argument(
+        "--save-json",
+        type=Path,
+        default=None,
+        help="File path to save the raw odds snapshot",
+    )
+    parser.add_argument(
+        "--load-json",
+        type=Path,
+        default=None,
+        help="Fallback snapshot file to load if live calls fail",
+    )
+    return parser.parse_args()
+
+
 def main():
-    """Main function to run the prop line scraper"""
-    
-    # Initialize scraper
+    """CLI entry point for the prop line scraper."""
+    args = _parse_args()
     scraper = NFLPropScraper()
-    
-    # Check if Odds API key is available
+
     if scraper.odds_api_key:
-        print("✅ Odds API key found")
+        logger.info("Odds API key detected.")
     else:
-        print("⚠️  No Odds API key found. Using sample data.")
-        print("   To use real data, set ODDS_API_KEY environment variable")
-        print("   or get a free key from https://the-odds-api.com/")
-    
-    # Run weekly update
-    df = scraper.run_weekly_update(1, 2023)  # Use weekly update with season 2023, week 1
-    
-    # Display summary
-    print(f"📊 PROP LINE SUMMARY")
-    print(f"Total lines: {len(df)}")
-    print(f"Unique players: {df['player'].nunique()}")
-    print(f"Unique books: {df['book'].nunique()}")
-    print(f"Stats covered: {', '.join(df['stat'].unique())}")
-    
-    # Show sample of data
-    print(f"📋 SAMPLE PROP LINES:")
-    print(df.head(10).to_string(index=False))
-    
-    print(f"💾 Data saved to:")
-    print(f"  - Database: {scraper.db_path}")
-    print(f"  - CSV: current_prop_lines.csv")
+        logger.warning(
+            "No Odds API key found. Live odds calls will fall back to cached snapshots or synthetic data."
+        )
+
+    df = scraper.run_weekly_update(
+        args.week,
+        args.season,
+        save_json_path=args.save_json,
+        load_json_path=args.load_json,
+    )
+
+    logger.info("Weekly prop scrape complete: %d rows", len(df))
+    if not df.empty:
+        logger.info(
+            "Players=%d, Books=%d, Markets=%s",
+            df["player"].nunique(),
+            df["book"].nunique(),
+            ", ".join(df["stat"].unique()),
+        )
 
 if __name__ == "__main__":
     main()

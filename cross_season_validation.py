@@ -11,13 +11,13 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import TimeSeriesSplit
-import sqlite3
 import logging
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 from pathlib import Path
 
 from config import config
+from utils.db import read_dataframe
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,29 +32,29 @@ class EnhancedCrossSeasonValidator:
         
     def load_enhanced_data(self) -> pd.DataFrame:
         """Load enhanced dataset with all features."""
-        conn = sqlite3.connect(self.db_path)
-        
         # Try enhanced table first, fall back to basic
         try:
-            query = """
-            SELECT * FROM player_stats_enhanced 
-            WHERE season BETWEEN 2021 AND 2024
-            ORDER BY season, week, player_id
-            """
-            df = pd.read_sql_query(query, conn)
+            query = (
+                """
+                SELECT * FROM player_stats_enhanced 
+                WHERE season BETWEEN 2021 AND 2024
+                ORDER BY season, week, player_id
+                """
+            )
+            df = read_dataframe(query)
             logger.info(f"Loaded {len(df)} enhanced records")
-        except:
-            # Fallback to basic table
-            query = """
-            SELECT * FROM player_stats 
-            WHERE season BETWEEN 2021 AND 2024
-            ORDER BY season, player_id
-            """
-            df = pd.read_sql_query(query, conn)
+            return df
+        except Exception:
+            query = (
+                """
+                SELECT * FROM player_stats 
+                WHERE season BETWEEN 2021 AND 2024
+                ORDER BY season, player_id
+                """
+            )
+            df = read_dataframe(query)
             logger.info(f"Loaded {len(df)} basic records")
-        
-        conn.close()
-        return df
+            return df
     
     def engineer_enhanced_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Engineer enhanced features for better performance."""
@@ -222,6 +222,28 @@ class EnhancedCrossSeasonValidator:
                 ('lgb', lgb.LGBMRegressor(random_state=42, **lgb_params)),
                 ('ridge', LinearRegression())
             ]
+            # Optionally add XGBoost if available
+            try:
+                import xgboost as xgb
+                base_models.append(
+                    (
+                        'xgb',
+                        xgb.XGBRegressor(
+                            n_estimators=600,
+                            max_depth=6,
+                            learning_rate=0.05,
+                            subsample=0.8,
+                            colsample_bytree=0.8,
+                            reg_alpha=0.0,
+                            reg_lambda=1.0,
+                            tree_method='hist',
+                            n_jobs=-1,
+                            random_state=42,
+                        ),
+                    )
+                )
+            except ImportError:
+                logger.warning("XGBoost not available; skipping XGB in ensemble")
             
             # Use LightGBM as meta-learner for better performance
             meta_params = {
@@ -239,6 +261,28 @@ class EnhancedCrossSeasonValidator:
                 ('rf', RandomForestRegressor(random_state=42, **rf_params)),
                 ('ridge', LinearRegression())
             ]
+            # Try to include XGBoost even if LightGBM is missing
+            try:
+                import xgboost as xgb
+                base_models.append(
+                    (
+                        'xgb',
+                        xgb.XGBRegressor(
+                            n_estimators=600,
+                            max_depth=6,
+                            learning_rate=0.05,
+                            subsample=0.8,
+                            colsample_bytree=0.8,
+                            reg_alpha=0.0,
+                            reg_lambda=1.0,
+                            tree_method='hist',
+                            n_jobs=-1,
+                            random_state=42,
+                        ),
+                    )
+                )
+            except (ImportError, Exception):
+                logger.warning("XGBoost not available or failed to load; skipping XGB in ensemble")
             meta_learner = LinearRegression()
         
         return StackingRegressor(

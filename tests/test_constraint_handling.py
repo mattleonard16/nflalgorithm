@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 from pathlib import Path
+import os
 
 import pandas as pd
 import pytest
@@ -19,10 +20,18 @@ from value_betting_engine import rank_weekly_value
 def temp_db():
     """Create a temporary database for testing."""
     tmp = Path(tempfile.mkstemp(suffix=".db")[1])
+    original_path = config.database.path
+    original_backend = config.database.backend
+    # Force pipeline code to use this isolated SQLite database
+    env_backend = os.environ.get("DB_BACKEND")
+    env_sqlite_path = os.environ.get("SQLITE_DB_PATH")
+    os.environ["DB_BACKEND"] = "sqlite"
+    os.environ["SQLITE_DB_PATH"] = str(tmp)
+    config.database.backend = "sqlite"
+    config.database.path = str(tmp)
 
     # Setup schema
     MigrationManager(tmp).run()
-    MigrationManager(tmp_path).run()
 
     # Insert test data
     with sqlite3.connect(tmp) as conn:
@@ -77,6 +86,19 @@ def temp_db():
         conn.commit()
     
     yield str(tmp)
+
+    # Cleanup
+    config.database.path = original_path
+    config.database.backend = original_backend
+    if env_backend is not None:
+        os.environ["DB_BACKEND"] = env_backend
+    else:
+        os.environ.pop("DB_BACKEND", None)
+    if env_sqlite_path is not None:
+        os.environ["SQLITE_DB_PATH"] = env_sqlite_path
+    else:
+        os.environ.pop("SQLITE_DB_PATH", None)
+    tmp.unlink(missing_ok=True)
 
 
 def test_rank_weekly_value_with_valid_data(temp_db):

@@ -1,10 +1,37 @@
+import os
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
 from config import config
 from prop_integration import join_odds_projections, normalize_player_name
+
+
+@contextmanager
+def use_database(db_path: Path):
+    original_path = config.database.path
+    original_backend = config.database.backend
+    env_backend = os.environ.get("DB_BACKEND")
+    env_sqlite_path = os.environ.get("SQLITE_DB_PATH")
+    os.environ["DB_BACKEND"] = "sqlite"
+    os.environ["SQLITE_DB_PATH"] = str(db_path)
+    config.database.backend = "sqlite"
+    config.database.path = str(db_path)
+    try:
+        yield
+    finally:
+        config.database.path = original_path
+        config.database.backend = original_backend
+        if env_backend is not None:
+            os.environ["DB_BACKEND"] = env_backend
+        else:
+            os.environ.pop("DB_BACKEND", None)
+        if env_sqlite_path is not None:
+            os.environ["SQLITE_DB_PATH"] = env_sqlite_path
+        else:
+            os.environ.pop("SQLITE_DB_PATH", None)
 
 
 def _init_tables(conn: sqlite3.Connection) -> None:
@@ -127,7 +154,8 @@ def test_join_matches_by_normalized_name(tmp_path: Path) -> None:
         )
         conn.commit()
 
-    result = join_odds_projections(2024, 1)
+    with use_database(db_path):
+        result = join_odds_projections(2024, 1)
 
     assert not result.empty
     row = result.loc[result['player_id'] == "HOU_cj_stroud"].iloc[0]
@@ -197,7 +225,8 @@ def test_join_matches_by_fuzzy_name_with_team_mismatch(tmp_path: Path) -> None:
         )
         conn.commit()
 
-    result = join_odds_projections(2024, 1)
+    with use_database(db_path):
+        result = join_odds_projections(2024, 1)
 
     assert not result.empty
     row = result.loc[result['player_id'] == "KC_isaiah_pacheco"].iloc[0]
@@ -265,7 +294,8 @@ def test_join_handles_team_aliases(tmp_path: Path) -> None:
             )
         conn.commit()
 
-    result = join_odds_projections(2024, 2)
+    with use_database(db_path):
+        result = join_odds_projections(2024, 2)
 
     assert not result.empty
     row = result.loc[result['player_id'] == "KC_isaiah_pacheco"].iloc[0]
@@ -335,7 +365,8 @@ def test_team_priority_stats_over_projections_and_odds(tmp_path: Path) -> None:
         )
         conn.commit()
 
-    result = join_odds_projections(2024, 3)
+    with use_database(db_path):
+        result = join_odds_projections(2024, 3)
 
     assert not result.empty
     row = result.iloc[0]

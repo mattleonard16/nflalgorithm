@@ -4,6 +4,7 @@ Handles real-time data ingestion, feature engineering, and persistence.
 """
 
 import logging
+import os
 import sqlite3
 import time
 from datetime import datetime, timedelta
@@ -72,9 +73,17 @@ class DataPipeline:
     
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or config.database.path
+        if db_path:
+            self._force_sqlite_backend(db_path)
         self.setup_enhanced_database()
         self._column_cache: Dict[str, Dict[str, Dict[str, object]]] = {}
         self._projection_cache: Optional[pd.DataFrame] = None
+
+    def _force_sqlite_backend(self, db_path: str) -> None:
+        os.environ["DB_BACKEND"] = "sqlite"
+        os.environ["SQLITE_DB_PATH"] = str(db_path)
+        config.database.backend = "sqlite"
+        config.database.path = str(db_path)
         
     def setup_enhanced_database(self) -> None:
         """Create or update all deterministic schema objects used by the pipeline."""
@@ -352,23 +361,25 @@ class DataPipeline:
         )
         cursor.execute(
             """
+            -- Weekly prop lines now mirrors the ingestion script schema used by run_prop_update/PropIntegration
             CREATE TABLE IF NOT EXISTS weekly_prop_lines (
-                prop_id TEXT PRIMARY KEY,
-                player_id TEXT NOT NULL,
-                player_name TEXT NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                week INTEGER NOT NULL,
+                season INTEGER NOT NULL,
+                player TEXT NOT NULL,
                 team TEXT NOT NULL,
                 position TEXT NOT NULL,
-                market TEXT NOT NULL,
+                book TEXT NOT NULL,
+                stat TEXT NOT NULL,
                 line REAL NOT NULL,
-                over_odds INTEGER NOT NULL,
-                under_odds INTEGER NOT NULL,
-                sportsbook TEXT NOT NULL,
-                season INTEGER NOT NULL,
-                week INTEGER NOT NULL,
-                game_date DATE NOT NULL,
-                as_of TIMESTAMP NOT NULL,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(player_id, market, sportsbook, season, week)
+                over_odds INTEGER,
+                under_odds INTEGER,
+                game_date DATE,
+                home_team TEXT,
+                away_team TEXT,
+                last_updated TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(player, book, stat, week, season)
             )
             """
         )
@@ -831,7 +842,34 @@ class DataPipeline:
                         'as_of': as_of
                     })
                 
-                return pd.DataFrame(records)
+                df = pd.DataFrame(records)
+                if df.empty:
+                    return df
+
+                available_markets = set(df['market'].dropna().unique())
+                missing_markets = {'receiving_yards'} - available_markets
+                if missing_markets:
+                    logger.warning(
+                        "Real odds missing markets %s for season=%s week=%s; generating synthetic supplements",
+                        ",".join(sorted(missing_markets)),
+                        season,
+                        week,
+                    )
+                    # If only receiving is missing, prefer to leave it empty rather than fabricate shaky lines
+                    if missing_markets == {'receiving_yards'}:
+                        logger.warning("Skipping synthetic receiving_yards to avoid stale/retired players. Expect fewer rows.")
+                        return df
+                    synthetic = self._synthesize_weekly_odds(player_stats, season, week)
+                    if not synthetic.empty:
+                        # Only keep synthetic rows for players we already have real odds for to avoid fake/retired names
+                        synthetic = synthetic[synthetic['player_id'].isin(df['player_id'])]
+                        synthetic = synthetic[synthetic['market'].isin(missing_markets)]
+                        if 'receiving_yards' in missing_markets:
+                            synthetic = synthetic[~((synthetic['market'] == 'receiving_yards') & (synthetic['line'] < 15.0))]
+                        if not synthetic.empty:
+                            df = pd.concat([df, synthetic], ignore_index=True)
+
+                return df
             else:
                 logger.warning(f"No real odds data available for week {week}, using synthetic fallback")
                 return self._synthesize_weekly_odds(player_stats, season, week)
@@ -857,7 +895,18 @@ class DataPipeline:
                     baseline = row.receiving_yards
                 else:
                     baseline = row.rolling_air_yards * 1.2
-                line = float(np.round(baseline * 0.95 + 5, 1))
+                if market == 'receiving_yards' and baseline < 20:
+                    continue
+                line = float(np.round(baseline * 0.9 + 3, 1))
+                # Clamp lines to realistic market ranges
+                if market == 'receiving_yards':
+                    line = min(max(line, 25.0), 115.0)
+                elif market == 'rushing_yards':
+                    # Looser cap so QB rush props can show true edges but stay reasonable
+                    max_cap = 90.0 if (row.position or '').upper() == 'QB' else 115.0
+                    line = min(max(line, 15.0), max_cap)
+                elif market == 'passing_yards':
+                    line = min(max(line, 150.0), 330.0)
                 price = -110 if baseline >= 0 else 100
                 records.append({
                     'event_id': row.game_id,
@@ -1023,8 +1072,7 @@ class DataPipeline:
 
     def compute_week_feature_frame(self, season: int, week: int) -> pd.DataFrame:
         """Assemble per-player, per-market feature rows for the specified week."""
-        conn = self._connect()
-        try:
+        with get_connection() as conn:
             stats = pd.read_sql_query(
                 """
                 SELECT ps.player_id, ps.name, ps.team, ps.position, ps.season, ps.week,
@@ -1065,8 +1113,6 @@ class DataPipeline:
                 conn,
                 params=(season, week)
             )
-        finally:
-            conn.close()
 
         game_lookup: Dict[str, Dict[str, Optional[str]]] = {}
         for game in games.itertuples():

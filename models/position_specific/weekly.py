@@ -120,6 +120,12 @@ def predict_week(season: int, week: int, model_directory: Optional[Path | str] =
             # This handles cases where features are all NaN/imputed to 0
             mu_prior = group['mu_prior'].to_numpy()
             mu = np.where((mu <= 0) | np.isnan(mu), mu_prior, mu)
+            # Guardrail: QB rushing projections can explode if trained on mixed-position data.
+            # Keep them within a reasonable band around mu_prior.
+            if market == 'rushing_yards':
+                is_qb = group['position'].str.upper().eq('QB').to_numpy()
+                qb_cap = np.minimum(mu_prior * 1.5 + 10.0, 90.0)
+                mu = np.where(is_qb, np.minimum(mu, qb_cap), mu)
             
             sigma = np.maximum(sigma_default, np.abs(mu) * 0.3)
             featureset_hash = _featureset_hash(feature_columns)

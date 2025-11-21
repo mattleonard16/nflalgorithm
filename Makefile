@@ -295,8 +295,9 @@ backup:
 # Database maintenance
 db-maintenance:
 	@echo "Running database maintenance..."
-	python -c "import sqlite3; conn = sqlite3.connect('data/nfl.db'); conn.execute('VACUUM'); conn.close()"
-	@echo "Database optimized!" 
+	# python -c "import sqlite3; conn = sqlite3.connect('data/nfl.db'); conn.execute('VACUUM'); conn.close()"
+	@echo "Database optimization not supported for remote MySQL yet."
+ 
 # ============================================================================
 # UV ENHANCED TARGETS - 10-100x faster dependency management
 # ============================================================================

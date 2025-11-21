@@ -175,6 +175,43 @@ pipeline.run_full_update()  # Updates all data sources
 
 ## Configuration
 
+### Database Setup (MySQL)
+
+The system supports both local SQLite (default) and remote MySQL databases (e.g., Sevalla, Kinsta).
+
+1.  **Create Environment File**:
+    Copy the example or create a new `.env` file in the project root:
+    ```bash
+    cp .env.example .env
+    ```
+
+2.  **Configure Credentials**:
+    Edit `.env` to set your database backend and credentials.
+
+    **For MySQL (Recommended for Production):**
+    ```env
+    DB_BACKEND=mysql
+    DB_URL="mysql://username:password@host:port/database_name"
+    ```
+
+    **For SQLite (Local Development):**
+    ```env
+    DB_BACKEND=sqlite
+    SQLITE_DB_PATH="nfl_data.db"
+    ```
+
+3.  **API Keys**:
+    Add your required API keys to `.env`:
+    ```env
+    ODDS_API_KEY="your_odds_api_key"
+    WEATHER_API_KEY="your_weather_api_key"
+    ```
+
+**⚠️ SECURITY WARNING**: 
+*   **Never commit your `.env` file** to version control.
+*   **Never expose your `DB_URL` or API keys** in public repositories, issues, or screenshots.
+*   The `.env` file is already added to `.gitignore` to prevent accidental commits.
+
 Key settings in `config.py`:
 - **Target MAE**: 3.0 (rushing), 3.5 (receiving)
 - **Min Edge**: 8% for value bets
@@ -299,6 +336,12 @@ make validate-report # Run validation and save markdown to logs/
 - 90%+ test coverage
 - Type hints required
 - Documentation for all public methods
+
+**System Requirements**:
+- Python 3.13+
+- MySQL 8.0+ (if using remote backend)
+- `pymysql` driver
+- `uv` package manager (recommended)
 
 ## License
 

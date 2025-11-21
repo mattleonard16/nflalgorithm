@@ -1,7 +1,7 @@
-"""Database abstraction layer for SQLite and Supabase (PostgreSQL).
+"""Database abstraction layer for SQLite and MySQL.
 
 The goal is to centralize connection handling so callers do not care
-whether the backend is a local SQLite file or a remote Postgres DB.
+whether the backend is a local SQLite file or a remote MySQL DB.
 """
 
 from __future__ import annotations
@@ -14,13 +14,14 @@ from urllib.parse import urlparse
 import pandas as pd
 import sqlite3
 
+# MySQL support
 try:
-    import psycopg2
-    from psycopg2.extensions import connection as psycopg2_connection
-    PSYCOPG2_AVAILABLE = True
+    import pymysql
+    from pymysql.connections import Connection as pymysql_connection
+    PYMYSQL_AVAILABLE = True
 except ImportError:
-    PSYCOPG2_AVAILABLE = False
-    psycopg2_connection = None  # type: ignore
+    PYMYSQL_AVAILABLE = False
+    pymysql_connection = None # type: ignore
 
 from config import config
 
@@ -28,65 +29,73 @@ from config import config
 warnings.filterwarnings("ignore", message=".*pandas only supports SQLAlchemy connectable.*")
 
 # Union type for database connections
-DBConnection = Union[sqlite3.Connection, psycopg2_connection] if PSYCOPG2_AVAILABLE else sqlite3.Connection
-
+DBConnection = Union[sqlite3.Connection, pymysql_connection]
 
 def _normalize_sql_for_backend(sql: str, backend: str) -> str:
     """Convert SQL parameter placeholders based on backend.
     
-    SQLite uses '?' placeholders, PostgreSQL uses '%s'.
-    This function converts '?' to '%s' when using Postgres backend.
-    
-    Note: This assumes '?' only appears as parameter placeholders,
-    not inside string literals. Properly parameterized SQL should
-    follow this pattern.
+    SQLite uses '?' placeholders
+    MySQL uses '%s'
     """
-    if backend in ("postgresql", "supabase"):
-        # Simple replacement: convert ? to %s for PostgreSQL
-        # This works because properly parameterized SQL should not
-        # have ? inside string literals (values should be in params tuple)
+    if backend == "mysql":
+        # MySQL (PyMySQL) use %s
         return sql.replace('?', '%s')
     return sql
 
 
 def _get_backend() -> str:
     """Get the configured database backend."""
-    return getattr(config.database, "backend", "sqlite").lower()
+    # Force re-evaluate from config which now reads env dynamically or refresh config
+    # For now, just trust config.database.backend
+    backend = getattr(config.database, "backend", "sqlite").lower()
+    
+    # Double check env var because config might be cached/stale
+    import os
+    env_backend = os.getenv("DB_BACKEND", "").lower()
+    if env_backend and env_backend != backend:
+        return env_backend
+        
+    return backend
 
 
-def _create_postgres_connection() -> psycopg2_connection:
-    """Create a PostgreSQL connection using Supabase DSN."""
-    if not PSYCOPG2_AVAILABLE:
-        raise RuntimeError("psycopg2-binary is required for PostgreSQL/Supabase support. Install it with: pip install psycopg2-binary")
+def _create_mysql_connection() -> pymysql_connection:
+    """Create a MySQL connection using connection URL."""
+    if not PYMYSQL_AVAILABLE:
+        raise RuntimeError("pymysql is required for MySQL support.")
+
+    # Use env var directly to ensure freshness and correctness for now
+    import os
+    dsn = os.getenv("DB_URL", "")
     
-    supabase_dsn = getattr(config.database, "supabase_dsn", "")
-    if not supabase_dsn:
-        raise RuntimeError("SUPABASE_DB_URL environment variable must be set when using Supabase backend")
-    
-    # Validate the connection string format
+    # Fallback to config if env var missing
+    if not dsn:
+         dsn = getattr(config.database, "db_url", "")
+
+    if not dsn:
+        raise RuntimeError("DB_URL environment variable must be set for MySQL backend")
+
+    # Parse mysql://user:pass@host:port/db
     try:
-        parsed = urlparse(supabase_dsn)
-        if parsed.scheme not in ("postgresql", "postgres"):
-            raise ValueError(f"Invalid DSN scheme: {parsed.scheme}. Expected postgresql:// or postgres://")
-    except Exception as e:
-        raise RuntimeError(f"Invalid Supabase DSN format: {e}")
-    
-    try:
-        # Connect to Supabase
-        # options="-c client_min_messages=ERROR" suppresses notices like "supautils.disable_program"
-        conn = psycopg2.connect(supabase_dsn, options="-c client_min_messages=ERROR")
+        parsed = urlparse(dsn)
+        # Allow mysql, mysql+pymysql schemes
+        if parsed.scheme not in ("mysql", "mysql+pymysql"):
+            raise ValueError(f"DSN scheme must be 'mysql' or 'mysql+pymysql', got '{parsed.scheme}'")
+            
+        conn = pymysql.connect(
+            host=parsed.hostname,
+            user=parsed.username,
+            password=parsed.password,
+            database=parsed.path.lstrip('/'),
+            port=parsed.port or 3306,
+            cursorclass=pymysql.cursors.Cursor
+        )
         return conn
-    except psycopg2.Error as e:
-        raise RuntimeError(f"Failed to connect to Supabase: {e}")
-
+    except Exception as e:
+        raise RuntimeError(f"Failed to connect to MySQL: {e}")
 
 @contextlib.contextmanager
 def get_connection() -> Iterator[DBConnection]:
-    """Return a context-managed connection.
-    
-    Supports both SQLite and PostgreSQL/Supabase backends based on
-    config.database.backend setting.
-    """
+    """Return a context-managed connection."""
     backend = _get_backend()
     
     if backend == "sqlite":
@@ -96,26 +105,18 @@ def get_connection() -> Iterator[DBConnection]:
             yield conn
         finally:
             conn.close()
-    elif backend in ("postgresql", "supabase"):
-        conn = _create_postgres_connection()
+    elif backend == "mysql":
+        conn = _create_mysql_connection()
         try:
             yield conn
         finally:
             conn.close()
     else:
-        raise RuntimeError(f"Unsupported database backend: {backend}. Supported: sqlite, postgresql, supabase")
+        raise RuntimeError(f"Unsupported database backend: {backend}. Supported: sqlite, mysql")
 
 
 def read_dataframe(sql: str, params: Optional[tuple] = None, conn: Optional[DBConnection] = None) -> pd.DataFrame:
-    """Run a SELECT and return a DataFrame using the configured backend.
-
-    If ``conn`` is provided, it is used directly and *not* closed. This
-    allows callers to reuse a transaction. Otherwise a temporary
-    connection from :func:`get_connection` is used.
-    
-    Note: pandas handles parameter style conversion automatically, so
-    both SQLite (?) and PostgreSQL (%s) placeholders work.
-    """
+    """Run a SELECT and return a DataFrame."""
     backend = _get_backend()
     normalized_sql = _normalize_sql_for_backend(sql, backend)
 
@@ -126,15 +127,7 @@ def read_dataframe(sql: str, params: Optional[tuple] = None, conn: Optional[DBCo
 
 
 def execute(sql: str, params: Optional[tuple] = None, conn: Optional[DBConnection] = None) -> None:
-    """Execute a single statement and commit immediately.
-
-    If ``conn`` is provided, it is used and the caller is responsible for
-    committing/rolling back. Otherwise the function manages a temporary
-    connection and commits automatically.
-    
-    Note: SQL parameter placeholders are automatically converted based on
-    the backend (SQLite uses ?, PostgreSQL uses %s).
-    """
+    """Execute a single statement and commit immediately."""
     backend = _get_backend()
     normalized_sql = _normalize_sql_for_backend(sql, backend)
     
@@ -142,7 +135,7 @@ def execute(sql: str, params: Optional[tuple] = None, conn: Optional[DBConnectio
         if isinstance(conn, sqlite3.Connection):
             conn.execute(normalized_sql, params or ())
         else:
-            # PostgreSQL connection
+            # MySQL
             with conn.cursor() as cursor:
                 cursor.execute(normalized_sql, params or ())
         return
@@ -152,20 +145,14 @@ def execute(sql: str, params: Optional[tuple] = None, conn: Optional[DBConnectio
             tmp_conn.execute(normalized_sql, params or ())
             tmp_conn.commit()
         else:
-            # PostgreSQL connection
+             # MySQL
             with tmp_conn.cursor() as cursor:
                 cursor.execute(normalized_sql, params or ())
             tmp_conn.commit()
 
 
 def executemany(sql: str, seq_of_params: Iterable[tuple[Any, ...]], conn: Optional[DBConnection] = None) -> None:
-    """Execute many statements and commit immediately.
-
-    Follows the same connection semantics as :func:`execute`.
-    
-    Note: SQL parameter placeholders are automatically converted based on
-    the backend (SQLite uses ?, PostgreSQL uses %s).
-    """
+    """Execute many statements and commit immediately."""
     backend = _get_backend()
     normalized_sql = _normalize_sql_for_backend(sql, backend)
     params_list = list(seq_of_params)
@@ -174,7 +161,6 @@ def executemany(sql: str, seq_of_params: Iterable[tuple[Any, ...]], conn: Option
         if isinstance(conn, sqlite3.Connection):
             conn.executemany(normalized_sql, params_list)
         else:
-            # PostgreSQL connection
             with conn.cursor() as cursor:
                 cursor.executemany(normalized_sql, params_list)
         return
@@ -184,55 +170,46 @@ def executemany(sql: str, seq_of_params: Iterable[tuple[Any, ...]], conn: Option
             tmp_conn.executemany(normalized_sql, params_list)
             tmp_conn.commit()
         else:
-            # PostgreSQL connection
             with tmp_conn.cursor() as cursor:
                 cursor.executemany(normalized_sql, params_list)
             tmp_conn.commit()
 
 
 def write_dataframe(df: pd.DataFrame, table_name: str, if_exists: str = 'fail', index: bool = False) -> None:
-    """Write a DataFrame to the database using the configured backend.
-    
-    Args:
-        df: DataFrame to write
-        table_name: Target table name
-        if_exists: How to behave if the table already exists.
-                   User 'fail', 'replace', or 'append'.
-        index: Write DataFrame index as a column.
-    """
+    """Write a DataFrame to the database."""
     backend = _get_backend()
     
-    if backend in ("postgresql", "supabase"):
-        # Use SQLAlchemy for robust Postgres support (handles types/schema correctly)
+    if backend == "mysql":
         try:
             from sqlalchemy import create_engine
-            # Create engine (pool is managed by SQLAlchemy)
-            supabase_dsn = getattr(config.database, "supabase_dsn", "")
-            if not supabase_dsn:
-                raise RuntimeError("SUPABASE_DB_URL not set")
+            # Check env var first
+            import os
+            dsn = os.getenv("DB_URL", "")
+            if not dsn:
+                 dsn = getattr(config.database, "db_url", "")
+
+            if not dsn:
+                raise RuntimeError("Database URL not set")
                 
-            # options="-c client_min_messages=ERROR" suppresses notices like "supautils.disable_program"
-            engine = create_engine(supabase_dsn, connect_args={'options': '-c client_min_messages=ERROR'})
+            # MySQL needs pymysql driver in connection string usually: mysql+pymysql://
+            if dsn.startswith("mysql://"):
+                dsn = dsn.replace("mysql://", "mysql+pymysql://")
+                
+            engine = create_engine(dsn)
             with engine.begin() as conn:
                 df.to_sql(table_name, conn, if_exists=if_exists, index=index)
         except ImportError:
-            raise RuntimeError("SQLAlchemy is required for writing DataFrames to PostgreSQL/Supabase")
+            raise RuntimeError("SQLAlchemy is required for writing DataFrames")
         except Exception as e:
             raise RuntimeError(f"Failed to write dataframe to {table_name}: {e}")
     else:
         # SQLite
-        # Pandas handles SQLite correctly with raw connection
         with get_connection() as conn:
              df.to_sql(table_name, conn, if_exists=if_exists, index=index)
 
 
 def get_table_columns(table_name: str, conn: Optional[DBConnection] = None) -> Dict[str, Dict[str, Any]]:
-    """Return column metadata for a table across backends.
-
-    The metadata dict for each column includes keys: ``type``, ``notnull``,
-    ``default`` and ``pk`` mirroring SQLite's PRAGMA output to minimize
-    downstream changes.
-    """
+    """Return column metadata for a table."""
     backend = _get_backend()
     cleanup_needed = False
 
@@ -252,40 +229,18 @@ def get_table_columns(table_name: str, conn: Optional[DBConnection] = None) -> D
                     "default": row[4],
                     "pk": bool(row[5]),
                 }
-        else:
-            with conn.cursor() as cursor:  # type: ignore[arg-type]
-                cursor.execute(
-                    """
-                    WITH pk_columns AS (
-                        SELECT kcu.column_name
-                        FROM information_schema.table_constraints tc
-                        JOIN information_schema.key_column_usage kcu
-                          ON tc.constraint_name = kcu.constraint_name
-                         AND tc.table_schema = kcu.table_schema
-                        WHERE tc.table_schema = current_schema()
-                          AND tc.table_name = %s
-                          AND tc.constraint_type = 'PRIMARY KEY'
-                    )
-                    SELECT
-                        c.column_name,
-                        c.data_type,
-                        (c.is_nullable = 'NO') AS notnull,
-                        c.column_default,
-                        (c.column_name IN (SELECT column_name FROM pk_columns)) AS pk
-                    FROM information_schema.columns c
-                    WHERE c.table_schema = current_schema()
-                      AND c.table_name = %s
-                    ORDER BY c.ordinal_position
-                    """,
-                    (table_name, table_name),
-                )
+        elif backend == "mysql":
+             with conn.cursor() as cursor:
+                cursor.execute(f"DESCRIBE {table_name}")
                 for row in cursor.fetchall():
+                    # Row: Field, Type, Null, Key, Default, Extra
+                    # PyMySQL returns tuples
                     col_name = row[0]
                     columns[col_name] = {
                         "type": row[1],
-                        "notnull": bool(row[2]),
-                        "default": row[3],
-                        "pk": bool(row[4]),
+                        "notnull": row[2] == "NO",
+                        "default": row[4],
+                        "pk": row[3] == "PRI"
                     }
         return columns
     finally:
@@ -295,13 +250,11 @@ def get_table_columns(table_name: str, conn: Optional[DBConnection] = None) -> D
 
 
 def column_exists(table_name: str, column_name: str, conn: Optional[DBConnection] = None) -> bool:
-    """Return True if ``column_name`` exists on ``table_name``."""
     columns = get_table_columns(table_name, conn=conn)
     return column_name in columns
 
 
 def table_exists(table_name: str, conn: Optional[DBConnection] = None) -> bool:
-    """Return True if the given table exists in the current backend."""
     cleanup_needed = False
     if conn is None:
         cleanup_needed = True
@@ -315,14 +268,11 @@ def table_exists(table_name: str, conn: Optional[DBConnection] = None) -> bool:
                 (table_name,),
             )
             return cursor.fetchone() is not None
-        else:
-            with conn.cursor() as cursor:  # type: ignore[arg-type]
-                cursor.execute(
-                    "SELECT to_regclass(%s)",
-                    (f"public.{table_name}",),
-                )
-                result = cursor.fetchone()
-                return bool(result and result[0])
+        elif _get_backend() == "mysql":
+             with conn.cursor() as cursor:
+                cursor.execute("SHOW TABLES LIKE %s", (table_name,))
+                return cursor.fetchone() is not None
+        return False
     finally:
         if cleanup_needed:
             connection_cm.__exit__(None, None, None)

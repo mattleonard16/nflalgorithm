@@ -16,7 +16,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from config import config
-from utils.db import read_dataframe
+from utils.db import read_dataframe, get_connection, execute, executemany, write_dataframe
 from utils.player_id_utils import (
     canonicalize_team,
     normalize_name,
@@ -27,7 +27,7 @@ from utils.player_id_utils import (
 logger = logging.getLogger(__name__)
 
 
-_FUZZY_THRESHOLD = 0.87  # Lowered to catch spelling variations and middle name differences
+_FUZZY_THRESHOLD = 0.82  # Slightly lower to increase match rate across name variants
 
 
 def _safe_nunique(series: pd.Series) -> int:
@@ -696,14 +696,14 @@ class PropIntegration:
     def get_current_prop_lines(self) -> pd.DataFrame:
         """Get current prop lines from database"""
         try:
-            conn = sqlite3.connect(self.prop_db_path)
-            df = pd.read_sql_query('''
+            df = read_dataframe(
+                '''
                 SELECT player, team, position, book, stat, line, over_odds, under_odds, last_updated
                 FROM prop_lines
                 WHERE season = '2025-2026'
                 ORDER BY player, stat, book
-            ''', conn)
-            conn.close()
+                '''
+            )
             return df
         except Exception as e:
             logger.error(f"Error loading prop lines: {e}")
@@ -717,16 +717,16 @@ class PropIntegration:
             
             # Also try to load from database if available
             try:
-                conn = sqlite3.connect(self.prediction_db_path)
-                db_projections = pd.read_sql_query('''
+                db_projections = read_dataframe(
+                    '''
                     SELECT name, position, team, 
                            rushing_yards as proj_rush_yds, 
                            receiving_yards as proj_rec_yds,
                            (rushing_yards + receiving_yards) as proj_total_yds
                     FROM player_stats 
                     WHERE season = 2024
-                ''', conn)
-                conn.close()
+                    '''
+                )
                 
                 # Merge with CSV projections if available
                 if not projections_df.empty:
@@ -871,49 +871,63 @@ class PropIntegration:
             logger.warning("No value opportunities found")
             return
         
-        # Save to database for real-time value finder
-        conn = sqlite3.connect(self.prediction_db_path)
-        
-        # Create or update prop_opportunities table
-        conn.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS prop_opportunities (
-                id INTEGER PRIMARY KEY,
-                player TEXT NOT NULL,
-                team TEXT NOT NULL,
-                position TEXT NOT NULL,
-                book TEXT NOT NULL,
-                stat TEXT NOT NULL,
-                line REAL NOT NULL,
-                model_prediction REAL NOT NULL,
-                edge_yards REAL NOT NULL,
-                edge_percentage REAL NOT NULL,
-                over_odds INTEGER NOT NULL,
-                under_odds INTEGER NOT NULL,
-                value_rating TEXT NOT NULL,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(player, book, stat)
+        with get_connection() as conn:
+            execute(
+                '''
+                CREATE TABLE IF NOT EXISTS prop_opportunities (
+                    id INTEGER PRIMARY KEY,
+                    player TEXT NOT NULL,
+                    team TEXT NOT NULL,
+                    position TEXT NOT NULL,
+                    book TEXT NOT NULL,
+                    stat TEXT NOT NULL,
+                    line REAL NOT NULL,
+                    model_prediction REAL NOT NULL,
+                    edge_yards REAL NOT NULL,
+                    edge_percentage REAL NOT NULL,
+                    over_odds INTEGER NOT NULL,
+                    under_odds INTEGER NOT NULL,
+                    value_rating TEXT NOT NULL,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(player, book, stat)
+                )
+                ''',
+                conn=conn,
             )
-            ''')
-        
-        # Clear old opportunities
-        conn.execute('DELETE FROM prop_opportunities')
-        
-        # Insert new opportunities
-        for _, row in value_opportunities.iterrows():
-            conn.execute('''
-                INSERT INTO prop_opportunities 
-                (player, team, position, book, stat, line, model_prediction, 
-                 edge_yards, edge_percentage, over_odds, under_odds, value_rating)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                row['player'], row['team'], row['position'], row['book'], row['stat'],
-                row['line'], row['model_prediction'], row['edge_yards'], row['edge_percentage'],
-                row['over_odds'], row['under_odds'], row['value_rating']
-            ))
-        
-        conn.commit()
-        conn.close()
+
+            execute('DELETE FROM prop_opportunities', conn=conn)
+
+            rows = [
+                (
+                    r['player'],
+                    r['team'],
+                    r['position'],
+                    r['book'],
+                    r['stat'],
+                    r['line'],
+                    r['model_prediction'],
+                    r['edge_yards'],
+                    r['edge_percentage'],
+                    r['over_odds'],
+                    r['under_odds'],
+                    r['value_rating'],
+                )
+                for _, r in value_opportunities.iterrows()
+            ]
+
+            if rows:
+                executemany(
+                    '''
+                    INSERT INTO prop_opportunities 
+                    (player, team, position, book, stat, line, model_prediction, 
+                     edge_yards, edge_percentage, over_odds, under_odds, value_rating)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''',
+                    params=rows,
+                    conn=conn,
+                )
+
+            conn.commit()
         
         logger.info(f"Updated {len(value_opportunities)} value opportunities")
         return value_opportunities
@@ -921,18 +935,15 @@ class PropIntegration:
     # ------------------------ Weekly integration ------------------------
     def get_weekly_prop_lines(self, week: int) -> pd.DataFrame:
         try:
-            conn = sqlite3.connect(self.prop_db_path)
-            df = pd.read_sql_query(
+            df = read_dataframe(
                 """
                 SELECT week, season, player, team, position, book, stat, line, over_odds, under_odds, game_date
                 FROM weekly_prop_lines
                 WHERE week = ?
                 ORDER BY player, stat, book
                 """,
-                conn,
-                params=(week,)
+                params=(week,),
             )
-            conn.close()
             return df
         except Exception as e:
             logger.error(f"Error reading weekly_prop_lines: {e}")
@@ -941,18 +952,15 @@ class PropIntegration:
     def get_weekly_predictions(self, week: int) -> pd.DataFrame:
         """Fast baseline weekly predictions using weighted rolling averages over last 3 games."""
         try:
-            conn = sqlite3.connect(self.prediction_db_path)
-            df = pd.read_sql_query(
+            df = read_dataframe(
                 """
                 SELECT player_id, name as player, team, position, season, week as game_week,
                        rushing_yards, receiving_yards, passing_yards
                 FROM player_stats_enhanced
                 WHERE week < ?
                 """,
-                conn,
-                params=(week,)
+                params=(week,),
             )
-            conn.close()
         except Exception as e:
             logger.warning(f"Falling back: could not read player_stats_enhanced: {e}")
             return pd.DataFrame()
@@ -1017,7 +1025,6 @@ class PropIntegration:
         self.render_html_from_markdown(md, out_dir / f"week_{week}_value_report.html")
         # Write canonical table for dashboard
         try:
-            conn = sqlite3.connect(self.prediction_db_path)
             canonical = df.copy()
             canonical['player_name'] = canonical.get('player')
             canonical['prop_type'] = canonical.get('stat')
@@ -1028,10 +1035,9 @@ class PropIntegration:
             for c in canonical_cols:
                 if c not in canonical.columns:
                     canonical[c] = None
-            canonical[canonical_cols].to_sql('weekly_enhanced_value_bets', conn, if_exists='replace', index=False)
-            conn.close()
-        except Exception:
-            pass
+            write_dataframe(canonical[canonical_cols], 'weekly_enhanced_value_bets', if_exists='replace', index=False)
+        except Exception as e:
+            logger.warning(f"Could not write weekly_enhanced_value_bets: {e}")
         return df
     
     def generate_value_report(self) -> str:
