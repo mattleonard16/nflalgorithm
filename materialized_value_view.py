@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 
 from config import config
-from utils.db import get_connection
+from utils.db import get_connection, execute, executemany
 from value_betting_engine import rank_weekly_value
 
 
@@ -22,9 +22,10 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
     ranked = rank_weekly_value(season, week, threshold, place=False)
 
     with get_connection() as conn:
-        conn.execute(
+        execute(
             "DELETE FROM materialized_value_view WHERE season = ? AND week = ?",
             (season, week),
+            conn=conn,
         )
 
         if ranked.empty:
@@ -82,7 +83,7 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
             """
         )
 
-        conn.executemany(
+        executemany(
             sql,
             payload[
                 [
@@ -90,7 +91,8 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
                     'sportsbook', 'line', 'price', 'mu', 'sigma', 'p_win', 'edge_percentage',
                     'expected_roi', 'kelly_fraction', 'stake', 'generated_at',
                 ]
-            ].itertuples(index=False, name=None)
+            ].itertuples(index=False, name=None),
+            conn=conn,
         )
         conn.commit()
 

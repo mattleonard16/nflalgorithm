@@ -19,7 +19,7 @@ import numpy as np
 
 from config import config
 from schema_migrations import MigrationManager
-from utils.db import column_exists, get_connection, get_table_columns
+from utils.db import column_exists, get_connection, get_table_columns, read_dataframe
 from utils.player_id_utils import make_player_id
 
 GOLDEN_SEASON = 2024
@@ -517,52 +517,93 @@ class DataPipeline:
         return df.copy()
 
     def _augment_baseline_with_historical_players(self, baseline: pd.DataFrame, season: int, week: int) -> pd.DataFrame:
-        """Add players from historical stats who aren't in the baseline CSV."""
+        """Add players from historical stats who aren't in the baseline CSV.
+
+        Notes:
+        - WRs often have limited samples early; allow single-game WRs with legitimate usage.
+        - Player identity is keyed by player_id; names are only a fallback.
+        """
         try:
-            from utils.db import read_dataframe
-            # Get recent historical stats for active players
-            # Include current season data for rookies and new players
-            historical = read_dataframe(
-                """
-                SELECT name, team, position, 
-                       AVG(rushing_yards) * 17 as hist_rush,
-                       AVG(receiving_yards) * 17 as hist_rec,
-                       MAX(age) as age
+            base_query = """
+                SELECT player_id,
+                       name,
+                       team,
+                       position,
+                       AVG(rushing_yards)   AS avg_rush,
+                       AVG(receiving_yards) AS avg_rec,
+                       AVG(targets)         AS avg_targets,
+                       MAX(age)             AS age,
+                       COUNT(*)             AS games_played
                 FROM player_stats_enhanced
-                WHERE season >= ? - 1 AND week < ?
-                GROUP BY name, team, position
-                HAVING COUNT(*) >= 2
-                """,
-                params=(season, week)
-            )
-            
+                WHERE season = ? AND week < ?
+                GROUP BY player_id, name, team, position
+            """
+
+            historical = read_dataframe(base_query, params=(season, week))
             if historical.empty:
                 return baseline
-            
-            # Only add players not already in baseline (compute normalized names once)
-            baseline_names_normalized = baseline['name'].str.lower().str.strip()
-            baseline_names = set(baseline_names_normalized)
-            historical_names_normalized = historical['name'].str.lower().str.strip()
-            new_players = historical[~historical_names_normalized.isin(baseline_names)].copy()
-            
+
+            # Ensure baseline carries player_id for identity; compute if missing.
+            baseline = baseline.copy()
+            if 'player_id' not in baseline.columns:
+                baseline['player_id'] = baseline.apply(
+                    lambda r: make_player_id(r.get('name', ''), r.get('team', '')),
+                    axis=1
+                )
+            # Canonicalize positions for baseline
+            baseline['position'] = baseline['position'].apply(lambda p: (p or '').upper())
+            baseline['position'] = baseline['position'].replace({'FB': 'RB', 'HB': 'RB', 'SLWR': 'WR'})
+            baseline = baseline[baseline['position'].isin({'QB', 'RB', 'WR', 'TE'})]
+
+            baseline_ids = set(baseline['player_id'])
+
+            # WRs: allow single-game samples with meaningful receiving usage
+            wr_min_rec = 15.0
+            wr_min_tgts = 3.0
+            wr_hist = historical[
+                (historical['position'].str.upper() == 'WR')
+                & (
+                    (historical['games_played'] >= 1)
+                    & (
+                        (historical['avg_rec'] >= wr_min_rec)
+                        | (historical['avg_targets'] >= wr_min_tgts)
+                    )
+                )
+            ]
+
+            # Non-WR: require at least 2 games to avoid noise
+            non_wr_hist = historical[
+                (historical['position'].str.upper() != 'WR')
+                & (historical['games_played'] >= 2)
+            ]
+
+            filtered = pd.concat([wr_hist, non_wr_hist], ignore_index=True)
+            if filtered.empty:
+                return baseline
+
+            new_players = filtered[~filtered['player_id'].isin(baseline_ids)].copy()
             if new_players.empty:
                 return baseline
-            
-            # Format to match baseline schema
+
             new_players['age_2024'] = new_players['age'].fillna(26).astype(int)
-            new_players['2023_rush_yds'] = (new_players['hist_rush'] / 17 * 16).fillna(0).astype(float)
-            new_players['2023_rec_yds'] = (new_players['hist_rec'] / 17 * 16).fillna(0).astype(float)
-            new_players['2024_proj_rush'] = new_players['hist_rush'].fillna(0).astype(float)
-            new_players['2024_proj_rec'] = new_players['hist_rec'].fillna(0).astype(float)
+            # Scale historical averages to season-like totals for projection columns
+            new_players['2023_rush_yds'] = new_players['avg_rush'].fillna(0).astype(float)
+            new_players['2023_rec_yds'] = new_players['avg_rec'].fillna(0).astype(float)
+            new_players['2024_proj_rush'] = new_players['avg_rush'].fillna(0).astype(float)
+            new_players['2024_proj_rec'] = new_players['avg_rec'].fillna(0).astype(float)
             new_players['2024_proj_total'] = (new_players['2024_proj_rush'] + new_players['2024_proj_rec']).astype(float)
-            
-            # Select matching columns
-            new_players = new_players[['name', 'position', 'team', 'age_2024', '2023_rush_yds', 
-                                       '2023_rec_yds', '2024_proj_rush', '2024_proj_rec', '2024_proj_total']]
-            
-            # Append to baseline
+            new_players['2024_proj_targets'] = new_players['avg_targets'].fillna(0).astype(float)
+
+            # Select matching columns and keep identity
+            keep_cols = [
+                'player_id', 'name', 'position', 'team', 'age_2024',
+                '2023_rush_yds', '2023_rec_yds',
+                '2024_proj_rush', '2024_proj_rec', '2024_proj_total', '2024_proj_targets'
+            ]
+            new_players = new_players[keep_cols]
+
             augmented = pd.concat([baseline, new_players], ignore_index=True)
-            logger.info(f"Augmented baseline with {len(new_players)} historical players")
+            logger.info(f"Augmented baseline with {len(new_players)} historical players (WR-first policy applied)")
             return augmented
             
         except Exception as e:
@@ -624,7 +665,8 @@ class DataPipeline:
 
             name = getattr(row, 'name', 'Unknown Player')
             position = getattr(row, 'position', 'FLEX')
-            player_id = make_player_id(name, team)
+            pid_from_baseline = getattr(row, 'player_id', None)
+            player_id = pid_from_baseline if pid_from_baseline else make_player_id(name, team)
 
             # Get values with NaN handling
             rush_proj_val = getattr(row, '2024_proj_rush', 0.0)
@@ -855,17 +897,33 @@ class DataPipeline:
                         season,
                         week,
                     )
-                    # If only receiving is missing, prefer to leave it empty rather than fabricate shaky lines
-                    if missing_markets == {'receiving_yards'}:
-                        logger.warning("Skipping synthetic receiving_yards to avoid stale/retired players. Expect fewer rows.")
-                        return df
                     synthetic = self._synthesize_weekly_odds(player_stats, season, week)
                     if not synthetic.empty:
-                        # Only keep synthetic rows for players we already have real odds for to avoid fake/retired names
-                        synthetic = synthetic[synthetic['player_id'].isin(df['player_id'])]
                         synthetic = synthetic[synthetic['market'].isin(missing_markets)]
                         if 'receiving_yards' in missing_markets:
-                            synthetic = synthetic[~((synthetic['market'] == 'receiving_yards') & (synthetic['line'] < 15.0))]
+                            # Allow WR synthetic even if not present in real odds, gated by usage
+                            wr_ids = set(
+                                player_stats[
+                                    (player_stats['position'].str.upper() == 'WR')
+                                    & (
+                                        (player_stats['games_played'] >= 1)
+                                        & (
+                                            (player_stats['receiving_yards'] >= config.synthetic.wr_avg_rec_threshold)
+                                            | (player_stats['rolling_targets'] >= config.synthetic.wr_targets_threshold)
+                                        )
+                                    )
+                                ]['player_id']
+                            )
+                            synthetic = synthetic[
+                                ~((synthetic['market'] == 'receiving_yards') & (synthetic['line'] < config.synthetic.min_wr_baseline))
+                            ]
+                            synthetic = synthetic[
+                                (synthetic['market'] != 'receiving_yards')
+                                | (synthetic['player_id'].isin(wr_ids))
+                            ]
+                        else:
+                            # For non-WR markets, still restrict to known players to avoid junk
+                            synthetic = synthetic[synthetic['player_id'].isin(df['player_id'])]
                         if not synthetic.empty:
                             df = pd.concat([df, synthetic], ignore_index=True)
 
@@ -884,23 +942,41 @@ class DataPipeline:
                 'event_id', 'season', 'week', 'player_id', 'market', 'sportsbook', 'line', 'price', 'as_of'
             ])
 
+        ps = player_stats.copy()
+        ps['position'] = ps['position'].apply(lambda p: (p or '').upper())
+        ps['position'] = ps['position'].replace({'FB': 'RB', 'HB': 'RB', 'SLWR': 'WR'})
+        ps = ps[ps['position'].isin({'QB', 'RB', 'WR', 'TE'})]
+        ps = ps[
+            (ps['games_played'] >= 1)
+            | (ps['rolling_targets'] >= config.synthetic.wr_targets_threshold)
+            | (ps['receiving_yards'] >= config.synthetic.wr_avg_rec_threshold)
+        ]
         records = []
         as_of = f"{season}-W{week:02d}T00:00:00Z"
-        for row in player_stats.itertuples():
+        for row in ps.itertuples():
             markets = self._markets_for_position(row.position)
             for market in markets:
+                pos = (row.position or '').upper()
+                if market == 'receiving_yards' and pos not in {'WR', 'RB', 'TE'}:
+                    continue
                 if market == 'rushing_yards':
                     baseline = row.rushing_yards
                 elif market == 'receiving_yards':
-                    baseline = row.receiving_yards
+                    baseline = max(
+                        row.receiving_yards,
+                        float(getattr(row, 'rolling_targets', 0.0)) * config.synthetic.targets_to_yards_factor
+                    )
                 else:
                     baseline = row.rolling_air_yards * 1.2
-                if market == 'receiving_yards' and baseline < 20:
+                if market == 'receiving_yards' and baseline < config.synthetic.min_wr_baseline:
                     continue
-                line = float(np.round(baseline * 0.9 + 3, 1))
+                if market == 'receiving_yards':
+                    line = float(np.round(baseline * 0.8, 1))
+                else:
+                    line = float(np.round(baseline * 0.9 + 3, 1))
                 # Clamp lines to realistic market ranges
                 if market == 'receiving_yards':
-                    line = min(max(line, 25.0), 115.0)
+                    line = min(max(line, config.synthetic.min_wr_line), config.synthetic.max_wr_line)
                 elif market == 'rushing_yards':
                     # Looser cap so QB rush props can show true edges but stay reasonable
                     max_cap = 90.0 if (row.position or '').upper() == 'QB' else 115.0
@@ -917,7 +993,8 @@ class DataPipeline:
                     'sportsbook': 'SimBook',
                     'line': line,
                     'price': int(price),
-                    'as_of': as_of
+                    'as_of': as_of,
+                    'is_synthetic': 1
                 })
 
         return pd.DataFrame(records)
@@ -1199,22 +1276,56 @@ class DataPipeline:
         return features.sort_values(['team', 'player_id', 'market']).reset_index(drop=True)
 
     def _compute_market_mu(self, row: object, market: str, season: int, week: int) -> float:
-        """Compute market-specific mu_prior using rolling averages, historical stats, or baseline projections."""
+        """Compute market-specific mu_prior using rolling averages, historical stats, or baseline projections.
+        
+        For WR receiving_yards:
+        - hist_mu: EWMA over last K games (decay=0.65)
+        - targets_mu: rolling_targets * yards_per_target_factor
+        - defense_adj: defense_vs_wr_multiplier (stubbed to 1.0)
+        - mu = (w_hist * hist_mu + w_targets * targets_mu + w_role * role_prior) * defense_adj
+        
+        Role clusters for low-sample WRs:
+        - alpha: snap >= 80% or breakout >= 0.7 -> 75 yds
+        - secondary: snap >= 65% or breakout >= 0.5 -> 55 yds
+        - slot: snap >= 50% or usage_delta >= 0.05 -> 45 yds
+        - fringe: everything else -> 30 yds
+        """
         try:
-            from utils.db import read_dataframe
-            # Strategy 1: Use rolling averages from previous weeks if available
+            def _ewma(values: List[float], decay: float = 0.65) -> float:
+                if not values:
+                    return 0.0
+                weights = [decay ** i for i in range(len(values))]
+                return float(sum(v * w for v, w in zip(values, weights)) / sum(weights))
+
+            def _wr_role_cluster(r: object) -> tuple:
+                """Bin WR into role cluster and return (cluster_name, prior_yards)."""
+                snap = float(getattr(r, 'snap_percentage', 0.0))
+                breakout = float(getattr(r, 'breakout_percentile', 0.0))
+                usage_delta = float(getattr(r, 'usage_delta', 0.0))
+                if snap >= 80 or breakout >= 0.7:
+                    return ('alpha', 75.0)
+                if snap >= 65 or breakout >= 0.5:
+                    return ('secondary', 55.0)
+                if snap >= 50 or usage_delta >= 0.05:
+                    return ('slot', 45.0)
+                return ('fringe', 30.0)
+
+            def _get_defense_multiplier(opponent: str, position: str, stat_type: str) -> float:
+                """Get defense adjustment multiplier based on historical performance."""
+                try:
+                    from utils.defense_adjustments import get_defense_multiplier
+                    return get_defense_multiplier(opponent, position, stat_type, season, week - 1)
+                except Exception:
+                    return 1.0
+
             if market == 'rushing_yards':
-                # Try rolling averages from recent weeks first
                 current_rush = float(getattr(row, 'rushing_yards', 0.0))
                 if current_rush > 0:
                     return current_rush
-                
-                # If current week stats are 0 (future week), use historical rolling average
-                # Try to get latest historical stats for this player
-                
+
                 historical = read_dataframe(
                     """
-                    SELECT rushing_yards, rushing_attempts, rolling_targets
+                    SELECT rushing_yards
                     FROM player_stats_enhanced
                     WHERE player_id = ? AND ((season = ? AND week < ?) OR (season < ?))
                     ORDER BY season DESC, week DESC
@@ -1223,48 +1334,78 @@ class DataPipeline:
                     params=(getattr(row, 'player_id', ''), season, week, season)
                 )
                 if not historical.empty:
-                    # Use weighted rolling average (most recent gets higher weight)
-                    recent_yards = historical['rushing_yards'].values
-                    if len(recent_yards) > 0:
-                        weights = [0.6, 0.3, 0.1][:len(recent_yards)]
-                        weighted_avg = sum(y * w for y, w in zip(recent_yards, weights)) / sum(weights)
-                        if weighted_avg > 0:
-                            return float(weighted_avg)
-                
+                    hist_vals = historical['rushing_yards'].fillna(0).tolist()
+                    weighted_avg = _ewma(hist_vals, decay=0.7)
+                    if weighted_avg > 0:
+                        # Apply defense adjustment
+                        position = getattr(row, 'position', 'RB')
+                        opponent = getattr(row, 'opponent', '')
+                        defense_mult = _get_defense_multiplier(opponent, position, 'rushing_yards')
+                        return float(weighted_avg * defense_mult)
+
             elif market == 'receiving_yards':
                 current_rec = float(getattr(row, 'receiving_yards', 0.0))
                 if current_rec > 0:
                     return current_rec
-                
-                # Use historical receiving yards
+
                 historical = read_dataframe(
                     """
-                    SELECT receiving_yards, targets, rolling_targets, rolling_air_yards
+                    SELECT receiving_yards, targets
                     FROM player_stats_enhanced
                     WHERE player_id = ? AND ((season = ? AND week < ?) OR (season < ?))
                     ORDER BY season DESC, week DESC
-                    LIMIT 3
+                    LIMIT 5
                     """,
                     params=(getattr(row, 'player_id', ''), season, week, season)
                 )
-                if not historical.empty:
-                    recent_yards = historical['receiving_yards'].values
-                    if len(recent_yards) > 0:
-                        weights = [0.6, 0.3, 0.1][:len(recent_yards)]
-                        weighted_avg = sum(y * w for y, w in zip(recent_yards, weights)) / sum(weights)
-                        if weighted_avg > 0:
-                            return float(weighted_avg)
                 
+                hist_mu = 0.0
+                hist_targets_mu = 0.0
+                if not historical.empty:
+                    hist_rec_vals = historical['receiving_yards'].fillna(0).tolist()
+                    hist_mu = _ewma(hist_rec_vals, decay=0.65)
+                    if 'targets' in historical.columns:
+                        hist_tgt_vals = historical['targets'].fillna(0).tolist()
+                        hist_targets_mu = _ewma(hist_tgt_vals, decay=0.65)
+
+                yards_per_target = 8.0
+                targets_mu = float(getattr(row, 'rolling_targets', 0.0)) * yards_per_target
+                if targets_mu == 0 and hist_targets_mu > 0:
+                    targets_mu = hist_targets_mu * yards_per_target
+
+                cluster_name, role_prior = _wr_role_cluster(row)
+                position = getattr(row, 'position', 'WR')
+                opponent = getattr(row, 'opponent', '')
+                defense_mult = _get_defense_multiplier(opponent, position, 'receiving_yards')
+
+                # Weighted blend: history (55%), targets (30%), role (15%)
+                components = []
+                weights = []
+                if hist_mu > 0:
+                    components.append(hist_mu)
+                    weights.append(0.55)
+                if targets_mu > 0:
+                    components.append(targets_mu)
+                    weights.append(0.30)
+                # Always include role prior as fallback/blend
+                components.append(role_prior)
+                weights.append(0.15)
+
+                if sum(weights) == 0:
+                    return role_prior * defense_mult
+
+                mu = sum(c * w for c, w in zip(components, weights)) / sum(weights)
+                # Ensure WR mu is never exactly zero and at least the fringe baseline
+                return float(max(mu * defense_mult, 15.0))
+
             elif market == 'passing_yards':
-                # For QBs, use rolling_air_yards or historical passing
                 rolling_air = float(getattr(row, 'rolling_air_yards', 0.0))
                 if rolling_air > 0:
                     return float(rolling_air * 1.5)
-                
-                # Try historical passing yards
+
                 historical = read_dataframe(
                     """
-                    SELECT receiving_yards, rolling_air_yards
+                    SELECT rolling_air_yards
                     FROM player_stats_enhanced
                     WHERE player_id = ? AND ((season = ? AND week < ?) OR (season < ?))
                     ORDER BY season DESC, week DESC
@@ -1283,14 +1424,13 @@ class DataPipeline:
                 player_name = getattr(row, 'name', '')
                 team = getattr(row, 'team', '')
                 if player_name:
-                    # Try to match by name and team
                     matched = baseline[
                         (baseline['name'].str.contains(player_name.split()[0], case=False, na=False)) &
                         (baseline['team'] == team)
                     ]
                     if not matched.empty:
                         if market == 'rushing_yards':
-                            proj = matched['2024_proj_rush'].iloc[0] / 17.0  # Weekly projection
+                            proj = matched['2024_proj_rush'].iloc[0] / 17.0
                             if pd.notna(proj) and proj > 0:
                                 return float(proj)
                         elif market == 'receiving_yards':
@@ -1302,14 +1442,11 @@ class DataPipeline:
                             if pd.notna(proj) and proj > 0:
                                 return float(proj)
             
-            # Final fallback: Use rolling_targets to estimate
             if market == 'receiving_yards':
-                rolling_targets = float(getattr(row, 'rolling_targets', 0.0))
-                if rolling_targets > 0:
-                    # Estimate receiving yards from targets (avg ~10 yards per target)
-                    return float(rolling_targets * 10.0)
+                targets_mu = float(getattr(row, 'rolling_targets', 0.0)) * 8.0
+                if targets_mu > 0:
+                    return float(max(targets_mu, 15.0))
             
-            # Final fallback: return reasonable default instead of 0
             if market == 'passing_yards':
                 return 150.0  # ~2550 yards/17 weeks
             elif market == 'rushing_yards':
@@ -1319,7 +1456,6 @@ class DataPipeline:
             return 0.0
         except (AttributeError, Exception) as e:
             logger.warning(f"Error computing mu_prior for {market}: {e}")
-            # Return reasonable defaults on error
             if market == 'passing_yards':
                 return 150.0
             elif market == 'rushing_yards':

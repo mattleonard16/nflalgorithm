@@ -176,6 +176,12 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
         len(odds_markets),
     )
 
+    # -----------------------------------------------------------------
+    # Match tier logic:
+    #   tier=1: exact player_id + market match
+    #   tier=2: normalized_name + market + team_canon match
+    #   tier=3: normalized_name + market match (team differences allowed but penalized)
+    # -----------------------------------------------------------------
     id_matches = projections.merge(
         odds,
         on=['season', 'week', 'player_id', 'market'],
@@ -184,6 +190,7 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
     )
     if not id_matches.empty:
         id_matches['match_type'] = 'player_id'
+        id_matches['match_tier'] = 1
         id_matches['match_score'] = 1.0
         if '__mapped_from_table' in id_matches.columns:
             mapped_mask = id_matches['__mapped_from_table'].fillna(False)
@@ -197,23 +204,40 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
     unmatched_proj = projections[~projections['__proj_idx'].isin(matched_proj_idx)]
     unmatched_odds = odds[~odds['__odds_idx'].isin(matched_odds_idx)]
 
-    # Match on normalized name + market, ignoring team differences
-    # This handles cases where players changed teams or have outdated team data
-    name_matches = unmatched_proj.merge(
+    # Tier 2: normalized_name + market + team_token match
+    name_team_matches = unmatched_proj.merge(
         unmatched_odds,
+        on=['season', 'week', 'market', 'normalized_name', 'team_token'],
+        how='inner',
+        suffixes=('_proj', '_odds')
+    )
+    if not name_team_matches.empty:
+        name_team_matches['match_type'] = 'normalized_name_team'
+        name_team_matches['match_tier'] = 2
+        name_team_matches['match_score'] = 0.95
+        matched_proj_idx.update(name_team_matches['__proj_idx'])
+        matched_odds_idx.update(name_team_matches['__odds_idx'])
+
+    # Tier 3: normalized_name + market match (team differences allowed, lower score)
+    unmatched_proj_t3 = projections[~projections['__proj_idx'].isin(matched_proj_idx)]
+    unmatched_odds_t3 = odds[~odds['__odds_idx'].isin(matched_odds_idx)]
+    name_matches = unmatched_proj_t3.merge(
+        unmatched_odds_t3,
         on=['season', 'week', 'market', 'normalized_name'],
         how='inner',
         suffixes=('_proj', '_odds')
     )
     if not name_matches.empty:
         name_matches['match_type'] = 'normalized_name'
-        name_matches['match_score'] = 1.0
+        name_matches['match_tier'] = 3
+        name_matches['match_score'] = 0.85  # Penalized for team mismatch
         matched_proj_idx.update(name_matches['__proj_idx'])
         matched_odds_idx.update(name_matches['__odds_idx'])
 
     remaining_proj = projections[~projections['__proj_idx'].isin(matched_proj_idx)]
     remaining_odds = odds[~odds['__odds_idx'].isin(matched_odds_idx)]
 
+    # Fuzzy name matching (tier 3 with lower confidence)
     fuzzy_pairs: List[Tuple[int, int, float]] = []
     used_odds_idx: set[int] = set()
     proj_candidates = list(zip(remaining_proj['__proj_idx'], remaining_proj['normalized_name']))
@@ -239,6 +263,8 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
             remaining_odds, on='__odds_idx', suffixes=('_proj', '_odds')
         )
         fuzzy_matches['match_type'] = 'fuzzy_name'
+        fuzzy_matches['match_tier'] = 3
+        # Fuzzy score already reflects confidence from ratio
         matched_proj_idx.update(pair_df['__proj_idx'])
         matched_odds_idx.update(pair_df['__odds_idx'])
 
@@ -315,7 +341,7 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
 
     candidate_frames = [
         _prepare_match_frame(df)
-        for df in (id_matches, name_matches, fuzzy_matches)
+        for df in (id_matches, name_team_matches, name_matches, fuzzy_matches)
         if df is not None and not df.empty
     ]
 
@@ -380,21 +406,85 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
     mismatch_mask = ~merged['team_match_flag']
     team_mismatch_count = int(mismatch_mask.sum())
     team_mismatch_sample: List[Dict[str, str]] = []
+    
+    # WR-specific team mismatch tolerance (Issue 4)
+    # Allow WRs to match even if team differs (e.g., traded players)
+    allow_wr_mismatch = config.integration.allow_wr_team_mismatch
+    
     if team_mismatch_count:
         team_mismatch_sample = (
             merged.loc[
                 mismatch_mask,
-                ['player_id', 'player_id_odds', 'team_stats_canon', 'team_proj_canon', 'team_odds_canon', 'season', 'week'],
+                ['player_id', 'player_id_odds', 'team_stats_canon', 'team_proj_canon', 'team_odds_canon', 'season', 'week', 'position'],
             ]
             .head(5)
             .to_dict(orient='records')
         )
+        
+        # Build valid mask: team matches OR team_odds empty OR (WR with allowed mismatch)
+        valid_mask = merged['team_match_flag'] | merged['team_odds_canon'].eq('')
+        if allow_wr_mismatch:
+            # Allow WRs with team mismatch but penalize their match_score
+            position_upper = merged['position'].fillna('').str.upper()
+            wr_mismatch_mask = (
+                mismatch_mask 
+                & (position_upper == 'WR')
+                & merged['team_odds_canon'].ne('')
+            )
+            valid_mask = valid_mask | wr_mismatch_mask
+            # Penalize WR team mismatches in match_score
+            merged.loc[wr_mismatch_mask, 'match_score'] = merged.loc[wr_mismatch_mask, 'match_score'] * 0.9
+            merged.loc[wr_mismatch_mask, 'match_tier'] = merged.loc[wr_mismatch_mask, 'match_tier'].fillna(3).astype(int)
+            wr_tolerated = int(wr_mismatch_mask.sum())
+            if wr_tolerated:
+                logger.info(
+                    "join_odds_projections: tolerating %d WR rows with team mismatch (allow_wr_team_mismatch=True)",
+                    wr_tolerated,
+                )
+        
+        dropped_mismatch = int((~valid_mask).sum())
+        if dropped_mismatch:
+            logger.warning(
+                "join_odds_projections: dropping %d rows with team mismatch (team_stats=%s team_proj=%s team_odds=%s sample=%s)",
+                dropped_mismatch,
+                merged['team_stats_canon'].nunique() if 'team_stats_canon' in merged else 0,
+                merged['team_proj_canon'].nunique() if 'team_proj_canon' in merged else 0,
+                merged['team_odds_canon'].nunique() if 'team_odds_canon' in merged else 0,
+                team_mismatch_sample,
+            )
+        merged = merged[valid_mask].copy()
+        mismatch_mask = ~merged['team_match_flag']
+        team_mismatch_count = int(mismatch_mask.sum())
 
     merged['price'] = merged['price'].astype(int)
     merged['line'] = merged['line'].astype(float)
     merged['mu'] = merged['mu'].astype(float)
     merged['sigma'] = merged['sigma'].astype(float)
     merged['match_confidence'] = merged['match_score']
+    
+    # Ensure match_tier is set (default to 3 if missing)
+    if 'match_tier' not in merged.columns:
+        merged['match_tier'] = 3
+    merged['match_tier'] = merged['match_tier'].fillna(3).astype(int)
+    
+    # Apply match tier filtering based on sportsbook type
+    min_tier_real = config.integration.min_match_tier_real
+    min_tier_synthetic = config.integration.min_match_tier_synthetic
+    
+    is_simbook = merged['sportsbook'].str.upper().str.contains('SIM', na=False)
+    tier_filter = (
+        (is_simbook & (merged['match_tier'] <= min_tier_synthetic)) |
+        (~is_simbook & (merged['match_tier'] <= min_tier_real))
+    )
+    filtered_count = int((~tier_filter).sum())
+    if filtered_count:
+        logger.info(
+            "join_odds_projections: filtering %d rows by match_tier (real<=%d, synthetic<=%d)",
+            filtered_count,
+            min_tier_real,
+            min_tier_synthetic,
+        )
+    merged = merged[tier_filter].copy()
 
     logger.info(
         "join_odds_projections: matched_rows=%d matched_players=%d match_breakdown=%s team_mismatches=%d unmatched_projection_players=%d unmatched_odds_players=%d",

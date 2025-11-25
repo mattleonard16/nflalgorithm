@@ -6,8 +6,13 @@
 # Environment detection - defaults to UV if available
 ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && echo "uv" || echo "venv")
 
-SEASON ?= 2023
-WEEK ?= 1
+SEASON ?= 2025
+WEEK ?= 13
+
+# Database backend - default to SQLite for local development
+DB_BACKEND ?= sqlite
+SQLITE_DB_PATH ?= nfl_data.db
+DB_ENV := DB_BACKEND=$(DB_BACKEND) SQLITE_DB_PATH=$(SQLITE_DB_PATH)
 
 # Conditional commands based on ENV_TYPE
 ifeq ($(ENV_TYPE),uv)
@@ -45,8 +50,11 @@ help:
 	@echo "  validate-report - Run validation and print leaderboard"
 	@echo "  start_pipeline - Start complete automated pipeline"
 	@echo "  stop_pipeline - Stop automated pipeline"
-	@echo "  clean         - Clean temporary files"
-	@echo "  migrate-to-uv  - Migrate from venv to UV (10-100x faster!)"
+	@echo "  clean         - Clean temporary files (caches, coverage) (safe for venv/.venv)"
+	@echo "  clean-root    - Archive root clutter (exports, logs, backup DB copies)"
+	@echo "  archive-week  - Archive current week's reports (use WEEK=N)"
+	@echo "  archive-all   - Full archive (reports + root cleanup)"
+	@echo "  migrate-to-uv (deprecated) - See UV_MIGRATION_NOTES.md"
 	@echo "  env-info      - Show environment information"
 	@echo "  health-check  - Comprehensive environment health check"
 	@echo ""
@@ -55,6 +63,9 @@ help:
 	@echo "  cache-warm    - Pre-populate cache with popular endpoints"
 	@echo "  cache-test    - Test cache functionality and performance"
 	@echo "  cache-clean   - Clean expired cache entries"
+	@echo ""
+	@echo "Data Ingestion:"
+	@echo "  ingest-nfl    - Ingest real NFL data (2024+2025) via nflreadpy"
 
 # Smart installation - auto-detects best environment
 install:
@@ -156,15 +167,15 @@ optimize:
 
 # Launch dashboard with environment detection
 dashboard:
-	@echo "Launching Streamlit dashboard with $(ENV_TYPE)..."
-	$(PYTHON) -m streamlit run dashboard/main_dashboard.py --server.port 8501
+	@echo "Launching Streamlit dashboard with $(ENV_TYPE) ($(DB_BACKEND))..."
+	$(DB_ENV) $(PYTHON) -m streamlit run dashboard/main_dashboard.py --server.port 8501
 
 # Weekly report with timing
 report:
 	@echo "Running weekly report pipeline with $(ENV_TYPE)..."
 	@start_time=$$(date +%s); \
-	$(PYTHON) run_prop_update.py; \
-	$(PYTHON) enhanced_visualizer.py; \
+	$(PYTHON) -m scripts.run_prop_update; \
+	$(PYTHON) -m scripts.enhanced_visualizer; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
 	echo "Reports generated in $${duration}s! Available in reports/"
@@ -173,45 +184,45 @@ report:
 # Enhanced report only
 enhanced-report:
 	@echo "Building enhanced report with $(ENV_TYPE)..."
-	$(PYTHON) enhanced_visualizer.py; \
+	$(PYTHON) -m scripts.enhanced_visualizer; \
 	if command -v open >/dev/null 2>&1; then open reports/enhanced_dashboard.html || true; fi
 
 # Weekly flow for specific week/season
 week:
-	@echo "Running weekly report for week $(W) season $(S) with $(ENV_TYPE)..."
-	$(PYTHON) run_prop_update.py --week $(W) --season $(S)
-	$(PYTHON) enhanced_visualizer.py
-	@echo "Weekly artifacts in reports/: week_$(W)_*.{csv,json,md,html} and enhanced files"
+	@echo "Running weekly report for week $(WEEK) season $(SEASON) with $(ENV_TYPE)..."
+	$(PYTHON) -m scripts.run_prop_update --week $(WEEK) --season $(SEASON)
+	$(PYTHON) -m scripts.enhanced_visualizer
+	@echo "Weekly artifacts in reports/: week_$(WEEK)_*.{csv,json,md,html} and enhanced files"
 
 week-open:
-	@echo "Opening weekly enhanced dashboard for week $(W)"
-	@open reports/week_$(W)_enhanced_dashboard.html 2>/dev/null || true
+	@echo "Opening weekly enhanced dashboard for week $(WEEK)"
+	@open reports/week_$(WEEK)_enhanced_dashboard.html 2>/dev/null || true
 
 week-update:
 	@echo "Updating data for season $(SEASON), week $(WEEK)..."
-	$(PYTHON) -c "from data_pipeline import update_week; update_week(int('$(SEASON)'), int('$(WEEK)'))"
+	$(DB_ENV) $(PYTHON) -c "from data_pipeline import update_week; update_week(int('$(SEASON)'), int('$(WEEK)'))"
 
 week-predict:
 	@echo "Generating projections for season $(SEASON), week $(WEEK)..."
-	$(PYTHON) -c "from models.position_specific import predict_week; predict_week(int('$(SEASON)'), int('$(WEEK)'))"
+	$(DB_ENV) $(PYTHON) -c "from models.position_specific import predict_week; predict_week(int('$(SEASON)'), int('$(WEEK)'))"
 
 week-materialize:
 	@echo "Materializing value view for season $(SEASON), week $(WEEK)..."
-	$(PYTHON) scripts/materialize_value_view.py --season $(SEASON) --week $(WEEK)
+	$(DB_ENV) $(PYTHON) -m scripts.materialize_value_view --season $(SEASON) --week $(WEEK)
 
 mini-backtest:
 	@echo "Running mini backtest for season $(SEASON), week $(WEEK)..."
-	$(PYTHON) backtest_replay.py --season $(SEASON) --weeks $(WEEK) --dry-run
+	$(DB_ENV) $(PYTHON) -m scripts.backtest_replay --season $(SEASON) --weeks $(WEEK) --dry-run
 
 health:
 	@echo "Checking feed freshness for season $(SEASON), week $(WEEK)..."
-	$(PYTHON) health_check.py --season $(SEASON) --week $(WEEK)
+	$(DB_ENV) $(PYTHON) -m scripts.health_check --season $(SEASON) --week $(WEEK)
 
 # Activate betting: scrape props, compute edges, persist to DB
 activate-betting:
 	@echo "Activating value betting pipeline with $(ENV_TYPE)..."
 	@start_time=$$(date +%s); \
-	$(PYTHON) scripts/quick_activate.py; \
+	$(DB_ENV) $(PYTHON) scripts/quick_activate.py; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
 	echo "Activation complete in $${duration}s!"
@@ -224,15 +235,20 @@ activate-all:
 	@$(MAKE) activate-betting
 	@echo "System operational! Run: make dashboard"
 
+# Ingest real NFL data from nflverse (2024+2025 by default)
+ingest-nfl:
+	@echo "Ingesting real NFL data via nflreadpy..."
+	$(DB_ENV) $(PYTHON) scripts/ingest_real_nfl_data.py --seasons 2024,2025 --through-week 18
+
 # Populate historical data (helper target)
 populate-data:
 	@echo "Populating NFL database with UV speed..."
-	$(PYTHON) scripts/quick_populate.py
+	$(DB_ENV) $(PYTHON) scripts/quick_populate.py
 
 # Train models (helper target)
 train-models:
 	@echo "🤖 Training models..."
-	$(PYTHON) scripts/quick_train.py
+	$(DB_ENV) $(PYTHON) scripts/quick_train.py
 
 # Validation report
 validate-report:
@@ -245,15 +261,15 @@ validate-report:
 start_pipeline: install
 	@echo "Starting NFL Algorithm Professional Pipeline..."
 	@echo "Installing dependencies..."
-	@pip install -r requirements.txt
+	@$(PIP_INSTALL) -r requirements.txt
 	@echo "Setting up database..."
-	@python data_pipeline.py
+	@$(PYTHON) data_pipeline.py
 	@echo "Running validation..."
-	@python cross_season_validation.py
+	@$(PYTHON) cross_season_validation.py
 	@echo "Starting pipeline scheduler..."
-	@python pipeline_scheduler.py &
+	@$(PYTHON) -m scripts.pipeline_scheduler &
 	@echo "Launching dashboard..."
-	@streamlit run dashboard/main_dashboard.py &
+	@$(PYTHON) -m streamlit run dashboard/main_dashboard.py &
 	@echo "Pipeline started successfully!"
 	@echo "   Dashboard: http://localhost:8501"
 
@@ -267,13 +283,25 @@ stop_pipeline:
 # Clean temporary files
 clean:
 	@echo "Cleaning temporary files..."
-	find . -type f -name "*.pyc" -delete
-	find . -type d -name "__pycache__" -delete
-	find . -type f -name "*.log" -delete
+	# Avoid touching virtualenvs
+	find . \( -path "./venv" -o -path "./.venv" \) -prune -o -type f -name "*.pyc" -delete
+	find . \( -path "./venv" -o -path "./.venv" \) -prune -o -type d -name "__pycache__" -delete
 	rm -rf .mypy_cache/
 	rm -rf htmlcov/
 	rm -rf .pytest_cache/
 	@echo "Clean complete!"
+
+# Clean root clutter files (exports, logs, old DBs)
+clean-root:
+	@echo "Archiving root clutter files..."
+	@mkdir -p archive/exports archive/databases archive/logs_old
+	@if [ -f "export10.csv" ]; then mv export10.csv archive/exports/; echo "Moved export10.csv"; fi
+	@if [ -f "week102.csv" ]; then mv week102.csv archive/exports/; echo "Moved week102.csv"; fi
+	@if [ -f "prop_update.log" ]; then mv prop_update.log archive/logs_old/; echo "Moved prop_update.log"; fi
+	@if [ -f "nfl_data.db" ]; then cp nfl_data.db archive/databases/; echo "Copied nfl_data.db to archive/databases/"; fi
+	@if [ -f "nfl_prop_lines.db" ]; then cp nfl_prop_lines.db archive/databases/; echo "Copied nfl_prop_lines.db to archive/databases/"; fi
+	@if [ -f "optuna.db" ]; then cp optuna.db archive/databases/; echo "Copied optuna.db to archive/databases/"; fi
+	@echo "Root cleanup complete!"
 
 # Development workflow
 dev-setup: install format lint
@@ -288,9 +316,26 @@ production-check: lint test validate
 backup:
 	@echo "Backing up data..."
 	mkdir -p data/backups/$(shell date +%Y%m%d)
-	cp data/nfl.db data/backups/$(shell date +%Y%m%d)/
+	cp data/nfl.db data/backups/$(shell date +%Y%m%d)/ 2>/dev/null || true
 	cp logs/*.csv data/backups/$(shell date +%Y%m%d)/ 2>/dev/null || true
 	@echo "Backup complete in data/backups/$(shell date +%Y%m%d)/"
+
+# Archive current week's reports
+archive-week:
+	@echo "Archiving current week's reports..."
+	@WEEK_DIR=archive/reports/$(shell date +%Y-%m-%d-week-$(WEEK)); \
+	mkdir -p $$WEEK_DIR; \
+	if [ -d "reports" ]; then \
+		cp -r reports/* $$WEEK_DIR/ 2>/dev/null || true; \
+		echo "Archived reports to $$WEEK_DIR"; \
+	else \
+		echo "No reports directory found"; \
+	fi
+
+# Archive everything (exports, logs, DBs, reports)
+archive-all: archive-week clean-root
+	@echo "Full archive complete!"
+	@echo "Archived to: archive/exports/, archive/databases/, archive/logs_old/, archive/reports/"
 
 # Database maintenance
 db-maintenance:
@@ -304,9 +349,8 @@ db-maintenance:
 
 # Migration to UV (10-100x faster dependency management)
 migrate-to-uv:
-	@echo "Migrating to UV for 10-100x faster dependency management..."
-	python migrate_to_uv.py
-	@echo "Migration complete\! Use 'make install-uv' or set ENV_TYPE=uv"
+	@echo "migrate-to-uv is deprecated."
+	@echo "See UV_MIGRATION_NOTES.md for historical details if needed."
 
 # Environment information
 env-info:

@@ -33,6 +33,7 @@ dependencies = [
     "tqdm>=4.66.0",
     "pymysql>=1.1.0",
     "sqlalchemy>=2.0.0",
+    "nflreadpy>=0.1.5",
 ]
 
 [project.optional-dependencies]

@@ -108,6 +108,28 @@ class FreshnessConfig:
     projections_minutes: int = 30
 
 @dataclass
+class SyntheticConfig:
+    # WR synthetic odds tuning
+    min_wr_baseline: float = 35.0
+    min_wr_line: float = 25.0
+    max_wr_line: float = 115.0
+    targets_to_yards_factor: float = 8.0
+    wr_targets_threshold: float = 3.0
+    wr_avg_rec_threshold: float = 12.0
+    max_simbook_pwin: float = 0.75
+    max_simbook_edge: float = 0.20
+
+
+@dataclass
+class IntegrationConfig:
+    # Match tier filtering for join_odds_projections
+    # Tiers: 1=player_id exact, 2=name+team match, 3=name-only match
+    min_match_tier_real: int = 2       # For real sportsbooks, keep tier<=2 (player_id or name+team)
+    min_match_tier_synthetic: int = 3  # For SimBook, allow all tiers including fuzzy name
+    # WR-specific team mismatch tolerance
+    allow_wr_team_mismatch: bool = True  # Allow WRs to match even if team differs (traded players)
+
+@dataclass
 class PipelineConfig:
     update_interval_minutes: int = 15
     weather_update_hours: int = 1
@@ -124,6 +146,8 @@ class Config:
     betting: BettingConfig = field(default_factory=BettingConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     freshness: FreshnessConfig = field(default_factory=FreshnessConfig)
+    synthetic: SyntheticConfig = field(default_factory=SyntheticConfig)
+    integration: IntegrationConfig = field(default_factory=IntegrationConfig)
     
     # Paths
     project_root: Path = Path(__file__).parent

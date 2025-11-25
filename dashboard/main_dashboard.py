@@ -79,6 +79,8 @@ def load_weekly_value(season: int, week: int) -> pd.DataFrame:
     if df.empty:
         return df
 
+    df['is_synthetic'] = df['sportsbook'].str.lower().eq('simbook')
+
     # Team reconciliation for display: stats > projections > odds
     df['team_stats_canon'] = df.get('team_stats').apply(canonicalize_team) if 'team_stats' in df.columns else ''
     df['team_proj_canon'] = df.get('team_projection').apply(canonicalize_team) if 'team_projection' in df.columns else ''
@@ -161,6 +163,7 @@ def main() -> None:
 
     presentation_mode = st.sidebar.toggle("Presentation Mode", value=False)
     quick_bet_mode = st.sidebar.toggle("Quick Bet mode", value=False)
+    best_line_only = st.sidebar.toggle("Best Line Only", value=True, help="Show only the best sportsbook line per player/market")
     min_edge_slider = st.sidebar.slider("Minimum Edge %", min_value=0.0, max_value=30.0, value=5.0, step=0.5)
     include_pass = st.sidebar.toggle("Include PASS rows", value=True)
 
@@ -173,6 +176,14 @@ def main() -> None:
     edge_threshold = min_edge_slider / 100.0
 
     if not value_bets.empty:
+        # Deduplicate to best line per player/market if enabled
+        if best_line_only:
+            # For positive edge bets, keep the one with highest edge (best value)
+            # For negative edge, keep the one with least negative edge
+            value_bets = value_bets.loc[
+                value_bets.groupby(['player_id', 'market'])['edge_percentage'].idxmax()
+            ].reset_index(drop=True)
+        
         value_bets['recommendation'] = np.where(value_bets['edge_percentage'] >= edge_threshold, 'BET', 'PASS')
         if not include_pass:
             value_bets = value_bets[value_bets['recommendation'] == 'BET']
@@ -203,13 +214,13 @@ def main() -> None:
             display['roi_pct'] = display['expected_roi'] * 100
             display['kelly_pct'] = display['kelly_fraction'] * 100
             if quick_bet_mode:
-                quick_cols = ['player_name', 'prop_type', 'sportsbook', 'line', 'price', 'edge_pct', 'stake']
+                quick_cols = ['player_name', 'prop_type', 'sportsbook', 'line', 'price', 'recommendation', 'edge_pct', 'stake']
                 st.dataframe(display[quick_cols], use_container_width=True)
             else:
                 columns = [
                     'player_name', 'position', 'team_display', 'opponent', 'prop_type', 'sportsbook',
-                    'line', 'price', 'model_prediction', 'sigma', 'p_win_pct', 'edge_pct',
-                    'roi_pct', 'kelly_pct', 'stake', 'recommendation'
+                    'line', 'price', 'recommendation', 'model_prediction', 'sigma', 'p_win_pct', 'edge_pct',
+                    'roi_pct', 'kelly_pct', 'stake'
                 ]
                 st.dataframe(display[columns], use_container_width=True)
 
