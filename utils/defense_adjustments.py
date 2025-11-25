@@ -1,8 +1,12 @@
 """
-Defense vs Position Adjustments
-===============================
-Calculates how much a defense allows above/below league average for each position.
-Used to adjust player projections based on matchup strength.
+🛡️ Defense vs Position Adjustments
+===================================
+Calculates how players perform RELATIVE to their own average against specific defenses.
+Used to boost/reduce projections based on matchup strength.
+
+Example:
+- If RBs typically get 30% MORE than their average vs CIN → 1.30x multiplier (weak D)
+- If QBs typically get 10% LESS than their average vs DEN → 0.90x multiplier (strong D)
 """
 
 import logging

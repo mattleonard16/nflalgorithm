@@ -1,35 +1,85 @@
-# Repository Guidelines
+# 📋 Repository Guidelines
 
-## Project Structure & Module Organization
-- Core scripts in the root: `data_pipeline.py`, `value_betting_engine.py`, `cross_season_validation.py`, `materialized_value_view.py`.
-- Key folders: `models/` (position models), `utils/` (helpers), `scripts/` (populate/train/report), `dashboard/` (Streamlit UI), `templates/` (reports), `docs/`, `reports/`, `logs/`, `data/` (CSVs/JSON/cache), `tests/` (pytest).
-- Local databases (`nfl_data.db`, `nfl_prop_lines.db`, `optuna.db`) live at the root; treat as dev caches, not production sources.
+## 🏗️ Project Structure & Module Organization
 
-## Build, Test, and Development Commands
-- `make install` — smart env setup (prefers `uv`, falls back to `venv`).
-- `make dev-setup` — install + format + lint for a clean workspace.
-- `make test` — pytest with coverage (HTML in `htmlcov/`); `make lint` — mypy; `make format` — black + isort (line length 100).
-- `make validate` — cross-season validation baseline; `make optimize` — Optuna search.
-- `make dashboard` — Streamlit on port 8501; `make report` or `make enhanced-report` — build weekly artifacts in `reports/`.
-- Weekly helpers: `make week-update SEASON=2025 WEEK=10`, `make week-predict ...`, `make week-materialize ...`, `make mini-backtest ...`.
+| Location | Purpose |
+|----------|---------|
+| 📄 Root scripts | `data_pipeline.py`, `value_betting_engine.py`, `materialized_value_view.py` |
+| 🤖 `models/` | Position-specific ML models |
+| 🛠️ `utils/` | Helpers (`player_id_utils`, `defense_adjustments`, `db`) |
+| 🔧 `scripts/` | Populate, train, report, ingest scripts |
+| 📊 `dashboard/` | Streamlit UI |
+| 🧪 `tests/` | pytest test suite |
+| 📁 `data/` | CSVs, JSON, odds cache |
+| 🗄️ `*.db` | Local SQLite caches (dev only) |
 
-## Coding Style & Naming Conventions
-- Python 3.13; run `make format` before pushing. Black/isort enforce 100-column width.
-- Use type hints where practical; mypy is configured with `--ignore-missing-imports`.
-- Files/modules: snake_case; tests mirror sources (e.g., `tests/test_value_betting_engine.py`). Functions use verbs (`load_week_data`); classes PascalCase; constants UPPER_SNAKE.
+## ⚡ Build, Test, and Development Commands
 
-## Testing Guidelines
-- Framework: pytest; discovery set in `pyproject.toml` (`test_*.py`, `Test*` classes, `test_*` functions).
-- Cover new code paths; add regression tests for every bug fix.
-- Prefer temporary fixtures (`tmp_path`) over writing to `data/`.
-- Run `make test` before commits; avoid checking in `htmlcov/`.
+```bash
+# 📥 Setup
+make install        # Smart env setup (UV or venv)
+make dev-setup      # Install + format + lint
 
-## Commit & Pull Request Guidelines
-- Commit messages: concise, imperative; optional prefixes (`feat:`, `fix:`, `chore:`) match current history.
-- PRs should list intent, key commands run (tests/linters), and artifacts for UI/report changes (e.g., `reports/week_10_enhanced_dashboard.html`); link issues when relevant.
-- Keep diffs focused; separate formatting-only changes from logic.
+# 🧪 Testing
+make test           # pytest with coverage
+make lint           # mypy type checking
+make format         # black + isort (100 cols)
 
-## Configuration & Data Safety
-- Copy `.env.example` to `.env`; add DB and odds API credentials locally. Never commit secrets.
-- Treat `.db` files as disposable caches; back up with `make backup` before migrations.
-- Store large exports in `archive/` or `reports/`; keep the repo root clean.
+# 📡 Data
+make ingest-nfl     # Fetch 2024+2025 NFL data via nflreadpy
+
+# 📊 Weekly Workflow
+make week-predict SEASON=2025 WEEK=13
+make week-materialize SEASON=2025 WEEK=13
+make dashboard      # Streamlit on :8501
+```
+
+## 🎨 Coding Style & Naming Conventions
+
+- **Python**: 3.13+ with type hints
+- **Formatting**: `make format` before commits (black + isort, 100 cols)
+- **Files**: `snake_case.py`
+- **Functions**: verbs (`load_week_data`, `compute_mu`)
+- **Classes**: `PascalCase`
+- **Constants**: `UPPER_SNAKE`
+
+## 🧪 Testing Guidelines
+
+- Framework: **pytest** (`test_*.py`, `test_*` functions)
+- Coverage: Add tests for new code paths
+- Fixtures: Use `tmp_path` for temp files
+- Pre-commit: Run `make test` before pushing
+
+## 📝 Commit & Pull Request Guidelines
+
+```bash
+# Commit prefixes
+feat:   # New feature
+fix:    # Bug fix
+chore:  # Maintenance
+docs:   # Documentation
+test:   # Test additions
+```
+
+- Keep diffs focused
+- Separate formatting from logic changes
+- Link related issues
+
+## 🔐 Configuration & Data Safety
+
+| Item | Guideline |
+|------|-----------|
+| 🔑 `.env` | Copy from `.env.example`, never commit |
+| 🗄️ `*.db` | Disposable caches, back up before migrations |
+| 📁 `archive/` | Store large exports here |
+| 🔒 Secrets | API keys in `.env` only |
+
+## 🗃️ Database Backends
+
+```bash
+# SQLite (local dev - default)
+DB_BACKEND=sqlite SQLITE_DB_PATH=nfl_data.db
+
+# MySQL (production)
+DB_BACKEND=mysql DB_URL="mysql://user:pass@host/db"
+```

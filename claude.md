@@ -1,10 +1,13 @@
-# Claude Session Notes
+# 🤖 Claude Session Notes
 
-## Session: November 25, 2025 (Updated)
+## 📅 Session: November 25, 2025 (Updated)
 
-### Summary
-1. **Previous**: Fixed data ingestion to use `nflreadpy` (nflverse) instead of `nfl_data_py` which had stale data.
-2. **Current**: Added **2024 season data** for training - now have both 2024 (full season) and 2025 (weeks 1-12).
+### 📋 Summary
+1. ✅ **Data Source**: Switched to `nflreadpy` (nflverse) - has real-time 2025 data
+2. ✅ **Historical Data**: Loaded 2024 + 2025 seasons (9,896 player-week rows)
+3. ✅ **Defense Adjustments**: Added relative performance vs defense multipliers
+4. ✅ **Dashboard**: Added "Best Line Only" toggle, fixed column order
+5. ✅ **Opponent Data**: Fixed incorrect matchups (PHI vs CHI, etc.)
 
 ---
 
