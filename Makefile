@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help install install-uv install-venv test lint format validate optimize dashboard start_pipeline stop_pipeline clean report validate-report
+.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report
 
 # Environment detection - defaults to UV if available
 ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && echo "uv" || echo "venv")
@@ -170,6 +170,35 @@ dashboard:
 	@echo "Launching Streamlit dashboard with $(ENV_TYPE) ($(DB_BACKEND))..."
 	$(DB_ENV) $(PYTHON) -m streamlit run dashboard/main_dashboard.py --server.port 8501
 
+# Launch FastAPI backend
+api:
+	@echo "Starting FastAPI backend on port 8000..."
+	$(DB_ENV) $(PYTHON) -m uvicorn api.server:app --host 0.0.0.0 --port 8000 --reload
+
+api-prod:
+	@echo "Starting FastAPI backend (production) on port 8000..."
+	$(DB_ENV) $(PYTHON) -m uvicorn api.server:app --host 0.0.0.0 --port 8000
+
+# Frontend commands
+frontend-install:
+	@echo "Installing frontend dependencies..."
+	cd frontend && npm install
+
+frontend-dev:
+	@echo "Starting Next.js frontend on port 3000..."
+	cd frontend && npm run dev
+
+frontend-build:
+	@echo "Building frontend for production..."
+	cd frontend && npm run build
+
+# Full stack - run both API and frontend
+fullstack:
+	@echo "Starting API and frontend..."
+	@make api &
+	@sleep 2
+	@make frontend-dev
+
 # Weekly report with timing
 report:
 	@echo "Running weekly report pipeline with $(ENV_TYPE)..."
@@ -209,6 +238,10 @@ week-predict:
 week-materialize:
 	@echo "Materializing value view for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.materialize_value_view --season $(SEASON) --week $(WEEK)
+
+week-grade:
+	@echo "📊 Grading bets for season $(SEASON), week $(WEEK)..."
+	$(DB_ENV) $(PYTHON) -m scripts.record_outcomes --season $(SEASON) --week $(WEEK)
 
 mini-backtest:
 	@echo "Running mini backtest for season $(SEASON), week $(WEEK)..."

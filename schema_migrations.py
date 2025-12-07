@@ -201,6 +201,111 @@ class MigrationManager:
                 PRIMARY KEY (player_id, season, week)
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS bet_outcomes (
+                bet_id TEXT PRIMARY KEY,
+                season INTEGER NOT NULL,
+                week INTEGER NOT NULL,
+                player_id TEXT NOT NULL,
+                player_name TEXT,
+                market TEXT NOT NULL,
+                sportsbook TEXT NOT NULL,
+                side TEXT NOT NULL,
+                line REAL NOT NULL,
+                price INTEGER NOT NULL,
+                actual_result REAL,
+                result TEXT,
+                profit_units REAL,
+                confidence_tier TEXT,
+                edge_at_placement REAL,
+                recorded_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS weekly_performance (
+                season INTEGER NOT NULL,
+                week INTEGER NOT NULL,
+                total_bets INTEGER NOT NULL DEFAULT 0,
+                wins INTEGER NOT NULL DEFAULT 0,
+                losses INTEGER NOT NULL DEFAULT 0,
+                pushes INTEGER NOT NULL DEFAULT 0,
+                profit_units REAL NOT NULL DEFAULT 0,
+                roi_pct REAL NOT NULL DEFAULT 0,
+                avg_edge REAL NOT NULL DEFAULT 0,
+                clv_avg REAL NOT NULL DEFAULT 0,
+                best_bet TEXT,
+                worst_bet TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (season, week)
+            )
+            """,
+            # ============================================
+            # User Authentication Tables
+            # ============================================
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                name TEXT,
+                subscription_tier TEXT NOT NULL DEFAULT 'free',
+                bankroll REAL NOT NULL DEFAULT 1000.0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                session_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                user_id TEXT PRIMARY KEY,
+                default_min_edge REAL NOT NULL DEFAULT 0.05,
+                default_kelly_fraction REAL NOT NULL DEFAULT 0.25,
+                default_max_stake REAL NOT NULL DEFAULT 0.02,
+                best_line_only INTEGER NOT NULL DEFAULT 1,
+                show_synthetic_odds INTEGER NOT NULL DEFAULT 0,
+                defense_multipliers INTEGER NOT NULL DEFAULT 1,
+                weather_adjustments INTEGER NOT NULL DEFAULT 1,
+                injury_weighting INTEGER NOT NULL DEFAULT 1,
+                preferred_sportsbooks TEXT,
+                preferred_markets TEXT,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS user_bets (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                season INTEGER NOT NULL,
+                week INTEGER NOT NULL,
+                player_id TEXT NOT NULL,
+                player_name TEXT,
+                market TEXT NOT NULL,
+                sportsbook TEXT NOT NULL,
+                side TEXT NOT NULL,
+                line REAL NOT NULL,
+                price INTEGER NOT NULL,
+                stake_units REAL NOT NULL,
+                stake_dollars REAL,
+                model_edge REAL,
+                confidence_tier TEXT,
+                actual_result REAL,
+                outcome TEXT,
+                profit_units REAL,
+                profit_dollars REAL,
+                placed_at TEXT NOT NULL,
+                graded_at TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """,
         )
 
     def _ensure_columns(self, cursor) -> None:
@@ -242,6 +347,12 @@ class MigrationManager:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_games_lookup ON games(season, week)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bet_outcomes_week ON bet_outcomes(season, week)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_weekly_performance_lookup ON weekly_performance(season, week)"
         )
 
 

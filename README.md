@@ -35,8 +35,12 @@ make install
 # Ingest real NFL data (2024 + 2025 seasons)
 make ingest-nfl
 
-# Launch dashboard
+# Option 1: Launch Streamlit dashboard (legacy)
 make dashboard
+
+# Option 2: Launch React dashboard (recommended)
+make api              # Start FastAPI backend on :8000
+make frontend-dev     # Start Next.js frontend on :3000
 ```
 
 ### 📅 Weekly Workflow
@@ -52,6 +56,37 @@ make week-materialize SEASON=2025 WEEK=13
 make dashboard
 
 # 4️⃣ View at http://localhost:8501
+```
+
+---
+
+## 🆕 React Dashboard (New)
+
+The project now includes a modern React/Next.js dashboard alongside the original Streamlit version.
+
+### Stack
+- **Frontend**: Next.js 15 + TypeScript + Tailwind CSS + shadcn/ui
+- **Backend**: FastAPI serving the same SQLite database
+- **Charts**: Recharts for data visualization
+
+### Running the React Dashboard
+
+```bash
+# Terminal 1: Start the API
+make api
+
+# Terminal 2: Start the frontend
+cd frontend && npm run dev
+
+# Visit http://localhost:3000
+```
+
+### Frontend Structure
+```
+frontend/
+├── src/app/           # Next.js pages (Dashboard, Performance, Analytics, System)
+├── src/components/    # React components + shadcn/ui
+└── src/lib/           # API client and TypeScript types
 ```
 
 ---

@@ -276,3 +276,51 @@ def table_exists(table_name: str, conn: Optional[DBConnection] = None) -> bool:
     finally:
         if cleanup_needed:
             connection_cm.__exit__(None, None, None)
+
+
+def fetchone(sql: str, params: Optional[tuple] = None, conn: Optional[DBConnection] = None) -> Optional[tuple]:
+    """Execute a query and return a single row."""
+    backend = _get_backend()
+    normalized_sql = _normalize_sql_for_backend(sql, backend)
+
+    if conn is not None:
+        if isinstance(conn, sqlite3.Connection):
+            cursor = conn.execute(normalized_sql, params or ())
+            return cursor.fetchone()
+        else:
+            with conn.cursor() as cursor:
+                cursor.execute(normalized_sql, params or ())
+                return cursor.fetchone()
+
+    with get_connection() as tmp_conn:
+        if isinstance(tmp_conn, sqlite3.Connection):
+            cursor = tmp_conn.execute(normalized_sql, params or ())
+            return cursor.fetchone()
+        else:
+            with tmp_conn.cursor() as cursor:
+                cursor.execute(normalized_sql, params or ())
+                return cursor.fetchone()
+
+
+def fetchall(sql: str, params: Optional[tuple] = None, conn: Optional[DBConnection] = None) -> list[tuple]:
+    """Execute a query and return all rows."""
+    backend = _get_backend()
+    normalized_sql = _normalize_sql_for_backend(sql, backend)
+
+    if conn is not None:
+        if isinstance(conn, sqlite3.Connection):
+            cursor = conn.execute(normalized_sql, params or ())
+            return cursor.fetchall()
+        else:
+            with conn.cursor() as cursor:
+                cursor.execute(normalized_sql, params or ())
+                return cursor.fetchall()
+
+    with get_connection() as tmp_conn:
+        if isinstance(tmp_conn, sqlite3.Connection):
+            cursor = tmp_conn.execute(normalized_sql, params or ())
+            return cursor.fetchall()
+        else:
+            with tmp_conn.cursor() as cursor:
+                cursor.execute(normalized_sql, params or ())
+                return cursor.fetchall()

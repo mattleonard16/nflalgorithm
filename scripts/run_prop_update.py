@@ -5,13 +5,9 @@ Run this weekly to refresh all prop lines and value opportunities
 """
 
 import sys
-import os
 from datetime import datetime
 import logging
 import argparse
-
-# Add current directory to path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from scripts.prop_line_scraper import NFLPropScraper
 from prop_integration import PropIntegration

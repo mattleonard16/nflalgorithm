@@ -75,6 +75,7 @@ def _format_export(df: pd.DataFrame, min_edge: float) -> pd.DataFrame:
         return df
 
     working = df.copy()
+
     working["player_name"] = working["player_name"].fillna(working["player_id"])
     working["position"] = working["position"].fillna("FLEX")
     working["team_display"] = working["team_projection"].fillna(working["team_stats"])
@@ -109,23 +110,25 @@ def _format_export(df: pd.DataFrame, min_edge: float) -> pd.DataFrame:
             ascending=[False, False, False, False],
         ).head(1)
 
-    deduped = (
-        working.groupby(["player_id", "market"], as_index=False, group_keys=False)
-        .apply(pick_best)
-        .reset_index(drop=True)
-    )
+    group_obj = working.groupby(["player_id", "market"], as_index=False, group_keys=False)
+    try:
+        # include_groups=False keeps future pandas behavior while retaining current semantics
+        deduped = group_obj.apply(pick_best, include_groups=False).reset_index(drop=True)
+    except TypeError:
+        # Fallback for older pandas without include_groups
+        deduped = group_obj.apply(pick_best).reset_index(drop=True)
     # Secondary guardrail: collapse residual duplicates that share the same display
     # name and market (often synthetic/alias rows) by keeping the best edge.
-    deduped = (
-        deduped.sort_values(
-            ["edge_percentage", "expected_roi", "p_win", "price"],
-            ascending=[False, False, False, False],
-        )
-        .drop_duplicates(subset=["player_name", "market"], keep="first")
-        .reset_index(drop=True)
+    deduped = deduped.sort_values(
+        ["edge_percentage", "expected_roi", "p_win", "price"],
+        ascending=[False, False, False, False],
     )
+    if {"player_name", "market"}.issubset(deduped.columns):
+        deduped = deduped.drop_duplicates(subset=["player_name", "market"], keep="first")
+    deduped = deduped.reset_index(drop=True)
 
-    return deduped[EXPORT_COLUMNS].reset_index(drop=True)
+    cols = [c for c in EXPORT_COLUMNS if c in deduped.columns]
+    return deduped[cols].reset_index(drop=True)
 
 
 def export_weekly_values(

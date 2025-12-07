@@ -8,7 +8,10 @@ from rich.table import Table
 
 from config import config
 from prop_integration import PropIntegration
-from filter_engine import enrich_opportunities, top_quick_cards
+try:
+    from scripts.filter_engine import enrich_opportunities, top_quick_cards
+except ImportError:
+    from filter_engine import enrich_opportunities, top_quick_cards
 import sqlite3
 
 console = Console()
@@ -140,5 +143,4 @@ def build_all() -> dict[str, Path]:
 
 if __name__ == "__main__":
     build_all()
-
 

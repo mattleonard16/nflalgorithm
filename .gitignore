@@ -75,4 +75,48 @@ build/
 *.egg-info/
 
 # UV workspace
-.uv-workspace/ 
+.uv-workspace/
+
+# ========================================
+# PROPRIETARY ALGORITHM - DO NOT COMMIT
+# ========================================
+
+# Core algorithm implementation
+data_pipeline.py
+value_betting_engine.py
+
+# Model training and prediction logic
+models/position_specific/weekly.py
+models/position_specific/*.joblib
+models/weekly/*.joblib
+
+# Trained model artifacts
+models/*.joblib
+models/*.pkl
+*.joblib
+*.pkl
+
+# Configuration with thresholds
+config.py
+
+# Prop integration matching logic
+prop_integration.py
+
+# Scripts with algorithm details
+scripts/materialize_value_view.py
+scripts/record_outcomes.py
+
+# API with edge calculation logic
+api/server.py
+
+# Agent artifacts
+.agent/
+.gemini/
+
+# Archive and exports
+archive/
+reports/
+exports/
+
+# Node modules (already typically ignored)
+node_modules/ 
