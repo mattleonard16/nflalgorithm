@@ -1,28 +1,28 @@
-# 🏈 NFL Algorithm - Professional Value Betting System
+# NFL Algorithm - Professional Value Betting System
 
 > *Advanced NFL player performance prediction and value betting engine*
 
-**Version**: 2.1 | **Status**: ✨ Production Ready | **Target MAE**: ≤ 3.0
+**Version**: 2.1 | **Status**: Production Ready | **Target MAE**: ≤ 3.0
 
 ---
 
-## 📊 System Overview
+## System Overview
 
 A comprehensive NFL betting algorithm combining:
 
 | Component | Description |
 |-----------|-------------|
-| 🤖 **ML Models** | Position-specific predictive models with defense adjustments |
-| 📡 **Data Pipeline** | Live odds, weather, injuries, and player stats via nflreadpy |
-| 💰 **Value Engine** | Kelly Criterion optimization with CLV tracking |
-| 🧪 **Validation** | Cross-season backtesting and performance metrics |
-| ⚡ **Automation** | Scheduled data updates and model retraining |
+| **ML Models** | Position-specific predictive models with defense adjustments |
+| **Data Pipeline** | Live odds, weather, injuries, and player stats via nflreadpy |
+| **Value Engine** | Kelly Criterion optimization with CLV tracking |
+| **Validation** | Cross-season backtesting and performance metrics |
+| **Automation** | Scheduled data updates and model retraining |
 
 **Core Philosophy**: Achieve consistent profitability through disciplined, data-driven betting with rigorous risk management.
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Clone and setup
@@ -43,24 +43,24 @@ make api              # Start FastAPI backend on :8000
 make frontend-dev     # Start Next.js frontend on :3000
 ```
 
-### 📅 Weekly Workflow
+### Weekly Workflow
 
 ```bash
-# 1️⃣ Generate projections for the week
+# 1. Generate projections for the week
 make week-predict SEASON=2025 WEEK=13
 
-# 2️⃣ Materialize value bets for dashboard
+# 2. Materialize value bets for dashboard
 make week-materialize SEASON=2025 WEEK=13
 
-# 3️⃣ Launch Streamlit dashboard
+# 3. Launch Streamlit dashboard
 make dashboard
 
-# 4️⃣ View at http://localhost:8501
+# 4. View at http://localhost:8501
 ```
 
 ---
 
-## 🆕 React Dashboard (New)
+## React Dashboard
 
 The project now includes a modern React/Next.js dashboard alongside the original Streamlit version.
 
@@ -91,25 +91,25 @@ frontend/
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 nflalgorithm/
-├── 🤖 models/              # Position-specific ML models
-├── 📁 data/                # CSVs, projections, odds cache
-├── 📚 docs/                # Documentation
-├── 🔧 scripts/             # Utility scripts and tools
-├── 🧪 tests/               # Comprehensive test suite
-├── 🛠️ utils/               # Helpers (player_id, defense_adjustments)
-├── 📊 dashboard/           # Streamlit monitoring UI
-├── 📝 logs/                # Performance tracking
-├── 🔄 data_pipeline.py     # Data ingestion + feature engineering
-├── 💵 value_betting_engine.py  # Value detection & CLV
-├── 🔗 prop_integration.py  # Player matching system
-└── 📈 materialized_value_view.py  # Dashboard data layer
+├── models/              # Position-specific ML models
+├── data/                # CSVs, projections, odds cache
+├── docs/                # Documentation
+├── scripts/             # Utility scripts and tools
+├── tests/               # Comprehensive test suite
+├── utils/               # Helpers (player_id, defense_adjustments)
+├── dashboard/           # Streamlit monitoring UI
+├── logs/                # Performance tracking
+├── data_pipeline.py     # Data ingestion + feature engineering
+├── value_betting_engine.py  # Value detection & CLV
+├── prop_integration.py  # Player matching system
+└── materialized_value_view.py  # Dashboard data layer
 ```
 
-### 🔌 Data Sources
+### Data Sources
 
 | Source | Purpose | Update Frequency |
 |--------|---------|------------------|
@@ -117,39 +117,39 @@ nflalgorithm/
 | **The Odds API** | Prop lines from multiple books | Real-time |
 | **nflverse** | Snap counts, depth charts, routes | 4x daily |
 
-### 🎯 Key Features
+### Key Features
 
-- **🛡️ Defense Adjustments**: Predictions adjusted based on how players perform vs their own average against specific defenses
-- **🔄 Multi-Source Matching**: 3-tier player matching (ID → name+team → fuzzy)
-- **📉 Best Line Detection**: Auto-selects best sportsbook line per player/market
-- **⚡ SQLite/MySQL**: Flexible backend for dev or production
+- **Defense Adjustments**: Predictions adjusted based on how players perform vs their own average against specific defenses
+- **Multi-Source Matching**: 3-tier player matching (ID → name+team → fuzzy)
+- **Best Line Detection**: Auto-selects best sportsbook line per player/market
+- **SQLite/MySQL**: Flexible backend for dev or production
 
 ---
 
-## 📈 Performance Metrics
+## Performance Metrics
 
 | Metric | Current | Target | Status |
 |--------|---------|--------|--------|
-| 🏃 Rushing MAE | **3.6** | ≤ 3.0 | 🔄 Optimizing |
-| 🎯 Receiving MAE | **4.1** | ≤ 3.5 | 🔄 Optimizing |
-| 💰 Value Bet ROI | **15.2%** | > 12% | ✅ Achieved |
-| 📊 CLV Performance | **+2.3%** | > 0% | ✅ Achieved |
-| 🔗 Player Match Rate | **28%** | > 25% | ✅ Achieved |
+| Rushing MAE | **3.6** | ≤ 3.0 | Optimizing |
+| Receiving MAE | **4.1** | ≤ 3.5 | Optimizing |
+| Value Bet ROI | **15.2%** | > 12% | Achieved |
+| CLV Performance | **+2.3%** | > 0% | Achieved |
+| Player Match Rate | **28%** | > 25% | Achieved |
 
 ---
 
-## 💻 Dashboard Features
+## Dashboard Features
 
 Access at `http://localhost:8501`:
 
 | Tab | Features |
 |-----|----------|
-| 🎰 **Live Bets** | Current value opportunities, best lines, recommendations |
-| 📊 **Performance** | Model accuracy, ROI tracking, edge distribution |
-| 📈 **CLV Analysis** | Closing line value tracking |
-| ⚙️ **System** | Pipeline health, data freshness |
+| **Live Bets** | Current value opportunities, best lines, recommendations |
+| **Performance** | Model accuracy, ROI tracking, edge distribution |
+| **CLV Analysis** | Closing line value tracking |
+| **System** | Pipeline health, data freshness |
 
-### 🎛️ Dashboard Controls
+### Dashboard Controls
 
 - **Best Line Only**: Toggle to show only best sportsbook per player/market
 - **Minimum Edge %**: Filter bets by edge threshold
@@ -157,9 +157,9 @@ Access at `http://localhost:8501`:
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
-### 🗄️ Database Setup
+### Database Setup
 
 ```bash
 # Copy example config
@@ -178,56 +178,56 @@ DB_BACKEND=mysql
 DB_URL="mysql://user:pass@host:port/database"
 ```
 
-### 🔑 API Keys
+### API Keys
 
 ```env
 ODDS_API_KEY="your_odds_api_key"
 ```
 
-> ⚠️ **Security**: Never commit `.env` to version control!
+> **Security**: Never commit `.env` to version control!
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
-make test          # 🧪 Run all tests
-make lint          # 🔍 Run mypy
-make format        # 🎨 Format with black + isort
-make validate      # ✅ Cross-season validation
+make test          # Run all tests
+make lint          # Run mypy
+make format        # Format with black + isort
+make validate      # Cross-season validation
 ```
 
 ---
 
-## 📦 Make Targets
+## Make Targets
 
 | Command | Description |
 |---------|-------------|
-| `make install` | 📥 Smart install (UV or venv) |
-| `make ingest-nfl` | 📡 Fetch real NFL data (2024+2025) |
-| `make week-predict` | 🔮 Generate week projections |
-| `make week-materialize` | 💾 Materialize value view |
-| `make dashboard` | 📊 Launch Streamlit UI |
-| `make test` | 🧪 Run test suite |
-| `make report` | 📄 Generate shareable reports |
+| `make install` | Smart install (UV or venv) |
+| `make ingest-nfl` | Fetch real NFL data (2024+2025) |
+| `make week-predict` | Generate week projections |
+| `make week-materialize` | Materialize value view |
+| `make dashboard` | Launch Streamlit UI |
+| `make test` | Run test suite |
+| `make report` | Generate shareable reports |
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
-### ✅ Completed
+### Completed
 - [x] Defense vs position adjustments (relative performance)
 - [x] nflreadpy integration for 2025 data
 - [x] Best line deduplication
 - [x] Multi-strategy player matching
 - [x] SQLite/MySQL dual backend support
 
-### 🔄 In Progress
+### In Progress
 - [ ] Game script adjustments (implied totals)
 - [ ] Weather factor integration
 - [ ] Injury status weighting
 
-### 📋 Planned
+### Planned
 - [ ] Line movement tracking
 - [ ] Target share predictions
 - [ ] Same-game correlation analysis
@@ -235,7 +235,7 @@ make validate      # ✅ Cross-season validation
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create feature branch (`git checkout -b feature/amazing-feature`)
@@ -243,11 +243,11 @@ make validate      # ✅ Cross-season validation
 4. Push to branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-**Standards**: PEP 8 • Type hints • 90%+ coverage • Documented methods
+**Standards**: PEP 8 | Type hints | 90%+ coverage | Documented methods
 
 ---
 
-## 📜 License
+## License
 
 MIT License - see LICENSE file for details.
 
@@ -255,7 +255,7 @@ MIT License - see LICENSE file for details.
 
 <div align="center">
 
-**🏈 NFL Algorithm v2.1** 
+**NFL Algorithm v2.1**
 
 *Built for accuracy. Designed for profit.*
 

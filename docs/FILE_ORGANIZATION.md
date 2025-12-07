@@ -43,29 +43,29 @@ nflalgorithm/
 
 ## File Categories
 
-### ✅ Keep in Root (Active Code)
+### Keep in Root (Active Code)
 - `*.py` - Application code
 - `Makefile` - Build commands
 - `README.md`, `*.md` docs - Documentation
 - `requirements.txt`, `pyproject.toml` - Dependencies
 - `config.py`, `.env` - Configuration
 
-### 📦 Archive Candidates (Root Clutter)
+### Archive Candidates (Root Clutter)
 
 **Export CSVs:**
-- `export10.csv`, `week102.csv` → `archive/exports/`
+- `export10.csv`, `week102.csv` -> `archive/exports/`
 
 **Log Files:**
-- `prop_update.log` → `archive/logs_old/`
+- `prop_update.log` -> `archive/logs_old/`
 - Active logs stay in `logs/` directory
 
 **Database Files:**
-- `nfl_data.db` (if duplicate) → `archive/databases/`
-- `nfl_prop_lines.db` → `archive/databases/`
-- `optuna.db` → `archive/databases/`
+- `nfl_data.db` (if duplicate) -> `archive/databases/`
+- `nfl_prop_lines.db` -> `archive/databases/`
+- `optuna.db` -> `archive/databases/`
 - Active DB should be in `data/` or configured path
 
-### 📁 Archive Structure
+### Archive Structure
 
 ```
 archive/
@@ -134,4 +134,3 @@ The `archive/` directory is **tracked in git** so you can:
 | `archive/logs_old/` | Old logs | Reference only | Small |
 | `data/` | Active datasets | Updated regularly | ~100MB |
 | `archive/databases/` | Old DB backups | Reference only | ~500MB |
-

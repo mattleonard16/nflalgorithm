@@ -1,13 +1,13 @@
-# 🤖 Claude Session Notes
+# Claude Session Notes
 
-## 📅 Session: November 25, 2025 (Updated)
+## Session: November 25, 2025 (Updated)
 
-### 📋 Summary
-1. ✅ **Data Source**: Switched to `nflreadpy` (nflverse) - has real-time 2025 data
-2. ✅ **Historical Data**: Loaded 2024 + 2025 seasons (9,896 player-week rows)
-3. ✅ **Defense Adjustments**: Added relative performance vs defense multipliers
-4. ✅ **Dashboard**: Added "Best Line Only" toggle, fixed column order
-5. ✅ **Opponent Data**: Fixed incorrect matchups (PHI vs CHI, etc.)
+### Summary
+1. **Data Source**: Switched to `nflreadpy` (nflverse) - has real-time 2025 data
+2. **Historical Data**: Loaded 2024 + 2025 seasons (9,896 player-week rows)
+3. **Defense Adjustments**: Added relative performance vs defense multipliers
+4. **Dashboard**: Added "Best Line Only" toggle, fixed column order
+5. **Opponent Data**: Fixed incorrect matchups (PHI vs CHI, etc.)
 
 ---
 
@@ -23,10 +23,10 @@
 
 Changes made:
 - Replaced `nfl_data_py` with `nflreadpy` 
-- Updated `fetch_weekly_stats()` to use `nfl.load_player_stats()` with Polars→pandas conversion
+- Updated `fetch_weekly_stats()` to use `nfl.load_player_stats()` with Polars-to-pandas conversion
 - Fixed column name differences (`team` vs `recent_team`)
 - Made script SQLite-compatible (was MySQL-only before)
-- Fixed deprecated `datetime.utcnow()` → `datetime.now(timezone.utc)`
+- Fixed deprecated `datetime.utcnow()` to `datetime.now(timezone.utc)`
 
 ### 3. Database Configuration
 - Per `AGENTS.md`: Local SQLite databases (`nfl_data.db`, `nfl_prop_lines.db`) are dev caches
@@ -119,7 +119,7 @@ Both completed and tested:
 - Tests in `tests/test_market_mu_wr.py`
 
 ### Issue 4: WR-Resilient Matching
-- 3-tier matching: player_id → name+team → name only
+- 3-tier matching: player_id to name+team to name only
 - WR team mismatch tolerance for trades
 - `IntegrationConfig` in `config.py`
 - Tests in `tests/test_prop_integration_wr.py`
