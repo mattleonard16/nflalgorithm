@@ -140,7 +140,7 @@ Both completed and tested:
 - `Makefile` - Added `ingest-nfl` target
 
 ## Files Created
-- `claude.md` - This file
+- `CLAUDE.md` - This file
 
 ---
 
