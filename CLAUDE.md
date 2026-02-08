@@ -1,42 +1,84 @@
-# Claude Session Notes
+# NFL Algorithm - Claude Session Notes
 
-## Session: November 25, 2025 (Updated)
+## Quick Start (Fresh Setup)
 
-### Summary
-1. **Data Source**: Switched to `nflreadpy` (nflverse) - has real-time 2025 data
-2. **Historical Data**: Loaded 2024 + 2025 seasons (9,896 player-week rows)
-3. **Defense Adjustments**: Added relative performance vs defense multipliers
-4. **Dashboard**: Added "Best Line Only" toggle, fixed column order
-5. **Opponent Data**: Fixed incorrect matchups (PHI vs CHI, etc.)
+No .env file needed — SQLite is the default local dev database.
+
+### Steps:
+1. Install dependencies: `make install`
+2. Run schema migrations:
+   ```bash
+   DB_BACKEND=sqlite SQLITE_DB_PATH=nfl_data.db uv run python -c "from schema_migrations import MigrationManager; MigrationManager('nfl_data.db').run()"
+   ```
+3. Ingest real NFL data: `make ingest-nfl`
+4. Run tests: `make test`
+5. Generate projections: `make week-predict SEASON=2025 WEEK=13`
+6. Materialize for dashboard: `make week-materialize SEASON=2025 WEEK=13`
+7. Launch full stack: `make fullstack`
 
 ---
 
-## Key Accomplishments
+## Environment Configuration
 
-### 1. Data Source Migration
-- **Problem**: `nfl_data_py` was returning 2024 season data (last year), not current 2025 season
-- **Solution**: Switched to `nflreadpy` which has up-to-date 2025 data through Week 12
-- **Installed**: `uv add nflreadpy` (uses Polars DataFrames, faster than pandas)
+- **Database**: SQLite for local dev (`DB_BACKEND=sqlite SQLITE_DB_PATH=nfl_data.db`)
+- All Makefile targets automatically set DB env vars via `$(DB_ENV)`
+- MySQL available for production via `DB_URL` env var
+- `ODDS_API_KEY` needed only for live odds scraping (not required for dev)
 
-### 2. Updated Ingestion Script
-**File**: `scripts/ingest_real_nfl_data.py`
+---
 
-Changes made:
-- Replaced `nfl_data_py` with `nflreadpy` 
-- Updated `fetch_weekly_stats()` to use `nfl.load_player_stats()` with Polars-to-pandas conversion
-- Fixed column name differences (`team` vs `recent_team`)
-- Made script SQLite-compatible (was MySQL-only before)
-- Fixed deprecated `datetime.utcnow()` to `datetime.now(timezone.utc)`
+## Proprietary Files (.gitignored)
 
-### 3. Database Configuration
-- Per `AGENTS.md`: Local SQLite databases (`nfl_data.db`, `nfl_prop_lines.db`) are dev caches
-- Run with: `DB_BACKEND=sqlite SQLITE_DB_PATH=nfl_data.db`
-- Remote MySQL (Kinsta) was timing out; use local SQLite for development
+These files are excluded from version control:
 
-### 4. Data Verification
-Week 12 2025 data now matches real stats:
-- Justin Jefferson: 4 rec, 48 yds, 6 targets (MIN vs GB)
-- Christian Watson: 5 rec, 49 yds, 7 targets (GB vs MIN)
+| File | Purpose |
+|------|---------|
+| `config.py` | Centralized configuration (database, API, model, betting settings) |
+| `data_pipeline.py` | Data ingestion, feature engineering, EWMA market mu computation |
+| `value_betting_engine.py` | Kelly criterion, probability calculations, value ranking |
+| `prop_integration.py` | 3-tier player matching (odds to projections) |
+| `models/position_specific/weekly.py` | Weekly model training and prediction |
+| `api/server.py` | FastAPI REST API for frontend dashboard |
+| `scripts/record_outcomes.py` | Bet grading and outcome recording |
+
+---
+
+## Key Configuration Values
+
+From `config.py`:
+
+- `config.model.target_mae = 3.0` (professional-grade target)
+- `config.betting.min_edge_threshold = 0.08` (8% minimum edge)
+- `config.betting.min_confidence = 0.75`
+- `config.integration.ewma_decay = 0.65`
+- WR role priors: alpha=75, secondary=55, slot=45, fringe=30
+- Minimum mu floor: 15.0
+
+---
+
+## Common Commands
+
+```bash
+# Install
+make install
+
+# Ingest data (2024+2025 seasons)
+make ingest-nfl
+
+# Run tests
+make test
+
+# Weekly workflow
+make week-predict SEASON=2025 WEEK=13
+make week-materialize SEASON=2025 WEEK=13
+make week-grade SEASON=2025 WEEK=13
+
+# Launch services
+make api          # FastAPI on :8000
+make frontend-dev # Next.js on :3000
+make fullstack    # Both
+make dashboard    # Streamlit on :8501
+```
 
 ---
 
@@ -71,19 +113,36 @@ nfl.load_ftn_charting([2025])      # Route/target data
 
 ---
 
-## Commands
+## Architecture
 
-### Ingest Real Data
-```bash
-# Ingest BOTH 2024 and 2025 seasons (default)
-DB_BACKEND=sqlite SQLITE_DB_PATH=nfl_data.db uv run python scripts/ingest_real_nfl_data.py
-
-# Or use Makefile target:
-make ingest-nfl
-
-# Single season only:
-DB_BACKEND=sqlite SQLITE_DB_PATH=nfl_data.db uv run python scripts/ingest_real_nfl_data.py --season 2025 --through-week 12
 ```
+nflreadpy -> ingest_real_nfl_data.py -> player_stats_enhanced
+                                              |
+                                    weekly.py (train/predict)
+                                              |
+                                     weekly_projections
+                                              |
+Odds API -> prop_line_scraper.py -> weekly_odds
+                                              |
+                                prop_integration.py (3-tier match)
+                                              |
+                              value_betting_engine.py (Kelly + CLV)
+                                              |
+                           materialized_value_view.py (dashboard layer)
+                                              |
+                             api/server.py -> React Dashboard
+```
+
+---
+
+## Data Status
+
+| Season | Source | Notes |
+|--------|--------|-------|
+| 2024 | nflreadpy | Full season (weeks 1-18) |
+| 2025 | nflreadpy | Through latest available week |
+
+**Data Source**: All data ingested via `scripts/ingest_real_nfl_data.py` using nflverse/nflreadpy.
 
 ### Verify Data
 ```bash
@@ -95,67 +154,50 @@ print(read_dataframe('SELECT season, COUNT(*) as rows, COUNT(DISTINCT player_id)
 
 ---
 
-## Current Data Status (as of Nov 25, 2025)
+## Key Features
 
-| Season | Rows  | Players | Weeks    |
-|--------|-------|---------|----------|
-| 2024   | 5,920 | 618     | 1-18     |
-| 2025   | 3,976 | 587     | 1-12     |
+### Defense Adjustments
+- Relative performance vs defense multipliers
+- Applied during feature engineering in `data_pipeline.py`
 
-**Total**: 9,896 player-week rows for training/prediction
-
-**Note**: Old stale data was cleaned up. Only fresh nflreadpy data remains in `player_stats_enhanced`.
-
----
-
-## Issues 3 & 4 Status (from previous session)
-
-Both completed and tested:
-
-### Issue 3: Enhanced `_compute_market_mu` for WR
-- Added EWMA with decay=0.65
+### WR-Specific Enhancements
+- EWMA with decay=0.65 for market mu computation
 - Role-based cluster priors (alpha/secondary/slot/fringe)
 - Blended weighting (55% hist, 30% targets, 15% role)
-- Tests in `tests/test_market_mu_wr.py`
 
-### Issue 4: WR-Resilient Matching
-- 3-tier matching: player_id to name+team to name only
-- WR team mismatch tolerance for trades
-- `IntegrationConfig` in `config.py`
-- Tests in `tests/test_prop_integration_wr.py`
+### Player Matching (3-Tier)
+- Tier 1: player_id exact match
+- Tier 2: name + team match
+- Tier 3: name only match (WR team mismatch tolerance for trades)
+- Implemented in `prop_integration.py`
 
----
-
-## Next Steps
-1. Generate Week 13 projections using 2025 Week 1-12 data
-2. Fetch/synthesize Week 13 odds
-3. Run `make week-materialize SEASON=2025 WEEK=13`
-4. Launch dashboard to verify predictions
+### Dashboard Features
+- "Best Line Only" toggle
+- Multiple sportsbook comparison
+- Value ranking by edge/CLV
+- Real-time projection updates
 
 ---
 
-## Files Modified This Session
-- `scripts/ingest_real_nfl_data.py` - Switched to nflreadpy, SQLite support, **default to 2024+2025**
-- `pyproject.toml` - Added nflreadpy dependency
-- `Makefile` - Added `ingest-nfl` target
+## Testing
 
-## Files Created
-- `CLAUDE.md` - This file
-
----
-
-## Quick Reference
-
+Run full test suite:
 ```bash
-# Ingest both seasons (recommended)
-make ingest-nfl
-
-# Generate Week 13 projections
-make week-predict SEASON=2025 WEEK=13
-
-# Materialize for dashboard
-make week-materialize SEASON=2025 WEEK=13
-
-# Launch dashboard
-make dashboard
+make test
 ```
+
+Key test files:
+- `tests/test_market_mu_wr.py` - EWMA and role priors
+- `tests/test_prop_integration_wr.py` - 3-tier player matching
+- `tests/test_projection_accuracy.py` - MAE validation
+- `tests/test_value_betting.py` - Kelly criterion and edge calculation
+
+---
+
+## Notes
+
+- Database migrations are managed by `schema_migrations.py`
+- All proprietary logic is in .gitignored files
+- Use `make fullstack` for complete local development environment
+- Front-end dashboard is in `/frontend` (Next.js + TypeScript)
+- Legacy Streamlit dashboard available via `make dashboard`
