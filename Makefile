@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report
+.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents
 
 # Environment detection - defaults to UV if available
 ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && echo "uv" || echo "venv")
@@ -243,6 +243,34 @@ week-grade:
 	@echo "📊 Grading bets for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.record_outcomes --season $(SEASON) --week $(WEEK)
 
+backfill-accuracy:
+	@echo "Running historical line accuracy backfill..."
+	$(DB_ENV) $(PYTHON) -m scripts.backfill_line_accuracy --seasons 2024,2025 --persist
+
+run-agents:
+	@echo "Running agent coordinator for season $(SEASON), week $(WEEK)..."
+	$(DB_ENV) $(PYTHON) -m agents.coordinator --season $(SEASON) --week $(WEEK)
+
+risk-check:
+	@echo "Running risk check for season $(SEASON), week $(WEEK)..."
+	$(DB_ENV) $(PYTHON) -m risk_manager --season $(SEASON) --week $(WEEK)
+
+dry-run:
+	@echo "Running dry-run validation for season $(SEASON)..."
+	$(DB_ENV) $(PYTHON) -m scripts.dry_run_validation --season $(SEASON)
+
+production-run:
+	@echo "Running production pipeline for season $(SEASON), week $(WEEK)..."
+	$(DB_ENV) $(PYTHON) -m scripts.production_runner --season $(SEASON) --week $(WEEK)
+
+learn:
+	@echo "Running learning loop for season $(SEASON), week $(WEEK)..."
+	$(DB_ENV) $(PYTHON) -m learning_loop learn --season $(SEASON) --week $(WEEK)
+
+learning-report:
+	@echo "Generating learning report for season $(SEASON)..."
+	$(DB_ENV) $(PYTHON) -m learning_loop report --season $(SEASON)
+
 mini-backtest:
 	@echo "Running mini backtest for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.backtest_replay --season $(SEASON) --weeks $(WEEK) --dry-run
@@ -267,6 +295,12 @@ activate-all:
 	@$(MAKE) train-models || true
 	@$(MAKE) activate-betting
 	@echo "System operational! Run: make dashboard"
+
+# TE market bias analysis
+te-bias-analysis:
+	@echo "Running TE market bias analysis with $(ENV_TYPE)..."
+	$(DB_ENV) $(PYTHON) -m scripts.te_market_bias --output reports
+	@echo "TE bias report written to reports/te_market_bias_report.json"
 
 # Ingest real NFL data from nflverse (2024+2025 by default)
 ingest-nfl:

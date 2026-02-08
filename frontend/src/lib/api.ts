@@ -18,6 +18,11 @@ import type {
   UserBet,
   UserStats,
   WeeklySummaryResponse,
+  PipelineRun,
+  WhyPayload,
+  CorrelationResponse,
+  RiskSummary,
+  AgentReviewStatus,
 } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -54,7 +59,10 @@ export async function getMeta(): Promise<MetaResponse> {
 /**
  * Get value bets for a specific week with filters
  */
-export async function getValueBets(filters: DashboardFilters): Promise<ValueBetsResponse> {
+export async function getValueBets(
+  filters: DashboardFilters,
+  includeWhy = false
+): Promise<ValueBetsResponse> {
   const params = new URLSearchParams({
     season: filters.season.toString(),
     week: filters.week.toString(),
@@ -65,6 +73,7 @@ export async function getValueBets(filters: DashboardFilters): Promise<ValueBets
   if (filters.sportsbook) params.append("sportsbook", filters.sportsbook);
   if (filters.market) params.append("market", filters.market);
   if (filters.position) params.append("position", filters.position);
+  if (includeWhy) params.append("include_why", "true");
 
   return fetchAPI<ValueBetsResponse>(`/api/value-bets?${params.toString()}`);
 }
@@ -150,6 +159,129 @@ export async function ping(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ============================================================================
+// Pipeline Refresh API
+// ============================================================================
+
+/**
+ * Trigger a pipeline run
+ */
+export async function triggerPipelineRun(
+  season: number,
+  week: number,
+  skipIngest = false,
+  skipOdds = false
+): Promise<PipelineRun> {
+  const params = new URLSearchParams({
+    season: season.toString(),
+    week: week.toString(),
+    skip_ingest: skipIngest.toString(),
+    skip_odds: skipOdds.toString(),
+  });
+  return fetchAPI<PipelineRun>(`/api/run?${params.toString()}`, { method: "POST" });
+}
+
+/**
+ * Get pipeline run status
+ */
+export async function getPipelineRun(runId: string): Promise<PipelineRun> {
+  return fetchAPI<PipelineRun>(`/api/run/${runId}`);
+}
+
+/**
+ * Get latest pipeline run for a season/week
+ */
+export async function getLatestRun(season: number, week: number): Promise<PipelineRun | null> {
+  return fetchAPI<PipelineRun | null>(`/api/run/latest?season=${season}&week=${week}`);
+}
+
+// ============================================================================
+// Explainability API
+// ============================================================================
+
+/**
+ * Get explainability payload for a single bet
+ */
+export async function getExplainability(
+  playerId: string,
+  market: string,
+  season: number,
+  week: number
+): Promise<{ player_id: string; market: string; why: WhyPayload }> {
+  return fetchAPI(`/api/explain/${playerId}/${market}?season=${season}&week=${week}`);
+}
+
+// ============================================================================
+// Risk & Correlation API
+// ============================================================================
+
+/**
+ * Get correlation analysis
+ */
+export async function getCorrelationAnalysis(
+  season: number,
+  week: number
+): Promise<CorrelationResponse> {
+  return fetchAPI<CorrelationResponse>(
+    `/api/analytics/correlation?season=${season}&week=${week}`
+  );
+}
+
+/**
+ * Get risk exposure summary
+ */
+export async function getRiskSummary(season: number, week: number): Promise<RiskSummary> {
+  return fetchAPI<RiskSummary>(`/api/analytics/risk-summary?season=${season}&week=${week}`);
+}
+
+// ============================================================================
+// Export API
+// ============================================================================
+
+/**
+ * Get CSV export URL for current table view
+ */
+export function getExportCsvUrl(season: number, week: number, minEdge = 0): string {
+  return `${API_BASE_URL}/api/export/csv?season=${season}&week=${week}&min_edge=${minEdge}`;
+}
+
+/**
+ * Get JSON bundle export URL
+ */
+export function getExportBundleUrl(season: number, week: number): string {
+  return `${API_BASE_URL}/api/export/bundle?season=${season}&week=${week}`;
+}
+
+// ============================================================================
+// Agent Review API
+// ============================================================================
+
+/**
+ * Request agent review for a pipeline run
+ */
+export async function requestAgentReview(
+  runId: string,
+  season: number,
+  week: number
+): Promise<{ run_id: string; review_status: string; message: string }> {
+  return fetchAPI(`/api/run/${runId}/review?season=${season}&week=${week}`, {
+    method: "POST",
+  });
+}
+
+/**
+ * Get agent review status for a pipeline run
+ */
+export async function getAgentReviewStatus(
+  runId: string,
+  season: number,
+  week: number
+): Promise<AgentReviewStatus> {
+  return fetchAPI<AgentReviewStatus>(
+    `/api/run/${runId}/review-status?season=${season}&week=${week}`
+  );
 }
 
 // ============================================================================

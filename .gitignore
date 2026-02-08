@@ -32,6 +32,7 @@ optuna.db
 # Large debug files
 debug_page.html
 *.png
+!docs/dashboard-screenshot.png
 
 # IDE
 .vscode/
@@ -61,12 +62,14 @@ htmlcov/
 temp_validation_test.py
 
 # HTTP cache artifacts
+cache/
 cache/cache/http/http_cache/
 cache/cache/http/redirects.sqlite
 
 # Logs
 *.log
 logs/*.log
+logs/production_runs/
 prop_update.log
 
 # Build artifacts

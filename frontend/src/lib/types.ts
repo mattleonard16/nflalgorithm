@@ -2,6 +2,129 @@
  * TypeScript types for NFL Algorithm API responses
  */
 
+// Explainability payload
+export interface WhyPayload {
+  model: {
+    mu: number | null;
+    sigma: number | null;
+    context_sensitivity: number | null;
+  };
+  volume: {
+    target_share: number | null;
+  };
+  volatility: {
+    score: number | null;
+  };
+  confidence: {
+    total: number | null;
+    tier?: string | null;
+    edge_pct?: number | null;
+    p_win?: number | null;
+  };
+  risk: {
+    correlation_group: string | null;
+    exposure_warning: string | null;
+    risk_adjusted_kelly: number | null;
+  };
+  agents: {
+    decision: string | null;
+    merged_confidence: number | null;
+    votes: Record<string, string> | null;
+    top_rationale: string | null;
+  };
+}
+
+// Data health check result
+export interface DataHealthCheck {
+  check: string;
+  status: "pass" | "warn" | "fail";
+  [key: string]: unknown;
+}
+
+export interface DataHealth {
+  overall: "pass" | "warn" | "fail";
+  checks: DataHealthCheck[];
+  season: number;
+  week: number;
+}
+
+// Agent review status
+export interface AgentReviewStatus {
+  run_id: string;
+  reviewed: boolean;
+  reviewed_at: string | null;
+  decision_count: number;
+}
+
+// Pipeline run
+export interface PipelineRun {
+  run_id: string;
+  season: number;
+  week: number;
+  status: "running" | "completed" | "failed";
+  stages_requested: number;
+  stages_completed: number;
+  error_message: string | null;
+  started_at: string;
+  finished_at: string | null;
+  report_json: Record<string, unknown> | null;
+  data_health: DataHealth | null;
+}
+
+// Risk & correlation types
+export interface CorrelationPlayer {
+  player_id: string;
+  player_name: string | null;
+  market: string;
+  team: string | null;
+}
+
+export interface CorrelationGroup {
+  group: string;
+  type: string;
+  players: CorrelationPlayer[];
+  combined_stake: number;
+}
+
+export interface TeamStack {
+  team: string;
+  count: number;
+  player_ids: string[];
+}
+
+export interface CorrelationResponse {
+  correlation_groups: CorrelationGroup[];
+  team_stacks: TeamStack[];
+}
+
+export interface Guardrails {
+  max_team_exposure: number;
+  max_game_exposure: number;
+  max_player_exposure: number;
+}
+
+export interface ExposureItem {
+  team?: string;
+  game?: string;
+  stake: number;
+  fraction: number;
+}
+
+export interface RiskWarning {
+  player_id: string;
+  player_name: string | null;
+  warning: string;
+}
+
+export interface RiskSummary {
+  total_stake: number;
+  bankroll: number;
+  team_exposure: ExposureItem[];
+  game_exposure: ExposureItem[];
+  guardrails: Guardrails;
+  warnings: RiskWarning[];
+}
+
 export interface ValueBet {
   player_id: string;
   player_name: string | null;
@@ -19,8 +142,12 @@ export interface ValueBet {
   expected_roi: number;
   kelly_fraction: number;
   stake: number;
-  confidence_tier: "Premium" | "Strong" | "Standard" | "Low";
-  recommendation: "BET" | "PASS";
+  confidence_tier: "Premium" | "Strong" | "Marginal" | "Pass";
+  confidence_score?: number;
+  event_id?: string;
+  generated_at?: string;
+  recommendation?: "BET" | "PASS";
+  why?: WhyPayload;
 }
 
 export interface ValueBetsResponse {

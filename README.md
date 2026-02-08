@@ -62,6 +62,8 @@ make dashboard
 
 ## React Dashboard
 
+![NFL Algorithm Dashboard](docs/dashboard-screenshot.png)
+
 The project now includes a modern React/Next.js dashboard alongside the original Streamlit version.
 
 ### Stack

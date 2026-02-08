@@ -87,7 +87,9 @@ def transform_to_enhanced_stats(weekly: pd.DataFrame, snaps: pd.DataFrame) -> pd
     df['receptions'] = df['receptions'].fillna(0).astype(float)
     df['targets'] = df['targets'].fillna(0).astype(float)
     df['passing_yards'] = df['passing_yards'].fillna(0).astype(float)
-    
+    att_col = 'attempts' if 'attempts' in df.columns else 'passing_attempts'
+    df['passing_attempts'] = df[att_col].fillna(0).astype(float) if att_col in df.columns else 0.0
+
     # Derived metrics
     df['target_share'] = df['target_share'].fillna(0).astype(float) if 'target_share' in df.columns else 0.0
     air_yards_col = 'receiving_air_yards' if 'receiving_air_yards' in df.columns else 'air_yards'
@@ -133,7 +135,8 @@ def transform_to_enhanced_stats(weekly: pd.DataFrame, snaps: pd.DataFrame) -> pd
     final_cols = [
         'player_id', 'season', 'week', 'name', 'team', 'position', 'age',
         'games_played', 'snap_count', 'snap_percentage',
-        'rushing_yards', 'rushing_attempts', 'receiving_yards', 'receptions', 'targets',
+        'rushing_yards', 'rushing_attempts', 'passing_yards', 'passing_attempts',
+        'receiving_yards', 'receptions', 'targets',
         'red_zone_touches', 'target_share', 'air_yards', 'yac_yards', 'game_script',
         'created_at', 'updated_at'
     ]

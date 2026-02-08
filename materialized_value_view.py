@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 
 from config import config
+from confidence_engine import score_plays
 from utils.db import get_connection, execute, executemany
 from value_betting_engine import rank_weekly_value
 
@@ -60,12 +61,16 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
 
         payload = payload[payload['edge_percentage'].between(-0.5, 0.5)]
 
+        # Compute confidence scores and tiers
+        payload = score_plays(payload)
+
         sql = (
             """
             INSERT INTO materialized_value_view (
                 season, week, player_id, event_id, team, team_odds, market, sportsbook, line, price,
-                mu, sigma, p_win, edge_percentage, expected_roi, kelly_fraction, stake, generated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                mu, sigma, p_win, edge_percentage, expected_roi, kelly_fraction, stake,
+                confidence_score, confidence_tier, generated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(season, week, player_id, market, sportsbook, event_id)
             DO UPDATE SET
                 team=excluded.team,
@@ -79,6 +84,8 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
                 expected_roi=excluded.expected_roi,
                 kelly_fraction=excluded.kelly_fraction,
                 stake=excluded.stake,
+                confidence_score=excluded.confidence_score,
+                confidence_tier=excluded.confidence_tier,
                 generated_at=excluded.generated_at
             """
         )
@@ -89,7 +96,8 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
                 [
                     'season', 'week', 'player_id', 'event_id', 'team', 'team_odds', 'market',
                     'sportsbook', 'line', 'price', 'mu', 'sigma', 'p_win', 'edge_percentage',
-                    'expected_roi', 'kelly_fraction', 'stake', 'generated_at',
+                    'expected_roi', 'kelly_fraction', 'stake',
+                    'confidence_score', 'confidence_tier', 'generated_at',
                 ]
             ].itertuples(index=False, name=None),
             conn=conn,
