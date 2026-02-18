@@ -4,6 +4,8 @@
 
 **Version**: 2.1 | **Status**: Production Ready | **Target MAE**: ≤ 3.0
 
+> **Coming soon: NBA algorithm**
+
 ---
 
 ## System Overview
@@ -229,8 +231,7 @@ make validate      # Cross-season validation
 - [ ] Weather factor integration
 - [ ] Injury status weighting
 
-### Coming Soon
-- [ ] NBA algorithm
+### Planned
 - [ ] Line movement tracking
 - [ ] Target share predictions
 - [ ] Same-game correlation analysis
