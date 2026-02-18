@@ -17,6 +17,7 @@ import pandas as pd
 
 from config import config
 from utils.db import read_dataframe, execute, executemany, get_connection
+from utils.grading import grade_bet, calculate_profit_units, get_confidence_tier
 
 
 # Market to stat column mapping
@@ -27,77 +28,6 @@ MARKET_TO_STAT = {
     'receptions': 'receptions',
     'targets': 'targets',
 }
-
-
-def get_confidence_tier(edge_percentage: float) -> str:
-    """
-    Determine confidence tier based on edge percentage.
-
-    Args:
-        edge_percentage: Edge percentage at time of placement
-
-    Returns:
-        Confidence tier: HIGH, MEDIUM, LOW, or MINIMAL
-    """
-    if edge_percentage >= 15.0:
-        return 'HIGH'
-    elif edge_percentage >= 8.0:
-        return 'MEDIUM'
-    elif edge_percentage >= 3.0:
-        return 'LOW'
-    else:
-        return 'MINIMAL'
-
-
-def calculate_profit_units(result: str, price: int) -> float:
-    """
-    Calculate profit in units for a bet.
-
-    Args:
-        result: Bet result ('win', 'loss', or 'push')
-        price: American odds (e.g., -110, +150)
-
-    Returns:
-        Profit in units (1 unit = stake)
-    """
-    if result == 'push':
-        return 0.0
-    elif result == 'loss':
-        return -1.0
-    elif result == 'win':
-        if price < 0:
-            # Negative odds: profit = 100 / abs(odds)
-            return 100.0 / abs(price)
-        else:
-            # Positive odds: profit = odds / 100
-            return price / 100.0
-    else:
-        return 0.0
-
-
-def grade_bet(actual: float, line: float, side: str) -> str:
-    """
-    Grade a single bet based on actual result vs line.
-
-    Args:
-        actual: Actual stat value
-        line: Bet line
-        side: Bet side ('over' or 'under')
-
-    Returns:
-        Result: 'win', 'loss', or 'push'
-    """
-    if pd.isna(actual):
-        # No actual data - treat as push
-        return 'push'
-
-    if actual == line:
-        return 'push'
-
-    if side.lower() == 'over':
-        return 'win' if actual > line else 'loss'
-    else:  # under
-        return 'win' if actual < line else 'loss'
 
 
 def grade_bets(season: int, week: int) -> List[Dict]:
