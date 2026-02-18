@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents
+.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade
 
 # Environment detection - defaults to UV if available
 ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && echo "uv" || echo "venv")
@@ -306,6 +306,80 @@ te-bias-analysis:
 ingest-nfl:
 	@echo "Ingesting real NFL data via nflreadpy..."
 	$(DB_ENV) $(PYTHON) scripts/ingest_real_nfl_data.py --seasons 2024,2025 --through-week 18
+
+# ============================================================
+# NBA Targets
+# ============================================================
+
+# Ingest NBA player game logs for current and prior season
+ingest-nba:
+	@echo "Ingesting NBA player game logs via nba_api..."
+	$(DB_ENV) $(PYTHON) scripts/ingest_nba_data.py
+
+# Train NBA models for all markets
+nba-train:
+	@echo "Training NBA models for all markets..."
+	$(DB_ENV) $(PYTHON) models/nba/stat_model.py --train --market all
+
+# Generate NBA projections for all markets (use NBA_DATE=YYYY-MM-DD for historical)
+NBA_DATE ?= $(shell date +%Y-%m-%d)
+nba-predict:
+	@echo "Generating NBA projections for all markets for $(NBA_DATE)..."
+	$(DB_ENV) $(PYTHON) models/nba/stat_model.py --predict --market all --date $(NBA_DATE)
+
+# Scrape NBA player prop odds from The Odds API
+nba-odds:
+	@echo "Scraping NBA player prop odds for $(NBA_DATE)..."
+	$(DB_ENV) $(PYTHON) scripts/scrape_nba_odds.py --date $(NBA_DATE)
+
+# Compute NBA value bets and materialise to nba_materialized_value_view
+nba-value:
+	@echo "Computing NBA value bets for $(NBA_DATE)..."
+	$(DB_ENV) $(PYTHON) nba_value_engine.py --date $(NBA_DATE)
+
+# Run NBA risk assessment
+nba-risk:
+	@echo "Running NBA risk assessment for $(NBA_DATE)..."
+	$(DB_ENV) $(PYTHON) nba_risk_manager.py --date $(NBA_DATE)
+
+# Run NBA agent coordinator
+nba-agents:
+	@echo "Running NBA agent coordinator for $(NBA_DATE)..."
+	$(DB_ENV) $(PYTHON) -m agents.nba_coordinator --date $(NBA_DATE)
+
+# Grade NBA bets against actual results
+GAME_DATE ?= $(shell date +%Y-%m-%d)
+nba-grade:
+	@echo "Grading NBA bets for $(GAME_DATE)..."
+	$(DB_ENV) $(PYTHON) scripts/record_nba_outcomes.py --game-date $(GAME_DATE)
+
+# Full NBA refresh: ingest -> train -> predict -> odds -> value -> risk -> agents
+nba-full:
+	@echo "Running full NBA pipeline..."
+	$(MAKE) ingest-nba
+	$(MAKE) nba-train
+	$(MAKE) nba-predict
+	$(MAKE) nba-odds
+	$(MAKE) nba-value
+	$(MAKE) nba-risk
+	$(MAKE) nba-agents
+
+# Individual market training targets
+nba-train-pts:
+	@echo "Training NBA points (PTS) model..."
+	$(DB_ENV) $(PYTHON) models/nba/stat_model.py --train --market pts
+
+nba-train-reb:
+	@echo "Training NBA rebounds (REB) model..."
+	$(DB_ENV) $(PYTHON) models/nba/stat_model.py --train --market reb
+
+nba-train-ast:
+	@echo "Training NBA assists (AST) model..."
+	$(DB_ENV) $(PYTHON) models/nba/stat_model.py --train --market ast
+
+nba-train-fg3m:
+	@echo "Training NBA 3-pointers made (FG3M) model..."
+	$(DB_ENV) $(PYTHON) models/nba/stat_model.py --train --market fg3m
 
 # Populate historical data (helper target)
 populate-data:
