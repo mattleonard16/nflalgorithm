@@ -409,6 +409,162 @@ class MigrationManager:
                 PRIMARY KEY (season, week, agent_name, player_id, market)
             )
             """,
+            # ============================================
+            # NBA Tables
+            # ============================================
+            """
+            CREATE TABLE IF NOT EXISTS nba_player_game_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                player_id INTEGER NOT NULL,
+                player_name TEXT NOT NULL,
+                team_abbreviation TEXT NOT NULL,
+                season INTEGER NOT NULL,
+                game_id TEXT NOT NULL,
+                game_date TEXT NOT NULL,
+                matchup TEXT,
+                wl TEXT,
+                min REAL,
+                pts INTEGER,
+                reb INTEGER,
+                ast INTEGER,
+                fg3m INTEGER,
+                fgm INTEGER,
+                fga INTEGER,
+                ftm INTEGER,
+                fta INTEGER,
+                stl INTEGER,
+                blk INTEGER,
+                tov INTEGER,
+                plus_minus REAL,
+                UNIQUE(player_id, game_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS nba_projections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                player_id INTEGER NOT NULL,
+                player_name TEXT NOT NULL,
+                team TEXT NOT NULL,
+                season INTEGER NOT NULL,
+                game_date TEXT NOT NULL,
+                game_id TEXT NOT NULL,
+                market TEXT NOT NULL,
+                projected_value REAL NOT NULL,
+                confidence REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(player_id, game_id, market)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS nba_odds (
+                event_id    TEXT NOT NULL,
+                season      INTEGER NOT NULL,
+                game_date   TEXT NOT NULL,
+                player_id   INTEGER,
+                player_name TEXT NOT NULL,
+                team        TEXT,
+                market      TEXT NOT NULL,
+                sportsbook  TEXT NOT NULL,
+                line        REAL NOT NULL,
+                over_price  INTEGER,
+                under_price INTEGER,
+                as_of       TEXT NOT NULL,
+                PRIMARY KEY (event_id, player_name, market, sportsbook)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS nba_materialized_value_view (
+                season          INTEGER NOT NULL,
+                game_date       TEXT NOT NULL,
+                player_id       INTEGER,
+                player_name     TEXT NOT NULL,
+                team            TEXT,
+                event_id        TEXT NOT NULL,
+                market          TEXT NOT NULL,
+                sportsbook      TEXT NOT NULL,
+                line            REAL NOT NULL,
+                over_price      INTEGER NOT NULL,
+                under_price     INTEGER,
+                mu              REAL NOT NULL,
+                sigma           REAL NOT NULL,
+                p_win           REAL NOT NULL,
+                edge_percentage REAL NOT NULL,
+                expected_roi    REAL NOT NULL,
+                kelly_fraction  REAL NOT NULL,
+                confidence      REAL,
+                generated_at    TEXT NOT NULL,
+                PRIMARY KEY (game_date, player_id, market, sportsbook, event_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS nba_bet_outcomes (
+                bet_id TEXT PRIMARY KEY,
+                season INTEGER NOT NULL,
+                game_date TEXT NOT NULL,
+                player_id INTEGER NOT NULL,
+                player_name TEXT,
+                market TEXT NOT NULL,
+                sportsbook TEXT NOT NULL,
+                side TEXT NOT NULL,
+                line REAL NOT NULL,
+                price INTEGER NOT NULL,
+                actual_result REAL,
+                result TEXT,
+                profit_units REAL,
+                confidence_tier TEXT,
+                edge_at_placement REAL,
+                recorded_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS nba_daily_performance (
+                season INTEGER NOT NULL,
+                game_date TEXT NOT NULL,
+                total_bets INTEGER NOT NULL DEFAULT 0,
+                wins INTEGER NOT NULL DEFAULT 0,
+                losses INTEGER NOT NULL DEFAULT 0,
+                pushes INTEGER NOT NULL DEFAULT 0,
+                profit_units REAL NOT NULL DEFAULT 0,
+                roi_pct REAL NOT NULL DEFAULT 0,
+                avg_edge REAL NOT NULL DEFAULT 0,
+                best_bet TEXT,
+                worst_bet TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (season, game_date)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS nba_risk_assessments (
+                game_date           TEXT NOT NULL,
+                player_id           INTEGER NOT NULL,
+                market              TEXT NOT NULL,
+                sportsbook          TEXT NOT NULL,
+                event_id            TEXT NOT NULL,
+                correlation_group   TEXT,
+                exposure_warning    TEXT,
+                risk_adjusted_kelly REAL NOT NULL,
+                mean_drawdown       REAL,
+                max_drawdown        REAL,
+                p95_drawdown        REAL,
+                assessed_at         TEXT NOT NULL,
+                PRIMARY KEY (game_date, player_id, market, sportsbook, event_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS nba_agent_decisions (
+                game_date            TEXT NOT NULL,
+                player_id            INTEGER NOT NULL,
+                market               TEXT NOT NULL,
+                decision             TEXT NOT NULL,
+                merged_confidence    REAL NOT NULL,
+                votes                TEXT NOT NULL,
+                rationale            TEXT,
+                coordinator_override INTEGER NOT NULL DEFAULT 0,
+                agent_reports        TEXT,
+                decided_at           TEXT NOT NULL,
+                PRIMARY KEY (game_date, player_id, market)
+            )
+            """,
         )
 
     def _ensure_columns(self, cursor) -> None:
@@ -506,6 +662,36 @@ class MigrationManager:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_pipeline_runs_lookup ON pipeline_runs(season, week, status)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_game_logs_player ON nba_player_game_logs(player_id, game_date)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_game_logs_season ON nba_player_game_logs(season, game_date)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_projections_lookup ON nba_projections(game_date, market)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_game_logs_team ON nba_player_game_logs(team_abbreviation, season)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_odds_lookup ON nba_odds(game_date, market, sportsbook)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_value_lookup ON nba_materialized_value_view(season, game_date, market)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_bet_outcomes_date ON nba_bet_outcomes(season, game_date)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_daily_performance_lookup ON nba_daily_performance(season, game_date)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_risk_game_date ON nba_risk_assessments(game_date, market)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_agent_game_date ON nba_agent_decisions(game_date, market)"
         )
 
 
