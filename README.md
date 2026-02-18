@@ -229,7 +229,8 @@ make validate      # Cross-season validation
 - [ ] Weather factor integration
 - [ ] Injury status weighting
 
-### Planned
+### Coming Soon
+- [ ] NBA algorithm
 - [ ] Line movement tracking
 - [ ] Target share predictions
 - [ ] Same-game correlation analysis
