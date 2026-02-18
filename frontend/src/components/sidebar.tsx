@@ -13,6 +13,8 @@ import {
   ChevronRight,
   LogOut,
   User,
+  Calendar,
+  Users,
 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -20,17 +22,27 @@ import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/lib/auth-context";
 import { PerformanceWidget } from "@/components/performance-widget";
 
+type Sport = "nfl" | "nba";
+
 interface NavItem {
   title: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
 }
 
-const navItems: NavItem[] = [
+const nflNavItems: NavItem[] = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
   { title: "Performance", href: "/performance", icon: TrendingUp },
   { title: "Analytics", href: "/analytics", icon: BarChart3 },
   { title: "System", href: "/system", icon: Activity },
+];
+
+const nbaNavItems: NavItem[] = [
+  { title: "Dashboard", href: "/nba", icon: LayoutDashboard },
+  { title: "Performance", href: "/nba/performance", icon: TrendingUp },
+  { title: "Players", href: "/nba/players", icon: Users },
+  { title: "Schedule", href: "/nba/schedule", icon: Calendar },
+  { title: "Analytics", href: "/nba/analytics", icon: BarChart3 },
 ];
 
 export function Sidebar() {
@@ -39,9 +51,44 @@ export function Sidebar() {
   const { user, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
 
+  const activeSport: Sport = pathname.startsWith("/nba") ? "nba" : "nfl";
+  const navItems = activeSport === "nba" ? nbaNavItems : nflNavItems;
+
+  const accentColor = activeSport === "nba" ? "blue" : "amber";
+  const accentStyles = {
+    nfl: {
+      logo: "bg-gradient-to-br from-amber-500 to-amber-700",
+      active: "bg-amber-500/10 text-amber-400 border-l-2 border-amber-500",
+      activeIcon: "text-amber-400",
+      switcher: "bg-amber-500/20 text-amber-300",
+      settingsActive: "bg-amber-500/10 text-amber-400",
+    },
+    nba: {
+      logo: "bg-gradient-to-br from-blue-500 to-blue-700",
+      active: "bg-blue-500/10 text-blue-400 border-l-2 border-blue-500",
+      activeIcon: "text-blue-400",
+      switcher: "bg-blue-500/20 text-blue-300",
+      settingsActive: "bg-blue-500/10 text-blue-400",
+    },
+  }[activeSport];
+
   const handleLogout = async () => {
     await logout();
     router.push("/login");
+  };
+
+  const handleSportSwitch = (sport: Sport) => {
+    if (sport === "nfl") {
+      router.push("/");
+    } else {
+      router.push("/nba");
+    }
+  };
+
+  const isNavActive = (href: string) => {
+    if (href === "/") return pathname === "/";
+    if (href === "/nba") return pathname === "/nba";
+    return pathname === href || pathname.startsWith(href + "/");
   };
 
   return (
@@ -55,25 +102,40 @@ export function Sidebar() {
       <div className="flex items-center justify-between h-16 px-4 border-b border-slate-800/50">
         {!collapsed && (
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-md bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center">
+            <div
+              className={cn(
+                "w-8 h-8 rounded-md flex items-center justify-center",
+                accentStyles.logo
+              )}
+            >
               <span className="text-xs font-bold text-black font-[family-name:var(--font-jetbrains)]">
-                NFL
+                {activeSport === "nba" ? "NBA" : "NFL"}
               </span>
             </div>
             <div className="flex flex-col">
               <span className="text-sm font-semibold text-slate-100 tracking-tight">
-                NFL Algorithm
+                {activeSport === "nba" ? "NBA Algorithm" : "NFL Algorithm"}
               </span>
-              <span className="text-[10px] text-amber-500/70 font-[family-name:var(--font-jetbrains)] uppercase tracking-widest">
+              <span
+                className={cn(
+                  "text-[10px] font-[family-name:var(--font-jetbrains)] uppercase tracking-widest",
+                  activeSport === "nba" ? "text-blue-500/70" : "text-amber-500/70"
+                )}
+              >
                 v2.1 Pro
               </span>
             </div>
           </div>
         )}
         {collapsed && (
-          <div className="w-8 h-8 rounded-md bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center mx-auto">
+          <div
+            className={cn(
+              "w-8 h-8 rounded-md flex items-center justify-center mx-auto",
+              accentStyles.logo
+            )}
+          >
             <span className="text-xs font-bold text-black font-[family-name:var(--font-jetbrains)]">
-              N
+              {activeSport === "nba" ? "B" : "N"}
             </span>
           </div>
         )}
@@ -90,6 +152,36 @@ export function Sidebar() {
         </Button>
       </div>
 
+      {/* Sport Switcher */}
+      {!collapsed && (
+        <div className="px-3 pt-3 pb-1">
+          <div className="flex gap-1 p-1 rounded-lg bg-slate-900/60 border border-slate-800/50">
+            <button
+              onClick={() => handleSportSwitch("nfl")}
+              className={cn(
+                "flex-1 text-xs font-semibold py-1.5 rounded-md transition-all duration-150 font-[family-name:var(--font-jetbrains)]",
+                activeSport === "nfl"
+                  ? "bg-amber-500/20 text-amber-300"
+                  : "text-slate-500 hover:text-slate-300"
+              )}
+            >
+              NFL
+            </button>
+            <button
+              onClick={() => handleSportSwitch("nba")}
+              className={cn(
+                "flex-1 text-xs font-semibold py-1.5 rounded-md transition-all duration-150 font-[family-name:var(--font-jetbrains)]",
+                activeSport === "nba"
+                  ? "bg-blue-500/20 text-blue-300"
+                  : "text-slate-500 hover:text-slate-300"
+              )}
+            >
+              NBA
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Navigation */}
       <nav className="flex-1 px-2 py-4 space-y-0.5">
         {!collapsed && (
@@ -98,7 +190,7 @@ export function Sidebar() {
           </p>
         )}
         {navItems.map((item) => {
-          const isActive = pathname === item.href;
+          const active = isNavActive(item.href);
           const Icon = item.icon;
           return (
             <Link
@@ -106,15 +198,15 @@ export function Sidebar() {
               href={item.href}
               className={cn(
                 "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-all duration-150",
-                isActive
-                  ? "bg-amber-500/10 text-amber-400 border-l-2 border-amber-500 ml-0"
+                active
+                  ? accentStyles.active
                   : "text-slate-500 hover:bg-slate-800/40 hover:text-slate-300"
               )}
             >
               <Icon
                 className={cn(
                   "h-4 w-4 flex-shrink-0",
-                  isActive ? "text-amber-400" : ""
+                  active ? accentStyles.activeIcon : ""
                 )}
               />
               {!collapsed && <span>{item.title}</span>}
@@ -123,8 +215,8 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Performance Widget */}
-      <PerformanceWidget collapsed={collapsed} />
+      {/* Performance Widget (NFL only) */}
+      {activeSport === "nfl" && <PerformanceWidget collapsed={collapsed} />}
 
       <Separator className="bg-slate-800/50" />
 
@@ -134,8 +226,7 @@ export function Sidebar() {
           href="/settings"
           className={cn(
             "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-slate-500 hover:bg-slate-800/40 hover:text-slate-300 transition-colors",
-            pathname === "/settings" &&
-              "bg-amber-500/10 text-amber-400"
+            pathname === "/settings" && accentStyles.settingsActive
           )}
         >
           <Settings className="h-4 w-4 flex-shrink-0" />
