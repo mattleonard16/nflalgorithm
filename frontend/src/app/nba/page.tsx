@@ -98,8 +98,7 @@ export default function NbaDashboardPage() {
     try {
       const res = await getNbaExplanation(bet.player_id, bet.market);
       setWhyCache((prev) => ({ ...prev, [key]: res.why }));
-    } catch (err) {
-      console.error("Failed to load bet explanation:", err);
+    } catch {
       setExpandedBet(null);
     } finally {
       setWhyLoading(null);

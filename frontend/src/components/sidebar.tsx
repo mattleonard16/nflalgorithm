@@ -54,7 +54,6 @@ export function Sidebar() {
   const activeSport: Sport = pathname.startsWith("/nba") ? "nba" : "nfl";
   const navItems = activeSport === "nba" ? nbaNavItems : nflNavItems;
 
-  const accentColor = activeSport === "nba" ? "blue" : "amber";
   const accentStyles = {
     nfl: {
       logo: "bg-gradient-to-br from-amber-500 to-amber-700",

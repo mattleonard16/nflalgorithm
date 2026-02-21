@@ -22,9 +22,8 @@ export function PerformanceWidget({ collapsed = false }: PerformanceWidgetProps)
                 const data = await getWeeklySummary(4);
                 setWeeks(data.weeks);
                 setError(null);
-            } catch (err) {
+            } catch {
                 setError("Failed to load");
-                console.error("Failed to fetch weekly summary:", err);
             } finally {
                 setLoading(false);
             }

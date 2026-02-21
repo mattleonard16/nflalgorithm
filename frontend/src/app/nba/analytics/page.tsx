@@ -115,8 +115,8 @@ export default function NbaAnalyticsPage() {
         ]);
         setCorrelationData(corrRes);
         setRiskData(riskRes);
-      } catch (err) {
-        console.error("Failed to load risk/correlation data:", err);
+      } catch {
+        // risk/correlation data is non-critical; silently skip
       } finally {
         setRiskLoading(false);
       }
