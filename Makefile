@@ -58,12 +58,6 @@ help:
 	@echo "  env-info      - Show environment information"
 	@echo "  health-check  - Comprehensive environment health check"
 	@echo ""
-	@echo "Cache Management:"
-	@echo "  cache-stats   - Show comprehensive cache statistics"
-	@echo "  cache-warm    - Pre-populate cache with popular endpoints"
-	@echo "  cache-test    - Test cache functionality and performance"
-	@echo "  cache-clean   - Clean expired cache entries"
-	@echo ""
 	@echo "Data Ingestion:"
 	@echo "  ingest-nfl    - Ingest real NFL data (2024+2025) via nflreadpy"
 
@@ -460,6 +454,15 @@ clean-root:
 	@if [ -f "optuna.db" ]; then cp optuna.db archive/databases/; echo "Copied optuna.db to archive/databases/"; fi
 	@echo "Root cleanup complete!"
 
+# Research loop (requires dev-browser on :9222)
+research-loop:
+	@echo "Run: npx tsx scripts/research_loop.ts --question '...' --urls 'url1,url2' --output docs/research/slug.md"
+	@echo "Start dev-browser first: ~/.claude/plugins/cache/n-skills/dev-browser/1.0.0/skills/dev-browser/server.sh --headless &"
+	@echo "Example: make research-run QUESTION='Playwright rate limit' URLS='https://playwright.dev' OUTPUT=docs/research/playwright-rate-limit.md"
+
+research-run:
+	npx tsx scripts/research_loop.ts --question "$(QUESTION)" --urls "$(URLS)" --output "$(OUTPUT)"
+
 # Development workflow
 dev-setup: install format lint
 	@echo "Development environment ready!"
@@ -568,37 +571,3 @@ add-dep:
 		echo "Added $(PKG) and updated requirements.txt"; \
 	fi
 
-# ============================================================================
-# CACHE MANAGEMENT TARGETS - Comprehensive API caching system
-# ============================================================================
-
-# Show cache statistics and performance metrics
-cache-stats:
-	@echo "Showing cache statistics with $(ENV_TYPE)..."
-	$(PYTHON) simple_cache_test.py
-
-# Pre-populate cache with popular endpoints  
-cache-warm:
-	@echo "Warming cache with popular endpoints using $(ENV_TYPE)..."
-	@echo "   This pre-loads common API calls to improve performance"
-	$(PYTHON) -c "from cache_cli import CacheCLI; CacheCLI().warm_cache()"
-
-# Test cache functionality and performance
-cache-test:
-	@echo "Testing cache functionality and performance with $(ENV_TYPE)..."
-	$(PYTHON) simple_cache_test.py
-
-# Clean expired cache entries
-cache-clean:
-	@echo "🧹 Cleaning expired cache entries with $(ENV_TYPE)..."
-	$(PYTHON) -c "from cache_cli import CacheCLI; CacheCLI().cleanup()"
-
-# Reset all cache data (use with caution)
-cache-reset:
-	@echo "Resetting all cache data with $(ENV_TYPE)..."
-	$(PYTHON) -c "from cache_cli import CacheCLI; CacheCLI().reset_cache()"
-
-# Cache offline mode test
-cache-offline-test:
-	@echo "Testing offline mode functionality with $(ENV_TYPE)..."
-	$(PYTHON) -c "from cache_cli import CacheCLI; CacheCLI().offline_mode_test()"

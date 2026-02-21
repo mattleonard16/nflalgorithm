@@ -9,7 +9,7 @@ from typing import Dict
 import json
 
 from config import config
-from monitoring import system_monitor, daily_reporter
+from scripts.monitoring import system_monitor, daily_reporter
 
 
 THRESHOLDS = {

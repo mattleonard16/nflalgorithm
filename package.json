@@ -1,5 +1,9 @@
 {
   "dependencies": {
     "react-scan": "^0.4.3"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.49.0",
+    "tsx": "^4.21.0"
   }
 }

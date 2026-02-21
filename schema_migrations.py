@@ -24,9 +24,6 @@ class MigrationManager:
             self._ensure_indexes(cursor)
             conn.commit()
 
-    def _db_path_str(self) -> str:
-        return str(self.db_path)
-
     def _ddl_statements(self) -> Iterable[str]:
         return (
             """
