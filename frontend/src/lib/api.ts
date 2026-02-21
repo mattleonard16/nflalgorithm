@@ -14,9 +14,6 @@ import type {
   DashboardFilters,
   AuthResponse,
   User,
-  UserPreferencesData,
-  UserBet,
-  UserStats,
   WeeklySummaryResponse,
   PipelineRun,
   WhyPayload,
@@ -402,88 +399,4 @@ export async function getCurrentUser(): Promise<User | null> {
   }
 }
 
-/**
- * Check if user is logged in
- */
-export function isLoggedIn(): boolean {
-  return !!getSessionToken();
-}
-
-// ============================================================================
-// User Preferences API
-// ============================================================================
-
-/**
- * Get user preferences
- */
-export async function getUserPreferences(): Promise<UserPreferencesData> {
-  return fetchAPIAuth<UserPreferencesData>("/api/user/preferences");
-}
-
-/**
- * Update user preferences
- */
-export async function updateUserPreferences(
-  prefs: Partial<UserPreferencesData>
-): Promise<UserPreferencesData> {
-  return fetchAPIAuth<UserPreferencesData>("/api/user/preferences", {
-    method: "PUT",
-    body: JSON.stringify(prefs),
-  });
-}
-
-/**
- * Update bankroll
- */
-export async function updateBankroll(bankroll: number): Promise<{ bankroll: number }> {
-  return fetchAPIAuth<{ bankroll: number }>(`/api/user/bankroll?bankroll=${bankroll}`, {
-    method: "PUT",
-  });
-}
-
-// ============================================================================
-// User Bet Tracking API
-// ============================================================================
-
-/**
- * Place a bet (record in user's history)
- */
-export async function placeBet(bet: {
-  season: number;
-  week: number;
-  player_id: string;
-  player_name?: string;
-  market: string;
-  sportsbook: string;
-  side: string;
-  line: number;
-  price: number;
-  stake_units: number;
-  stake_dollars?: number;
-  model_edge?: number;
-  confidence_tier?: string;
-}): Promise<UserBet> {
-  return fetchAPIAuth<UserBet>("/api/user/bets", {
-    method: "POST",
-    body: JSON.stringify(bet),
-  });
-}
-
-/**
- * Get user's placed bets
- */
-export async function getUserBets(season?: number, week?: number): Promise<UserBet[]> {
-  const params = new URLSearchParams();
-  if (season) params.append("season", season.toString());
-  if (week) params.append("week", week.toString());
-  const query = params.toString() ? `?${params.toString()}` : "";
-  return fetchAPIAuth<UserBet[]>(`/api/user/bets${query}`);
-}
-
-/**
- * Get user betting stats
- */
-export async function getUserStats(): Promise<UserStats> {
-  return fetchAPIAuth<UserStats>("/api/user/stats");
-}
 

@@ -262,50 +262,6 @@ export interface AuthResponse {
   user: User;
 }
 
-export interface UserPreferencesData {
-  default_min_edge: number;
-  default_kelly_fraction: number;
-  default_max_stake: number;
-  best_line_only: boolean;
-  show_synthetic_odds: boolean;
-  defense_multipliers: boolean;
-  weather_adjustments: boolean;
-  injury_weighting: boolean;
-  preferred_sportsbooks: string | null;
-  preferred_markets: string | null;
-}
-
-export interface UserBet {
-  id: string;
-  season: number;
-  week: number;
-  player_id: string;
-  player_name: string | null;
-  market: string;
-  sportsbook: string;
-  side: string;
-  line: number;
-  price: number;
-  stake_units: number;
-  stake_dollars: number | null;
-  model_edge: number | null;
-  confidence_tier: string | null;
-  outcome: string | null;
-  profit_units: number | null;
-  placed_at: string;
-}
-
-export interface UserStats {
-  total_bets: number;
-  wins: number;
-  losses: number;
-  pushes: number;
-  pending: number;
-  total_profit: number;
-  roi_pct: number;
-  win_rate: number;
-}
-
 // Weekly summary types for sidebar widget
 export interface EdgeTierPerformance {
   tier: string;
