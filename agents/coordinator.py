@@ -13,8 +13,6 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-import pandas as pd
-
 from agents import AgentReport, validate_report
 from agents.base_agent import BaseAgent
 from agents.market_bias_agent import MarketBiasAgent
@@ -27,8 +25,6 @@ logger = logging.getLogger(__name__)
 
 # Minimum number of agents that must agree for consensus approval
 CONSENSUS_THRESHOLD = 3
-# Total number of voting agents
-TOTAL_AGENTS = 4
 
 
 def _group_reports(

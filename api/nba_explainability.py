@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from utils.db import fetchone, read_dataframe
 from utils.nba_sigma import get_sigma_or_default

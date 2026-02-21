@@ -23,7 +23,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import config
-from utils.db import execute, executemany, get_connection, read_dataframe
+from utils.db import executemany, read_dataframe
 from utils.risk_utils import append_warning, monte_carlo_drawdown, risk_adjusted_kelly
 
 logger = logging.getLogger(__name__)
