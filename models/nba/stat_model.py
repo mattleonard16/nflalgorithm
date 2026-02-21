@@ -36,6 +36,9 @@ from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.preprocessing import LabelEncoder
 
 from utils.db import executemany, read_dataframe
+from utils.nba_defense import get_nba_defense_multiplier
+from utils.nba_sigma import compute_player_sigma
+from utils.nba_usage import compute_usage_features
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,7 +85,8 @@ def get_feature_cols(market: str) -> list[str]:
         for w in ROLLING_WINDOWS
     ]
     contextual_cols = ["home_game", "b2b", "opponent_enc"]
-    return rolling_cols + contextual_cols
+    usage_cols = ["fga_share", "min_share", "usage_delta"]
+    return rolling_cols + contextual_cols + usage_cols
 
 
 def _engineer_features(df: pd.DataFrame, market: str) -> pd.DataFrame:
@@ -103,7 +107,7 @@ def _engineer_features(df: pd.DataFrame, market: str) -> pd.DataFrame:
         for window in ROLLING_WINDOWS:
             df[f"{stat}_last{window}_avg"] = (
                 df.groupby("player_id")[stat]
-                .transform(lambda s, w=window: s.shift(1).rolling(w, min_periods=1).mean())
+                .transform(lambda s, w=window: s.shift(1).ewm(span=w, min_periods=1).mean())
             )
 
     # Home game flag: "TEAM vs. OPP" (home) or "TEAM @ OPP" (away)
@@ -116,6 +120,14 @@ def _engineer_features(df: pd.DataFrame, market: str) -> pd.DataFrame:
     df["prev_game_date"] = df.groupby("player_id")["game_date"].shift(1)
     df["days_rest"] = (df["game_date"] - df["prev_game_date"]).dt.days.fillna(3)
     df["b2b"] = (df["days_rest"] <= 1).astype(int)
+
+    # Usage features (fga_share, min_share, usage_delta)
+    if "fga" in df.columns and "min" in df.columns:
+        df = compute_usage_features(df)
+    else:
+        df["fga_share"] = 0.0
+        df["min_share"] = 0.0
+        df["usage_delta"] = 0.0
 
     return df
 
@@ -151,10 +163,10 @@ def train(market: str) -> None:
     feature_cols = get_feature_cols(market)
     stats_needed = _MARKET_STATS[market]
 
-    # Build the column list for the query
-    base_cols = "player_id, player_name, team_abbreviation, season, game_id, game_date, matchup, min"
+    # Build the column list for the query (always include fga for usage features)
+    base_cols = "player_id, player_name, team_abbreviation, season, game_id, game_date, matchup, min, fga"
     extra_cols = ", ".join(
-        c for c in stats_needed if c not in {"min"}
+        c for c in stats_needed if c not in {"min", "fga"}
     )
     select_cols = f"{base_cols}, {extra_cols}" if extra_cols else base_cols
 
@@ -305,10 +317,10 @@ def predict(market: str, game_date: str | None = None) -> None:
         team_game[g["home_team"]] = {**g, "home_game": 1}
         team_game[g["away_team"]] = {**g, "home_game": 0}
 
-    # All stat cols needed for feature engineering for this market
+    # All stat cols needed for feature engineering for this market (always include fga for usage)
     stats_needed = _MARKET_STATS[market]
-    base_cols = "player_id, player_name, team_abbreviation, season, game_id, game_date, matchup, min"
-    extra_cols = ", ".join(c for c in stats_needed if c not in {"min"})
+    base_cols = "player_id, player_name, team_abbreviation, season, game_id, game_date, matchup, min, fga"
+    extra_cols = ", ".join(c for c in stats_needed if c not in {"min", "fga"})
     select_cols = f"{base_cols}, {extra_cols}" if extra_cols else base_cols
 
     df_all = read_dataframe(
@@ -362,7 +374,6 @@ def predict(market: str, game_date: str | None = None) -> None:
     rolling_std = df_all.groupby("player_id")[market].apply(
         lambda s: s.rolling(10, min_periods=3).std().iloc[-1] if len(s) >= 3 else np.nan
     )
-    # Scale denominator by market: pts~30, reb~15, ast~12, fg3m~6
     _scale = {"pts": 30.0, "reb": 15.0, "ast": 12.0, "fg3m": 6.0}
     scale = _scale.get(market, 20.0)
     players_today = players_today.copy()
@@ -370,28 +381,47 @@ def predict(market: str, game_date: str | None = None) -> None:
         lambda pid: max(0.01, min(0.99, 1 - (rolling_std.get(pid, scale * 0.2) / scale)))
     )
 
+    # Pre-compute player history for sigma (Phase 1)
+    player_history = df_all.groupby("player_id")[market].apply(list)
+
     rows = []
     for (_, row), proj in zip(players_today.iterrows(), preds):
         g = team_game.get(row["team_abbreviation"], {})
+        pid = int(row["player_id"])
+        season_val = int(row.get("season", date.today().year))
+        opponent = str(row.get("opponent", "UNK"))
+
+        # Phase 3: Apply defense multiplier to base projection
+        defense_mult = get_nba_defense_multiplier(
+            opponent=opponent, market=market,
+            season=season_val, through_date=today,
+        )
+        adjusted_proj = float(proj) * defense_mult
+
+        # Phase 1: Compute player-specific sigma from historical variance
+        history = player_history.get(pid, [])
+        sigma = compute_player_sigma(history, market=market)
+
         rows.append(
             (
-                int(row["player_id"]),
+                pid,
                 str(row["player_name"]),
                 str(row["team_abbreviation"]),
-                int(row.get("season", date.today().year)),
+                season_val,
                 today,
                 str(g.get("game_id", "unknown")),
                 market,
-                float(round(proj, 2)),
+                float(round(adjusted_proj, 2)),
                 float(round(row["confidence"], 4)),
+                float(round(sigma, 4)),
             )
         )
 
     sql = """
         INSERT OR REPLACE INTO nba_projections (
             player_id, player_name, team, season, game_date,
-            game_id, market, projected_value, confidence
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            game_id, market, projected_value, confidence, sigma
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     executemany(sql, rows)
     log.info("[%s] Wrote %d projections to nba_projections for %s", market, len(rows), today)

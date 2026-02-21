@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade
+.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report
 
 # Environment detection - defaults to UV if available
 ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && echo "uv" || echo "venv")
@@ -347,18 +347,34 @@ nba-agents:
 	@echo "Running NBA agent coordinator for $(NBA_DATE)..."
 	$(DB_ENV) $(PYTHON) -m agents.nba_coordinator --date $(NBA_DATE)
 
+# Ingest NBA injury / DNP data for a given date
+nba-injuries:
+	@echo "Ingesting NBA injury data for $(NBA_DATE)..."
+	$(DB_ENV) $(PYTHON) scripts/ingest_nba_injuries.py --date $(NBA_DATE)
+
 # Grade NBA bets against actual results
 GAME_DATE ?= $(shell date +%Y-%m-%d)
 nba-grade:
 	@echo "Grading NBA bets for $(GAME_DATE)..."
 	$(DB_ENV) $(PYTHON) scripts/record_nba_outcomes.py --game-date $(GAME_DATE)
 
-# Full NBA refresh: ingest -> train -> predict -> odds -> value -> risk -> agents
+# Run NBA learning loop for a game date
+nba-learn:
+	@echo "Running NBA learning loop for $(GAME_DATE)..."
+	$(DB_ENV) $(PYTHON) nba_learning_loop.py learn --date $(GAME_DATE)
+
+# Generate NBA learning report for a date range
+nba-report:
+	@echo "Generating NBA learning report..."
+	$(DB_ENV) $(PYTHON) nba_learning_loop.py report --start-date $(NBA_DATE) --end-date $(GAME_DATE)
+
+# Full NBA refresh: ingest -> train -> predict -> injuries -> odds -> value -> risk -> agents
 nba-full:
 	@echo "Running full NBA pipeline..."
 	$(MAKE) ingest-nba
 	$(MAKE) nba-train
 	$(MAKE) nba-predict
+	$(MAKE) nba-injuries
 	$(MAKE) nba-odds
 	$(MAKE) nba-value
 	$(MAKE) nba-risk

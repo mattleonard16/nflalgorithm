@@ -469,7 +469,7 @@ class MigrationManager:
                 over_price  INTEGER,
                 under_price INTEGER,
                 as_of       TEXT NOT NULL,
-                PRIMARY KEY (event_id, player_name, market, sportsbook)
+                PRIMARY KEY (event_id, player_name, market, sportsbook, as_of)
             )
             """,
             """
@@ -565,6 +565,54 @@ class MigrationManager:
                 PRIMARY KEY (game_date, player_id, market)
             )
             """,
+            # ============================================
+            # NBA Phase 6 — Injury Tables
+            # ============================================
+            """
+            CREATE TABLE IF NOT EXISTS nba_injuries (
+                player_id INTEGER NOT NULL,
+                player_name TEXT NOT NULL,
+                team TEXT,
+                game_date TEXT NOT NULL,
+                status TEXT NOT NULL,
+                reason TEXT,
+                source TEXT,
+                scraped_at TEXT NOT NULL,
+                PRIMARY KEY (player_id, game_date)
+            )
+            """,
+            # ============================================
+            # NBA Phase 7 — CLV & Agent Performance
+            # ============================================
+            """
+            CREATE TABLE IF NOT EXISTS nba_clv (
+                bet_id TEXT PRIMARY KEY,
+                player_id INTEGER,
+                market TEXT NOT NULL,
+                sportsbook TEXT NOT NULL,
+                game_date TEXT NOT NULL,
+                open_line REAL,
+                close_line REAL,
+                clv_points REAL,
+                clv_pct REAL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS nba_agent_performance (
+                game_date TEXT NOT NULL,
+                agent_name TEXT NOT NULL,
+                player_id INTEGER NOT NULL,
+                market TEXT NOT NULL,
+                recommendation TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                final_decision TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                profit_units REAL NOT NULL DEFAULT 0,
+                correct INTEGER NOT NULL DEFAULT 0,
+                recorded_at TEXT NOT NULL,
+                PRIMARY KEY (game_date, agent_name, player_id, market)
+            )
+            """,
         )
 
     def _ensure_columns(self, cursor) -> None:
@@ -604,12 +652,81 @@ class MigrationManager:
             if not column_exists("pipeline_runs", "data_health_json", conn=cursor.connection):
                 cursor.execute("ALTER TABLE pipeline_runs ADD COLUMN data_health_json TEXT")
 
+        # Phase 1+2: Add sigma, usage_rate, volatility_score to nba_projections
+        if table_exists("nba_projections", conn=cursor.connection):
+            if not column_exists("nba_projections", "sigma", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_projections ADD COLUMN sigma REAL")
+            if not column_exists("nba_projections", "usage_rate", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_projections ADD COLUMN usage_rate REAL")
+            if not column_exists("nba_projections", "volatility_score", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_projections ADD COLUMN volatility_score REAL")
+
+        # Phase 4+6: Add confidence and injury columns to nba_materialized_value_view
+        if table_exists("nba_materialized_value_view", conn=cursor.connection):
+            if not column_exists("nba_materialized_value_view", "confidence_score", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN confidence_score REAL")
+            if not column_exists("nba_materialized_value_view", "confidence_tier", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN confidence_tier TEXT")
+            if not column_exists("nba_materialized_value_view", "injury_boost_multiplier", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN injury_boost_multiplier REAL")
+            if not column_exists("nba_materialized_value_view", "injury_boost_players", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN injury_boost_players TEXT")
+            if not column_exists("nba_materialized_value_view", "base_mu", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN base_mu REAL")
+            if not column_exists("nba_materialized_value_view", "injury_adjusted_mu", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN injury_adjusted_mu REAL")
+
+        # Phase 5: Migrate nba_odds PK to include as_of
+        self._migrate_nba_odds_pk(cursor)
+
         # Add passing columns to player_stats_enhanced
         if table_exists("player_stats_enhanced", conn=cursor.connection):
             if not column_exists("player_stats_enhanced", "passing_yards", conn=cursor.connection):
                 cursor.execute("ALTER TABLE player_stats_enhanced ADD COLUMN passing_yards REAL NOT NULL DEFAULT 0")
             if not column_exists("player_stats_enhanced", "passing_attempts", conn=cursor.connection):
                 cursor.execute("ALTER TABLE player_stats_enhanced ADD COLUMN passing_attempts REAL NOT NULL DEFAULT 0")
+
+    def _migrate_nba_odds_pk(self, cursor: Any) -> None:
+        """Recreate nba_odds with as_of in PK if it has the old 4-column PK."""
+        if not table_exists("nba_odds", conn=cursor.connection):
+            return
+        # Check current CREATE TABLE sql for the old PK pattern
+        cursor.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='nba_odds'"
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return
+        create_sql = row[0] if isinstance(row, (tuple, list)) else row["sql"]
+        # If as_of is already in the PK, nothing to do
+        if "as_of)" in create_sql and "sportsbook, as_of)" in create_sql:
+            return
+        # Recreate with new PK
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS nba_odds_new (
+                event_id    TEXT NOT NULL,
+                season      INTEGER NOT NULL,
+                game_date   TEXT NOT NULL,
+                player_id   INTEGER,
+                player_name TEXT NOT NULL,
+                team        TEXT,
+                market      TEXT NOT NULL,
+                sportsbook  TEXT NOT NULL,
+                line        REAL NOT NULL,
+                over_price  INTEGER,
+                under_price INTEGER,
+                as_of       TEXT NOT NULL,
+                PRIMARY KEY (event_id, player_name, market, sportsbook, as_of)
+            )
+        """)
+        cursor.execute("""
+            INSERT OR IGNORE INTO nba_odds_new
+            SELECT event_id, season, game_date, player_id, player_name,
+                   team, market, sportsbook, line, over_price, under_price, as_of
+            FROM nba_odds
+        """)
+        cursor.execute("DROP TABLE nba_odds")
+        cursor.execute("ALTER TABLE nba_odds_new RENAME TO nba_odds")
 
     def _ensure_indexes(self, cursor: Any) -> None:
         cursor.execute(
@@ -692,6 +809,31 @@ class MigrationManager:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_nba_agent_game_date ON nba_agent_decisions(game_date, market)"
+        )
+        # Phase 5: nba_odds snapshot index
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_odds_snapshot ON nba_odds(game_date, player_id, market, as_of)"
+        )
+        # Phase 6: nba_injuries indexes
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_injuries_date ON nba_injuries(game_date)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_injuries_player ON nba_injuries(player_id, game_date)"
+        )
+        # Phase 7: nba_clv indexes
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_clv_date ON nba_clv(game_date)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_clv_player ON nba_clv(player_id, game_date)"
+        )
+        # Phase 7: nba_agent_performance indexes
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_agent_perf_date ON nba_agent_performance(game_date)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_agent_perf_agent ON nba_agent_performance(agent_name, game_date)"
         )
 
 

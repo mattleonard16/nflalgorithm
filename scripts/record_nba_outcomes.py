@@ -251,6 +251,126 @@ def save_nba_outcomes(outcomes: List[Dict]) -> None:
     logger.info("  ROI: %.2f%%", roi_pct)
     logger.info("  Avg edge: %.2f%%", avg_edge)
 
+    # Compute CLV after saving outcomes
+    compute_and_save_clv(game_date)
+
+
+def compute_and_save_clv(game_date: str) -> int:
+    """Compute closing-line value for all bets on a given game date.
+
+    Compares opening and closing lines from nba_odds snapshots
+    and writes CLV metrics to the nba_clv table.
+
+    Args:
+        game_date: ISO date string (e.g., '2026-02-17')
+
+    Returns:
+        Number of CLV records inserted.
+    """
+    logger.info("Computing CLV for %s...", game_date)
+
+    bet_outcomes = read_dataframe(
+        """
+        SELECT bet_id, player_id, market, sportsbook, game_date
+        FROM nba_bet_outcomes
+        WHERE game_date = ?
+        """,
+        params=(game_date,),
+    )
+
+    if bet_outcomes.empty:
+        logger.info("No bet outcomes found for CLV computation on %s", game_date)
+        return 0
+
+    # Get open lines (earliest snapshot per player/market/sportsbook)
+    open_lines = read_dataframe(
+        """
+        SELECT o.player_id, o.market, o.sportsbook, o.line AS open_line
+        FROM nba_odds o
+        INNER JOIN (
+            SELECT player_id, market, sportsbook, MIN(as_of) AS min_as_of
+            FROM nba_odds
+            WHERE game_date = ? AND player_id IS NOT NULL
+            GROUP BY player_id, market, sportsbook
+        ) earliest
+            ON o.player_id = earliest.player_id
+            AND o.market = earliest.market
+            AND o.sportsbook = earliest.sportsbook
+            AND o.as_of = earliest.min_as_of
+        WHERE o.game_date = ?
+        """,
+        params=(game_date, game_date),
+    )
+
+    # Get close lines (latest snapshot per player/market/sportsbook)
+    close_lines = read_dataframe(
+        """
+        SELECT o.player_id, o.market, o.sportsbook, o.line AS close_line
+        FROM nba_odds o
+        INNER JOIN (
+            SELECT player_id, market, sportsbook, MAX(as_of) AS max_as_of
+            FROM nba_odds
+            WHERE game_date = ? AND player_id IS NOT NULL
+            GROUP BY player_id, market, sportsbook
+        ) latest
+            ON o.player_id = latest.player_id
+            AND o.market = latest.market
+            AND o.sportsbook = latest.sportsbook
+            AND o.as_of = latest.max_as_of
+        WHERE o.game_date = ?
+        """,
+        params=(game_date, game_date),
+    )
+
+    if open_lines.empty or close_lines.empty:
+        logger.info("No odds snapshots found for CLV on %s", game_date)
+        return 0
+
+    # Merge open and close lines
+    merge_keys = ["player_id", "market", "sportsbook"]
+    lines_df = pd.merge(open_lines, close_lines, on=merge_keys, how="inner")
+
+    # Join with bet outcomes
+    merged = pd.merge(
+        bet_outcomes,
+        lines_df,
+        on=merge_keys,
+        how="inner",
+    )
+
+    if merged.empty:
+        logger.info("No matching odds found for CLV on %s", game_date)
+        return 0
+
+    records = []
+    for _, row in merged.iterrows():
+        open_line = float(row["open_line"])
+        close_line = float(row["close_line"])
+        clv_points = open_line - close_line
+        clv_pct = (clv_points / open_line * 100) if open_line != 0 else 0.0
+
+        records.append((
+            row["bet_id"],
+            int(row["player_id"]) if row["player_id"] is not None else None,
+            row["market"],
+            row["sportsbook"],
+            game_date,
+            open_line,
+            close_line,
+            round(clv_points, 4),
+            round(clv_pct, 4),
+        ))
+
+    insert_sql = """
+        INSERT OR REPLACE INTO nba_clv (
+            bet_id, player_id, market, sportsbook, game_date,
+            open_line, close_line, clv_points, clv_pct
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    executemany(insert_sql, records)
+    logger.info("Inserted %d CLV records for %s", len(records), game_date)
+    return len(records)
+
 
 def main():
     """CLI entry point for recording NBA bet outcomes."""
