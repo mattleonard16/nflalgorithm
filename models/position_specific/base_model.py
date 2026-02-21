@@ -3,10 +3,10 @@ Base model class for position-specific NFL player performance prediction.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
-from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.base import BaseEstimator
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
 import joblib
@@ -119,25 +119,6 @@ class BasePositionModel(ABC):
         
         return pd.DataFrame(predictions, index=X_features.index)
     
-    def predict_with_uncertainty(self, X: pd.DataFrame, confidence_level: float = 0.8) -> pd.DataFrame:
-        """Make predictions with uncertainty intervals."""
-        predictions = self.predict(X)
-        
-        # Simple approach: use historical residuals for uncertainty
-        # In practice, you'd use quantile regression or similar
-        uncertainty = {}
-        for target in predictions.columns:
-            std_pred = np.std(predictions[target])
-            margin = std_pred * 1.28  # 80% confidence interval
-            uncertainty[f"{target}_lower"] = predictions[target] - margin
-            uncertainty[f"{target}_upper"] = predictions[target] + margin
-        
-        result = predictions.copy()
-        for key, values in uncertainty.items():
-            result[key] = values
-        
-        return result
-    
     def evaluate(self, X: pd.DataFrame, y: pd.DataFrame) -> Dict[str, Dict[str, float]]:
         """Evaluate model performance."""
         predictions = self.predict(X)
@@ -158,18 +139,6 @@ class BasePositionModel(ABC):
             }
         
         return results
-    
-    def feature_importance(self) -> Dict[str, np.ndarray]:
-        """Get feature importance for tree-based models."""
-        importance = {}
-        
-        for target, model in self.models.items():
-            if hasattr(model, 'feature_importances_'):
-                importance[target] = model.feature_importances_
-            else:
-                logger.warning(f"Model for {target} does not support feature importance")
-        
-        return importance
     
     def save(self, filepath: str) -> None:
         """Save model to disk."""

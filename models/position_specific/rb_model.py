@@ -152,20 +152,4 @@ class RBModel(BasePositionModel):
             random_state=42
         )
     
-    def get_workload_prediction(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Get workload-specific predictions for RBs."""
-        predictions = self.predict(X)
-        
-        # Add workload metrics
-        if 'total_touches' in predictions.columns:
-            predictions['projected_carries'] = predictions['total_touches'] * 0.75  # Estimate
-            predictions['projected_targets'] = predictions['total_touches'] * 0.25  # Estimate
-            
-            # Usage categories
-            predictions['workload_tier'] = pd.cut(
-                predictions['total_touches'],
-                bins=[0, 10, 18, 25, 100],
-                labels=['Backup', 'Committee', 'Featured', 'Workhorse']
-            )
-        
-        return predictions 
+ 
