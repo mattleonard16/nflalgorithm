@@ -21,7 +21,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import pandas as pd
 
+from nba_confidence_engine import compute_nba_confidence_score, assign_nba_tier
 from utils.db import executemany, read_dataframe
+from utils.nba_injury_adjustments import apply_injury_adjustments, SIGMA_INFLATION
+from utils.nba_sigma import get_sigma_or_default
 
 # ---------------------------------------------------------------------------
 # Normal CDF approximation (avoids scipy dependency)
@@ -111,21 +114,22 @@ def _normalize_name(name: str) -> str:
 def rank_nba_value(
     game_date: str,
     season: int,
-    min_edge: float = 0.05,
+    min_edge: float = 0.08,
 ) -> list[dict]:
     """Return ranked NBA value bets for *game_date*.
 
     Algorithm:
-    1. Load projections and odds from the database.
+    1. Load projections (with sigma) and odds from the database.
     2. Primary join on player_id + market for odds rows that have a player_id.
     3. Fallback name join for odds rows where player_id is NULL.
-    4. Estimate sigma = max(projected_value * 0.20, 3.0).
+    4. Use player-specific sigma from projections (fallback to market default).
     5. Compute p_win, edge, ROI, and Kelly for each matched row.
-    6. Filter to rows with edge_percentage >= min_edge.
-    7. Return sorted by edge_percentage descending.
+    6. Run confidence engine to assign score/tier.
+    7. Filter to rows with edge_percentage >= min_edge.
+    8. Return sorted by edge_percentage descending.
     """
     projections = read_dataframe(
-        "SELECT player_id, player_name, team, market, projected_value, confidence "
+        "SELECT player_id, player_name, team, market, projected_value, confidence, sigma "
         "FROM nba_projections WHERE game_date = ?",
         (game_date,),
     )
@@ -138,6 +142,14 @@ def rank_nba_value(
 
     if projections.empty or odds.empty:
         return []
+
+    # ------------------------------------------------------------------ #
+    # Injury adjustments: boost projections when teammates are OUT         #
+    # Applied BEFORE join so adjusted mu flows into sigma / p_win.        #
+    # ------------------------------------------------------------------ #
+    proj_rows = projections.to_dict("records")
+    proj_rows = apply_injury_adjustments(proj_rows, game_date)
+    projections = pd.DataFrame(proj_rows)
 
     # ------------------------------------------------------------------ #
     # Primary join: player_id (not null) + market                         #
@@ -209,7 +221,36 @@ def rank_nba_value(
         except (TypeError, ValueError):
             continue
 
-        sigma = max(projected_value * 0.20, 3.0)
+        # Injury fields from apply_injury_adjustments
+        base_mu = row.get("base_mu")
+        if base_mu is not None and not (isinstance(base_mu, float) and math.isnan(base_mu)):
+            base_mu = float(base_mu)
+        else:
+            base_mu = projected_value
+
+        injury_boost = row.get("injury_boost_multiplier")
+        if injury_boost is not None and not (isinstance(injury_boost, float) and math.isnan(injury_boost)):
+            injury_boost = float(injury_boost)
+        else:
+            injury_boost = 1.0
+
+        injury_adjusted_mu = row.get("injury_adjusted_mu")
+        if injury_adjusted_mu is not None and not (isinstance(injury_adjusted_mu, float) and math.isnan(injury_adjusted_mu)):
+            injury_adjusted_mu = float(injury_adjusted_mu)
+        else:
+            injury_adjusted_mu = projected_value
+
+        injury_players_json = row.get("injury_boost_players")
+
+        # Use player-specific sigma from projections (Phase 1)
+        sigma_raw = row.get("sigma") if "sigma" in row.index else None
+        market_str = str(row["market"])
+        sigma = get_sigma_or_default(sigma_raw, projected_value, market=market_str)
+
+        # Inflate sigma when injury boost is applied — less certainty
+        if injury_boost > 1.0:
+            sigma *= (1.0 + SIGMA_INFLATION)
+
         p_win = prob_over(mu=projected_value, sigma=sigma, line=line)
         implied_prob = implied_probability(over_price)
         edge_pct = p_win - implied_prob
@@ -227,6 +268,18 @@ def rank_nba_value(
         ):
             under_price = int(under_price_raw)
 
+        # Phase 4: Confidence engine scoring
+        conf_input = {
+            "edge_percentage": edge_pct,
+            "mu": projected_value,
+            "sigma": sigma,
+            "fga_share": 0.0,  # populated downstream when usage data available
+            "volatility_score": 50.0,  # neutral default
+            "usage_spike": injury_boost > 1.0,  # usage spike during injury periods
+        }
+        confidence_score = compute_nba_confidence_score(conf_input)
+        confidence_tier = assign_nba_tier(confidence_score)
+
         results.append(
             {
                 "season": season,
@@ -235,7 +288,7 @@ def rank_nba_value(
                 "player_name": str(row.get("player_name", "")),
                 "team": row.get("team"),
                 "event_id": str(row["event_id"]),
-                "market": str(row["market"]),
+                "market": market_str,
                 "sportsbook": str(row["sportsbook"]),
                 "line": line,
                 "over_price": over_price,
@@ -247,6 +300,12 @@ def rank_nba_value(
                 "expected_roi": round(roi, 6),
                 "kelly_fraction": round(kelly, 6),
                 "confidence": row.get("confidence"),
+                "confidence_score": confidence_score,
+                "confidence_tier": confidence_tier,
+                "base_mu": base_mu,
+                "injury_adjusted_mu": injury_adjusted_mu,
+                "injury_boost_multiplier": injury_boost,
+                "injury_boost_players": injury_players_json,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
             }
         )
@@ -258,7 +317,7 @@ def rank_nba_value(
 def materialize_nba_value(
     game_date: str,
     season: int,
-    min_edge: float = 0.05,
+    min_edge: float = 0.08,
 ) -> int:
     """Persist ranked NBA value bets to *nba_materialized_value_view*.
 
@@ -274,12 +333,14 @@ def materialize_nba_value(
             season, game_date, player_id, player_name, team,
             event_id, market, sportsbook, line, over_price, under_price,
             mu, sigma, p_win, edge_percentage, expected_roi, kelly_fraction,
-            confidence, generated_at
+            confidence, confidence_score, confidence_tier, generated_at,
+            base_mu, injury_adjusted_mu, injury_boost_multiplier, injury_boost_players
         ) VALUES (
             ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?,
-            ?, ?
+            ?, ?, ?, ?,
+            ?, ?, ?, ?
         )
     """
 
@@ -303,7 +364,13 @@ def materialize_nba_value(
             r["expected_roi"],
             r["kelly_fraction"],
             r["confidence"],
+            r.get("confidence_score"),
+            r.get("confidence_tier"),
             r["generated_at"],
+            r.get("base_mu"),
+            r.get("injury_adjusted_mu"),
+            r.get("injury_boost_multiplier"),
+            r.get("injury_boost_players"),
         )
         for r in rows
     ]
@@ -336,9 +403,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--min-edge",
         type=float,
-        default=0.05,
+        default=0.08,
         dest="min_edge",
-        help="Minimum edge threshold (default: 0.05 = 5%%)",
+        help="Minimum edge threshold (default: 0.08 = 8%%)",
     )
     return parser
 

@@ -11,6 +11,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from utils.db import fetchone, read_dataframe
+from utils.nba_sigma import get_sigma_or_default
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +84,9 @@ def _load_bulk_data(
 
     pid_params = player_ids if player_ids else []
 
-    # Query 1: projections
+    # Query 1: projections (include sigma for explainability)
     proj_rows = read_dataframe(
-        "SELECT player_id, market, projected_value, confidence "
+        "SELECT player_id, market, projected_value, confidence, sigma "
         "FROM nba_projections "
         "WHERE game_date = ? AND player_id IN " + placeholders,
         [game_date] + pid_params,
@@ -187,7 +188,8 @@ def _model_from_bulk(
     if row is None:
         return {"projected_value": None, "sigma": None, "confidence": None}
     projected_value = row["projected_value"]
-    sigma = max(float(projected_value) * 0.20, 3.0) if projected_value else None
+    sigma_raw = row.get("sigma") if "sigma" in row.index else None
+    sigma = get_sigma_or_default(sigma_raw, float(projected_value), market) if projected_value else None
     return {
         "projected_value": projected_value,
         "sigma": sigma,
@@ -229,7 +231,8 @@ def _variance_from_bulk(
     if row is None or row["projected_value"] is None:
         return {"sigma": None, "cv": None}
     projected = float(row["projected_value"])
-    sigma = max(projected * 0.20, 3.0)
+    sigma_raw = row.get("sigma") if "sigma" in row.index else None
+    sigma = get_sigma_or_default(sigma_raw, projected, market)
     cv = sigma / projected if projected > 0 else None
     return {
         "sigma": round(sigma, 2),
@@ -303,7 +306,7 @@ def _get_model_section(
 ) -> Dict[str, Any]:
     row = fetchone(
         """
-        SELECT projected_value, confidence
+        SELECT projected_value, confidence, sigma
         FROM nba_projections
         WHERE game_date = ? AND player_id = ? AND market = ?
         """,
@@ -313,7 +316,8 @@ def _get_model_section(
         return {"projected_value": None, "sigma": None, "confidence": None}
 
     projected_value = row[0]
-    sigma = max(float(projected_value) * 0.20, 3.0) if projected_value else None
+    sigma_raw = row[2] if len(row) > 2 else None
+    sigma = get_sigma_or_default(sigma_raw, float(projected_value), market) if projected_value else None
     return {
         "projected_value": row[0],
         "sigma": sigma,
@@ -364,10 +368,10 @@ def _get_recency_section(
 def _get_variance_section(
     game_date: str, player_id: int, market: str
 ) -> Dict[str, Any]:
-    """Compute sigma and coefficient of variation."""
+    """Compute sigma and coefficient of variation from stored projections."""
     row = fetchone(
         """
-        SELECT projected_value
+        SELECT projected_value, sigma
         FROM nba_projections
         WHERE game_date = ? AND player_id = ? AND market = ?
         """,
@@ -377,12 +381,13 @@ def _get_variance_section(
         return {"sigma": None, "cv": None}
 
     projected = float(row[0])
-    sigma = max(projected * 0.20, 3.0)
+    sigma_raw = row[1] if len(row) > 1 else None
+    sigma = get_sigma_or_default(sigma_raw, projected, market)
     cv = sigma / projected if projected > 0 else None
 
     return {
         "sigma": round(sigma, 2),
-        "cv": round(cv, 3) if cv else None,
+        "cv": round(cv, 3) if cv is not None else None,
     }
 
 

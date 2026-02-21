@@ -54,6 +54,42 @@ _MARKET_BASES = {
     "tov": 2.5,
 }
 
+# Full NBA team name -> abbreviation mapping
+NBA_TEAM_ABBR: Dict[str, str] = {
+    "Atlanta Hawks": "ATL",
+    "Boston Celtics": "BOS",
+    "Brooklyn Nets": "BKN",
+    "Charlotte Hornets": "CHA",
+    "Chicago Bulls": "CHI",
+    "Cleveland Cavaliers": "CLE",
+    "Dallas Mavericks": "DAL",
+    "Denver Nuggets": "DEN",
+    "Detroit Pistons": "DET",
+    "Golden State Warriors": "GSW",
+    "Houston Rockets": "HOU",
+    "Indiana Pacers": "IND",
+    "Los Angeles Clippers": "LAC",
+    "Los Angeles Lakers": "LAL",
+    "LA Clippers": "LAC",
+    "LA Lakers": "LAL",
+    "Memphis Grizzlies": "MEM",
+    "Miami Heat": "MIA",
+    "Milwaukee Bucks": "MIL",
+    "Minnesota Timberwolves": "MIN",
+    "New Orleans Pelicans": "NOP",
+    "New York Knicks": "NYK",
+    "Oklahoma City Thunder": "OKC",
+    "Orlando Magic": "ORL",
+    "Philadelphia 76ers": "PHI",
+    "Phoenix Suns": "PHX",
+    "Portland Trail Blazers": "POR",
+    "Sacramento Kings": "SAC",
+    "San Antonio Spurs": "SAS",
+    "Toronto Raptors": "TOR",
+    "Utah Jazz": "UTA",
+    "Washington Wizards": "WAS",
+}
+
 _FALLBACK_PLAYERS = [
     ("LeBron James", "LAL"),
     ("Stephen Curry", "GSW"),
@@ -83,56 +119,81 @@ def _normalize_name(name: str) -> str:
 
 # ── Player lookup / matching ──────────────────────────────────────────────────
 
-def _build_player_lookup() -> Dict[str, int]:
+
+def _build_player_lookup() -> Dict[str, Dict]:
     """
-    Return {normalized_name: player_id} from nba_player_game_logs.
+    Return {normalized_name: {"player_id": int, "team": str}} from nba_player_game_logs.
     Reads all seasons; later seasons win on duplicate normalized names.
     """
     try:
         df = read_dataframe(
-            "SELECT DISTINCT player_id, player_name FROM nba_player_game_logs "
-            "ORDER BY season ASC"
+            "SELECT DISTINCT player_id, player_name, team_abbreviation "
+            "FROM nba_player_game_logs ORDER BY season ASC"
         )
-        lookup: Dict[str, int] = {}
+        lookup: Dict[str, Dict] = {}
         for row in df.to_dict("records"):
             key = _normalize_name(row["player_name"])
-            lookup[key] = int(row["player_id"])
+            lookup[key] = {
+                "player_id": int(row["player_id"]),
+                "team": row.get("team_abbreviation"),
+            }
         return lookup
     except Exception as exc:
         logger.warning("Could not build player lookup: %s", exc)
         return {}
 
 
-def _match_player(raw_name: str, lookup: Dict[str, int]) -> Optional[int]:
+def _match_player(
+    raw_name: str,
+    lookup: Dict[str, Dict],
+    game_teams: Optional[tuple] = None,
+) -> Optional[Dict]:
     """
-    Return player_id for raw_name, or None if unmatched.
+    Return {"player_id": int, "team": str} for raw_name, or None if unmatched.
 
     Tier 1: exact normalized name match in lookup dict.
     Tier 2: fuzzy SequenceMatcher ratio >= 0.85 across all keys.
+    Tier 3: validate matched player's team against game_teams.
     """
     normalized = _normalize_name(raw_name)
 
+    matched: Optional[Dict] = None
+
     # Tier 1 – exact
     if normalized in lookup:
-        return lookup[normalized]
+        matched = lookup[normalized]
+    else:
+        # Tier 2 – fuzzy
+        best_ratio = 0.0
+        best_key = None
+        for key in lookup:
+            ratio = SequenceMatcher(None, normalized, key).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_key = key
 
-    # Tier 2 – fuzzy
-    best_ratio = 0.0
-    best_key = None
-    for key in lookup:
-        ratio = SequenceMatcher(None, normalized, key).ratio()
-        if ratio > best_ratio:
-            best_ratio = ratio
-            best_key = key
+        if best_ratio >= 0.85 and best_key is not None:
+            logger.debug(
+                "Fuzzy match: '%s' -> '%s' (ratio=%.2f)", raw_name, best_key, best_ratio
+            )
+            matched = lookup[best_key]
+        else:
+            logger.warning("Unmatched player: '%s' (best_ratio=%.2f)", raw_name, best_ratio)
+            return None
 
-    if best_ratio >= 0.85 and best_key is not None:
-        logger.debug(
-            "Fuzzy match: '%s' -> '%s' (ratio=%.2f)", raw_name, best_key, best_ratio
-        )
-        return lookup[best_key]
+    # Tier 3 – validate player's team is in the game
+    if matched is not None and game_teams is not None:
+        player_team = matched.get("team")
+        if player_team and player_team not in game_teams:
+            logger.warning(
+                "Team mismatch for '%s': player team '%s' not in game teams %s — clearing player_id",
+                raw_name,
+                player_team,
+                game_teams,
+            )
+            return None
 
-    logger.warning("Unmatched player: '%s' (best_ratio=%.2f)", raw_name, best_ratio)
-    return None
+    return matched
 
 
 # ── Season derivation ─────────────────────────────────────────────────────────
@@ -255,6 +316,15 @@ def _parse_events(events: List[Dict], season: int) -> List[Dict]:
         except (ValueError, AttributeError):
             game_date = datetime.utcnow().strftime("%Y-%m-%d")
 
+        # Extract game teams from event for Tier 3 validation
+        home_team_full = event.get("home_team", "")
+        away_team_full = event.get("away_team", "")
+        home_abbr = NBA_TEAM_ABBR.get(home_team_full)
+        away_abbr = NBA_TEAM_ABBR.get(away_team_full)
+        game_teams: Optional[tuple] = None
+        if home_abbr and away_abbr:
+            game_teams = (home_abbr, away_abbr)
+
         seen: set = set()
 
         for bookmaker in event.get("bookmakers", []):
@@ -301,7 +371,9 @@ def _parse_events(events: List[Dict], season: int) -> List[Dict]:
                     if line is None:
                         continue
 
-                    player_id = _match_player(player_desc, lookup)
+                    match_result = _match_player(player_desc, lookup, game_teams)
+                    player_id = match_result["player_id"] if match_result else None
+                    player_team = match_result["team"] if match_result else None
                     over_price = int(over_outcome["price"])
                     under_price = int(under_outcome["price"]) if under_outcome else None
 
@@ -311,7 +383,7 @@ def _parse_events(events: List[Dict], season: int) -> List[Dict]:
                         "game_date": game_date,
                         "player_id": player_id,
                         "player_name": player_desc,
-                        "team": None,
+                        "team": player_team,
                         "market": internal_market,
                         "sportsbook": sportsbook,
                         "line": float(line),
@@ -412,7 +484,8 @@ def scrape_nba_odds(game_date: str, season: int) -> List[Dict]:
 
 def upsert_odds_rows(rows: List[Dict]) -> int:
     """
-    INSERT OR REPLACE rows into nba_odds. Returns count of rows processed.
+    INSERT OR IGNORE rows into nba_odds. Returns count of rows processed.
+    Preserves existing snapshots — each (event, player, market, book, as_of) is unique.
     upsert_odds_rows([]) returns 0 (noop).
     """
     if not rows:
@@ -424,7 +497,7 @@ def upsert_odds_rows(rows: List[Dict]) -> int:
             try:
                 execute(
                     """
-                    INSERT OR REPLACE INTO nba_odds
+                    INSERT OR IGNORE INTO nba_odds
                         (event_id, season, game_date, player_id, player_name,
                          team, market, sportsbook, line, over_price, under_price, as_of)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
