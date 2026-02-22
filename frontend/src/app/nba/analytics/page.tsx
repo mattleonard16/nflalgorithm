@@ -302,7 +302,7 @@ export default function NbaAnalyticsPage() {
                 <tbody>
                   {topScorers.map((p, i) => (
                     <tr
-                      key={p.player_id}
+                      key={`${p.player_id}-${p.team}-${i}`}
                       className="border-b border-slate-800/30 hover:bg-slate-800/20"
                     >
                       <td className="px-4 py-2.5 text-slate-600 font-mono text-xs">{i + 1}</td>

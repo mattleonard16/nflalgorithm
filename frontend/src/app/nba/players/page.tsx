@@ -101,9 +101,9 @@ export default function NbaPlayersPage() {
                 </tr>
               </thead>
               <tbody>
-                {players.map((p) => (
+                {players.map((p, i) => (
                   <tr
-                    key={p.player_id}
+                    key={`${p.player_id}-${p.team}-${i}`}
                     className="border-b border-slate-800/30 hover:bg-slate-800/20 transition-colors"
                   >
                     <td className="px-4 py-2.5 font-medium text-slate-200">{p.player_name}</td>

@@ -683,31 +683,37 @@ def nba_correlation(
     except ValueError:
         raise HTTPException(status_code=400, detail="game_date must be YYYY-MM-DD")
 
-    rows = fetchall(
-        "SELECT player_id, market, sportsbook, correlation_group "
-        "FROM nba_risk_assessments "
-        "WHERE game_date = ? AND correlation_group IS NOT NULL",
-        (game_date,),
-    )
-
     groups: dict[str, list[NbaCorrelationMember]] = {}
-    for r in rows:
-        grp = r[3]
-        groups.setdefault(grp, []).append(NbaCorrelationMember(
-            player_id=r[0],
-            market=r[1],
-            sportsbook=r[2],
-        ))
+    team_stacks: dict[str, int] = {}
 
-    # Team stacks from the value view
-    team_rows = fetchall(
-        "SELECT team, COUNT(*) as bet_count "
-        "FROM nba_materialized_value_view "
-        "WHERE game_date = ? AND team IS NOT NULL "
-        "GROUP BY team HAVING COUNT(*) > 1",
-        (game_date,),
-    )
-    team_stacks: dict[str, int] = {r[0]: r[1] for r in team_rows}
+    try:
+        rows = fetchall(
+            "SELECT player_id, market, sportsbook, correlation_group "
+            "FROM nba_risk_assessments "
+            "WHERE game_date = ? AND correlation_group IS NOT NULL",
+            (game_date,),
+        )
+        for r in rows:
+            grp = r[3]
+            groups.setdefault(grp, []).append(NbaCorrelationMember(
+                player_id=r[0],
+                market=r[1],
+                sportsbook=r[2],
+            ))
+    except Exception as exc:
+        log.warning("Could not query nba_risk_assessments: %s", exc)
+
+    try:
+        team_rows = fetchall(
+            "SELECT team, COUNT(*) as bet_count "
+            "FROM nba_materialized_value_view "
+            "WHERE game_date = ? AND team IS NOT NULL "
+            "GROUP BY team HAVING COUNT(*) > 1",
+            (game_date,),
+        )
+        team_stacks = {r[0]: r[1] for r in team_rows}
+    except Exception as exc:
+        log.warning("Could not query team stacks: %s", exc)
 
     return NbaCorrelationResponse(
         game_date=game_date,
@@ -728,26 +734,32 @@ def nba_risk_summary(
     except ValueError:
         raise HTTPException(status_code=400, detail="game_date must be YYYY-MM-DD")
 
-    rows = fetchall(
-        "SELECT COUNT(*) as total, "
-        "SUM(CASE WHEN correlation_group IS NOT NULL THEN 1 ELSE 0 END) as correlated, "
-        "SUM(CASE WHEN exposure_warning IS NOT NULL THEN 1 ELSE 0 END) as exposure_flagged, "
-        "AVG(risk_adjusted_kelly) as avg_risk_kelly, "
-        "AVG(mean_drawdown) as avg_drawdown "
-        "FROM nba_risk_assessments WHERE game_date = ?",
-        (game_date,),
+    empty = NbaRiskSummaryResponse(
+        game_date=game_date,
+        total_assessed=0,
+        correlated=0,
+        exposure_flagged=0,
+        avg_risk_adjusted_kelly=None,
+        avg_drawdown=None,
+        guardrails=[],
     )
 
-    if not rows or rows[0][0] == 0:
-        return NbaRiskSummaryResponse(
-            game_date=game_date,
-            total_assessed=0,
-            correlated=0,
-            exposure_flagged=0,
-            avg_risk_adjusted_kelly=None,
-            avg_drawdown=None,
-            guardrails=[],
+    try:
+        rows = fetchall(
+            "SELECT COUNT(*) as total, "
+            "SUM(CASE WHEN correlation_group IS NOT NULL THEN 1 ELSE 0 END) as correlated, "
+            "SUM(CASE WHEN exposure_warning IS NOT NULL THEN 1 ELSE 0 END) as exposure_flagged, "
+            "AVG(risk_adjusted_kelly) as avg_risk_kelly, "
+            "AVG(mean_drawdown) as avg_drawdown "
+            "FROM nba_risk_assessments WHERE game_date = ?",
+            (game_date,),
         )
+    except Exception as exc:
+        log.warning("Could not query nba_risk_assessments: %s", exc)
+        return empty
+
+    if not rows or rows[0][0] == 0:
+        return empty
 
     r = rows[0]
     guardrails: list[str] = []
