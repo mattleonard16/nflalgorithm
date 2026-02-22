@@ -563,6 +563,23 @@ class MigrationManager:
             )
             """,
             # ============================================
+            # NBA Accuracy Upgrade — Team Defensive Stats
+            # ============================================
+            """
+            CREATE TABLE IF NOT EXISTS nba_team_defensive_stats (
+                team_abbreviation TEXT NOT NULL,
+                season INTEGER NOT NULL,
+                as_of_date TEXT NOT NULL,
+                def_rating REAL,
+                opp_pts_per100 REAL,
+                opp_reb_per100 REAL,
+                opp_ast_per100 REAL,
+                opp_fg3m_per100 REAL,
+                games_played INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (team_abbreviation, season, as_of_date)
+            )
+            """,
+            # ============================================
             # NBA Phase 6 — Injury Tables
             # ============================================
             """
@@ -608,6 +625,25 @@ class MigrationManager:
                 correct INTEGER NOT NULL DEFAULT 0,
                 recorded_at TEXT NOT NULL,
                 PRIMARY KEY (game_date, agent_name, player_id, market)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS nba_line_accuracy_history (
+                season INTEGER NOT NULL,
+                game_date TEXT NOT NULL,
+                player_id INTEGER NOT NULL,
+                market TEXT NOT NULL,
+                sportsbook TEXT NOT NULL,
+                line REAL NOT NULL,
+                actual REAL NOT NULL,
+                mu REAL,
+                sigma REAL,
+                model_abs_error REAL,
+                line_abs_error REAL,
+                model_beats_line INTEGER,
+                is_over_hit INTEGER,
+                computed_at TEXT NOT NULL,
+                PRIMARY KEY (season, game_date, player_id, market, sportsbook)
             )
             """,
         )
@@ -672,6 +708,8 @@ class MigrationManager:
                 cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN base_mu REAL")
             if not column_exists("nba_materialized_value_view", "injury_adjusted_mu", conn=cursor.connection):
                 cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN injury_adjusted_mu REAL")
+            if not column_exists("nba_materialized_value_view", "side", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN side TEXT DEFAULT 'over'")
 
         # Phase 5: Migrate nba_odds PK to include as_of
         self._migrate_nba_odds_pk(cursor)
@@ -831,6 +869,14 @@ class MigrationManager:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_nba_agent_perf_agent ON nba_agent_performance(agent_name, game_date)"
+        )
+        # Accuracy Upgrade: nba_team_defensive_stats index
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_def_stats_lookup ON nba_team_defensive_stats(team_abbreviation, season)"
+        )
+        # Phase 5: nba_line_accuracy_history index
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_line_accuracy_lookup ON nba_line_accuracy_history(season, game_date, market)"
         )
 
 

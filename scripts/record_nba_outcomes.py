@@ -372,6 +372,143 @@ def compute_and_save_clv(game_date: str) -> int:
     return len(records)
 
 
+def compute_nba_line_accuracy(game_date: str) -> int:
+    """Compute model vs line accuracy for graded bets.
+
+    Joins nba_bet_outcomes with nba_projections and nba_odds to compare
+    model prediction error against sportsbook line error.
+
+    Returns number of records written.
+    """
+    logger.info("Computing line accuracy for %s...", game_date)
+
+    # Get graded outcomes with actuals
+    outcomes = read_dataframe(
+        """
+        SELECT season, game_date, player_id, market, sportsbook,
+               line, actual_result, side
+        FROM nba_bet_outcomes
+        WHERE game_date = ? AND actual_result IS NOT NULL
+        """,
+        params=(game_date,),
+    )
+
+    if outcomes.empty:
+        logger.info("No graded outcomes with actuals for %s", game_date)
+        return 0
+
+    # Get model projections
+    projections = read_dataframe(
+        "SELECT player_id, market, projected_value AS mu, sigma "
+        "FROM nba_projections WHERE game_date = ?",
+        params=(game_date,),
+    )
+
+    if projections.empty:
+        logger.info("No projections found for %s", game_date)
+        return 0
+
+    # Merge outcomes with projections
+    merged = pd.merge(
+        outcomes,
+        projections,
+        on=["player_id", "market"],
+        how="inner",
+    )
+
+    if merged.empty:
+        logger.info("No matches between outcomes and projections for %s", game_date)
+        return 0
+
+    now = datetime.now(timezone.utc).isoformat()
+    records = []
+
+    for _, row in merged.iterrows():
+        actual = float(row["actual_result"])
+        mu = float(row["mu"]) if row["mu"] is not None else None
+        sigma = float(row["sigma"]) if row.get("sigma") is not None else None
+        line = float(row["line"])
+
+        model_abs_error = abs(mu - actual) if mu is not None else None
+        line_abs_error = abs(line - actual)
+
+        model_beats_line = None
+        if model_abs_error is not None:
+            model_beats_line = 1 if model_abs_error < line_abs_error else 0
+
+        is_over_hit = 1 if actual > line else 0
+
+        records.append((
+            int(row["season"]),
+            row["game_date"],
+            int(row["player_id"]),
+            row["market"],
+            row["sportsbook"],
+            line,
+            actual,
+            mu,
+            sigma,
+            model_abs_error,
+            line_abs_error,
+            model_beats_line,
+            is_over_hit,
+            now,
+        ))
+
+    insert_sql = """
+        INSERT OR REPLACE INTO nba_line_accuracy_history (
+            season, game_date, player_id, market, sportsbook,
+            line, actual, mu, sigma,
+            model_abs_error, line_abs_error, model_beats_line,
+            is_over_hit, computed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    executemany(insert_sql, records)
+    logger.info("Wrote %d line accuracy records for %s", len(records), game_date)
+    return len(records)
+
+
+def summarize_nba_accuracy(
+    season: int,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict:
+    """Return aggregate accuracy metrics.
+
+    Returns dict with: avg_model_mae, avg_line_mae, model_beats_line_pct, n_bets
+    """
+    where_clauses = ["season = ?"]
+    params: list = [season]
+
+    if start_date:
+        where_clauses.append("game_date >= ?")
+        params.append(start_date)
+    if end_date:
+        where_clauses.append("game_date <= ?")
+        params.append(end_date)
+
+    where = " AND ".join(where_clauses)
+
+    df = read_dataframe(
+        f"""
+        SELECT model_abs_error, line_abs_error, model_beats_line
+        FROM nba_line_accuracy_history
+        WHERE {where}
+        """,
+        params=tuple(params),
+    )
+
+    if df.empty:
+        return {"avg_model_mae": None, "avg_line_mae": None, "model_beats_line_pct": None, "n_bets": 0}
+
+    return {
+        "avg_model_mae": round(float(df["model_abs_error"].mean()), 4),
+        "avg_line_mae": round(float(df["line_abs_error"].mean()), 4),
+        "model_beats_line_pct": round(float(df["model_beats_line"].mean()) * 100, 2),
+        "n_bets": len(df),
+    }
+
+
 def main():
     """CLI entry point for recording NBA bet outcomes."""
     parser = argparse.ArgumentParser(
@@ -402,6 +539,21 @@ def main():
             logger.info("Successfully recorded outcomes for %s", args.game_date)
         else:
             logger.info("No outcomes to record for %s", args.game_date)
+
+        compute_nba_line_accuracy(args.game_date)
+        summary = summarize_nba_accuracy(
+            season=outcomes[0]["season"] if outcomes else 2025,
+            start_date=args.game_date,
+            end_date=args.game_date,
+        )
+        if summary["n_bets"] > 0:
+            logger.info(
+                "Accuracy: model MAE=%.2f, line MAE=%.2f, model beats line %.1f%% (%d bets)",
+                summary["avg_model_mae"],
+                summary["avg_line_mae"],
+                summary["model_beats_line_pct"],
+                summary["n_bets"],
+            )
 
     except Exception as e:
         logger.error("Error recording outcomes: %s", e)
