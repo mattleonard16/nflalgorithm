@@ -319,7 +319,12 @@ class TestBuildPlayerLookup:
         _seed_game_logs()
         from scripts.scrape_nba_odds import _build_player_lookup
         result = _build_player_lookup()
-        assert result["jayson tatum"] == 1628369
+        entry = result["jayson tatum"]
+        # _build_player_lookup returns {name: {"player_id": int, "team": str}}
+        if isinstance(entry, dict):
+            assert entry["player_id"] == 1628369
+        else:
+            assert entry == 1628369
 
     def test_empty_when_no_logs(self, db):
         from scripts.scrape_nba_odds import _build_player_lookup

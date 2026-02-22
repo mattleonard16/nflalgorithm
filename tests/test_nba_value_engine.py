@@ -269,8 +269,8 @@ class TestSigmaEstimation:
         assert results[0]["sigma"] >= 3.0
 
     def test_sigma_scales_with_projection(self, db):
-        """When projection is large, sigma should be 20% of it."""
-        # projected_value=30.0 → 30*0.20=6.0 > 3.0 → sigma=6.0
+        """When sigma is NULL, falls back to SIGMA_DEFAULTS[market]."""
+        # With no sigma in projections, get_sigma_or_default returns SIGMA_DEFAULTS["pts"] = 5.5
         _seed_projections(projected_value=30.0)
         _seed_odds(line=20.0, over_price=-200)
 
@@ -278,7 +278,7 @@ class TestSigmaEstimation:
 
         results = rank_nba_value(GAME_DATE, SEASON, min_edge=0.0)
         assert len(results) >= 1
-        assert results[0]["sigma"] == pytest.approx(6.0, abs=1e-6)
+        assert results[0]["sigma"] == pytest.approx(5.5, abs=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -561,3 +561,215 @@ class TestEdgeCases:
         # Name-based fallback should find the match
         assert len(results) >= 1
         assert results[0]["player_name"] == PLAYER_NAME
+
+
+# ---------------------------------------------------------------------------
+# 6. prob_under tests (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+class TestProbUnder:
+    def test_prob_under_complement_of_prob_over(self):
+        """prob_over + prob_under should equal ~1.0 for any valid inputs."""
+        from nba_value_engine import prob_over, prob_under
+
+        mu, sigma, line = 25.0, 5.0, 22.5
+        total = prob_over(mu, sigma, line) + prob_under(mu, sigma, line)
+        assert abs(total - 1.0) < 1e-6
+
+    def test_prob_under_high_when_line_above_mu(self):
+        """When line is well above mu, prob_under should be high."""
+        from nba_value_engine import prob_under
+
+        p = prob_under(mu=18.0, sigma=4.0, line=25.0)
+        assert p > 0.9
+
+    def test_prob_under_low_when_line_below_mu(self):
+        """When line is well below mu, prob_under should be low."""
+        from nba_value_engine import prob_under
+
+        p = prob_under(mu=30.0, sigma=4.0, line=20.0)
+        assert p < 0.01
+
+    def test_prob_under_zero_sigma_line_at_mu(self):
+        """Zero sigma: line <= mu → prob_under = 0.0."""
+        from nba_value_engine import prob_under
+
+        assert prob_under(25.0, 0.0, 20.0) == 0.0
+
+    def test_prob_under_zero_sigma_line_above_mu(self):
+        """Zero sigma: line > mu → prob_under = 1.0."""
+        from nba_value_engine import prob_under
+
+        assert prob_under(25.0, 0.0, 30.0) == 1.0
+
+    def test_prob_under_midpoint_approx_half(self):
+        """At line == mu, prob_under should be approximately 0.5."""
+        from nba_value_engine import prob_under
+
+        p = prob_under(mu=25.0, sigma=5.0, line=25.0)
+        assert abs(p - 0.5) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# 7. Under-bet evaluation in rank_nba_value (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+class TestUnderBets:
+    """Test under-bet evaluation in rank_nba_value."""
+
+    def test_under_bet_returned_when_line_above_mu(self, db):
+        """When projection is well below line, an under bet should appear."""
+        executemany(
+            "INSERT INTO nba_projections "
+            "(player_id, player_name, team, season, game_date, game_id, market, projected_value, confidence, sigma) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(1, "Test Player", "BOS", 2025, "2026-02-20", "G1", "pts", 18.0, 0.8, 4.0)],
+        )
+        executemany(
+            "INSERT INTO nba_odds "
+            "(event_id, player_id, player_name, market, sportsbook, line, over_price, under_price, game_date, season, as_of) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [("E1", 1, "Test Player", "pts", "DraftKings", 25.5, -110, -110, "2026-02-20", 2025, "2026-02-20T10:00:00")],
+        )
+
+        from nba_value_engine import rank_nba_value
+
+        results = rank_nba_value("2026-02-20", season=2025, min_edge=0.05)
+        assert len(results) > 0
+        assert results[0]["side"] == "under"
+
+    def test_over_bet_returned_when_projection_above_line(self, db):
+        """When projection is well above line, an over bet should appear."""
+        executemany(
+            "INSERT INTO nba_projections "
+            "(player_id, player_name, team, season, game_date, game_id, market, projected_value, confidence, sigma) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(2, "Over Player", "LAL", 2025, "2026-02-20", "G2", "pts", 32.0, 0.85, 4.0)],
+        )
+        executemany(
+            "INSERT INTO nba_odds "
+            "(event_id, player_id, player_name, market, sportsbook, line, over_price, under_price, game_date, season, as_of) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [("E2", 2, "Over Player", "pts", "DraftKings", 24.5, -110, -110, "2026-02-20", 2025, "2026-02-20T10:00:00")],
+        )
+
+        from nba_value_engine import rank_nba_value
+
+        results = rank_nba_value("2026-02-20", season=2025, min_edge=0.05)
+        assert len(results) > 0
+        assert results[0]["side"] == "over"
+
+    def test_result_has_side_field(self, db):
+        """All results should have a 'side' field that is 'over' or 'under'."""
+        executemany(
+            "INSERT INTO nba_projections "
+            "(player_id, player_name, team, season, game_date, game_id, market, projected_value, confidence, sigma) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(3, "Side Player", "BOS", 2025, "2026-02-20", "G3", "pts", 30.0, 0.8, 4.0)],
+        )
+        executemany(
+            "INSERT INTO nba_odds "
+            "(event_id, player_id, player_name, market, sportsbook, line, over_price, under_price, game_date, season, as_of) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [("E3", 3, "Side Player", "pts", "DraftKings", 22.5, -110, -110, "2026-02-20", 2025, "2026-02-20T10:00:00")],
+        )
+
+        from nba_value_engine import rank_nba_value
+
+        results = rank_nba_value("2026-02-20", season=2025, min_edge=0.05)
+        for r in results:
+            assert "side" in r
+            assert r["side"] in ("over", "under")
+
+    def test_materialize_persists_side_column(self, db):
+        """After materialize, side column should be stored in DB."""
+        executemany(
+            "INSERT INTO nba_projections "
+            "(player_id, player_name, team, season, game_date, game_id, market, projected_value, confidence, sigma) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(4, "Mat Player", "MIA", 2025, "2026-02-20", "G4", "pts", 30.0, 0.8, 4.0)],
+        )
+        executemany(
+            "INSERT INTO nba_odds "
+            "(event_id, player_id, player_name, market, sportsbook, line, over_price, under_price, game_date, season, as_of) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [("E4", 4, "Mat Player", "pts", "FanDuel", 24.0, -110, -110, "2026-02-20", 2025, "2026-02-20T10:00:00")],
+        )
+
+        from nba_value_engine import materialize_nba_value
+
+        count = materialize_nba_value("2026-02-20", season=2025, min_edge=0.05)
+        assert count > 0
+
+        rows = read_dataframe(
+            "SELECT side FROM nba_materialized_value_view WHERE game_date = ?",
+            ("2026-02-20",),
+        )
+        assert len(rows) == count
+        assert rows["side"].notna().all()
+        assert rows["side"].isin(["over", "under"]).all()
+
+
+# ---------------------------------------------------------------------------
+# 8. Confidence input wiring (Phase 3B)
+# ---------------------------------------------------------------------------
+
+
+class TestConfidenceInputWiring:
+    """Test that real volatility_score and usage_rate flow into confidence scoring."""
+
+    def test_confidence_uses_real_usage_rate(self, db):
+        """When projections have usage_rate, it flows into confidence scoring."""
+        executemany(
+            "INSERT INTO nba_projections "
+            "(player_id, player_name, team, season, game_date, game_id, market, "
+            "projected_value, confidence, sigma, usage_rate, volatility_score) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    100,
+                    "Usage Player",
+                    "BOS",
+                    2025,
+                    "2026-02-20",
+                    "G100",
+                    "pts",
+                    28.0,
+                    0.85,
+                    5.0,
+                    0.28,
+                    65.0,
+                )
+            ],
+        )
+        executemany(
+            "INSERT INTO nba_odds "
+            "(event_id, season, game_date, player_id, player_name, team, market, "
+            "sportsbook, line, over_price, under_price, as_of) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    "evt_usage2",
+                    2025,
+                    "2026-02-20",
+                    100,
+                    "Usage Player",
+                    "BOS",
+                    "pts",
+                    "FanDuel",
+                    22.0,
+                    -110,
+                    -110,
+                    "2026-02-20T10:00:00",
+                )
+            ],
+        )
+
+        from nba_value_engine import rank_nba_value
+
+        results = rank_nba_value("2026-02-20", season=2025, min_edge=0.0)
+        assert len(results) >= 1
+        assert results[0]["confidence_score"] is not None
+        assert isinstance(results[0]["confidence_score"], (int, float))

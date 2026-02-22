@@ -132,8 +132,8 @@ class TestModelSection:
         payload = build_why_payload(GAME_DATE, PLAYER_ID, MARKET)
         assert payload["model"]["projected_value"] == 28.0
         assert payload["model"]["confidence"] == 0.85
-        # sigma = max(28.0 * 0.20, 3.0) = 5.6
-        assert payload["model"]["sigma"] == pytest.approx(5.6)
+        # sigma uses SIGMA_DEFAULTS["pts"] = 5.5 when projection has no sigma
+        assert payload["model"]["sigma"] == pytest.approx(5.5)
 
 
 # ---------------------------------------------------------------------------
@@ -194,10 +194,10 @@ class TestVarianceSection:
 
         _seed_projection(db)
         payload = build_why_payload(GAME_DATE, PLAYER_ID, MARKET)
-        # sigma = max(28.0 * 0.20, 3.0) = 5.6
-        assert payload["variance"]["sigma"] == pytest.approx(5.6)
-        # cv = 5.6 / 28.0 = 0.2
-        assert payload["variance"]["cv"] == pytest.approx(0.2)
+        # sigma uses SIGMA_DEFAULTS["pts"] = 5.5 when projection has no sigma
+        assert payload["variance"]["sigma"] == pytest.approx(5.5)
+        # cv = 5.5 / 28.0 ≈ 0.196 (module rounds to 3 decimal places)
+        assert payload["variance"]["cv"] == pytest.approx(5.5 / 28.0, abs=0.001)
 
 
 # ---------------------------------------------------------------------------

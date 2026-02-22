@@ -2,9 +2,7 @@
 
 > *Advanced NFL player performance prediction and value betting engine*
 
-**Version**: 2.1 | **Status**: Production Ready | **Target MAE**: ≤ 3.0
-
-> **Coming soon: NBA algorithm**
+**Version**: 2.1 | **Status**: Production Ready | **Target MAE**: ≤ 3.0 | **Sports**: NFL + NBA
 
 ---
 
@@ -89,8 +87,52 @@ cd frontend && npm run dev
 ```
 frontend/
 ├── src/app/           # Next.js pages (Dashboard, Performance, Analytics, System)
+├── src/app/nba/       # NBA pages (Dashboard, Players, Schedule, Analytics, Performance)
 ├── src/components/    # React components + shadcn/ui
 └── src/lib/           # API client and TypeScript types
+```
+
+---
+
+## NBA Module
+
+![NBA Dashboard](docs/nba-dashboard.png)
+
+Full NBA player props pipeline with ML-powered projections and value betting.
+
+![NBA Players](docs/nba-players.png)
+
+### NBA Features
+
+| Component | Description |
+|-----------|-------------|
+| **StackingRegressor Ensemble** | GBR + RandomForest + XGBoost with Ridge meta-learner |
+| **Opponent Defense Ratings** | Z-score normalized per-market defensive adjustments |
+| **4-Market Coverage** | Points, rebounds, assists, and 3-pointers |
+| **Under-Bet Evaluation** | Evaluates both over and under sides per line |
+| **EWMA Sigma** | Player-specific volatility with market floors |
+| **Optuna Tuning** | Automated hyperparameter search per market |
+
+### NBA Quick Start
+
+```bash
+# Ingest NBA data (2024 + 2025 seasons)
+make ingest-nba
+
+# Train models (4 markets)
+make nba-train
+
+# Generate today's projections
+make nba-predict
+
+# Full pipeline (ingest → predict → odds → value ranking)
+make nba-full
+
+# Hyperparameter tuning with Optuna
+make nba-tune
+
+# Launch dashboard
+make fullstack    # Visit http://localhost:3000/nba
 ```
 
 ---
@@ -230,6 +272,14 @@ make validate      # Cross-season validation
 - [ ] Game script adjustments (implied totals)
 - [ ] Weather factor integration
 - [ ] Injury status weighting
+
+### Recently Completed
+- [x] NBA module with full pipeline (ingest, models, odds, value engine, dashboard)
+- [x] StackingRegressor ensemble (GBR + RF + XGBoost + Ridge)
+- [x] Opponent defensive ratings with z-score normalization
+- [x] Under-bet evaluation and dual-side value ranking
+- [x] Optuna hyperparameter tuning per market
+- [x] NBA production runner (7-stage orchestrator)
 
 ### Planned
 - [ ] Line movement tracking

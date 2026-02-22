@@ -136,15 +136,12 @@ class TestMultiMarketModel:
 
     @pytest.mark.parametrize("market", ALL_MARKETS)
     def test_train_saves_model_file(self, db, tmp_path, monkeypatch, market):
-        """train(market) must write a .joblib model file and a shared encoder file."""
+        """train(market) must write a .joblib model file (no encoder file)."""
         import joblib
 
         model_dir = tmp_path / "nba_models"
         model_dir.mkdir()
         monkeypatch.setattr("models.nba.stat_model.MODEL_DIR", model_dir)
-        monkeypatch.setattr(
-            "models.nba.stat_model.ENCODER_PATH", model_dir / "team_encoder.joblib"
-        )
 
         _seed_game_logs(30)
         from models.nba.stat_model import train
@@ -154,10 +151,31 @@ class TestMultiMarketModel:
         model_path = model_dir / f"{market}_model.joblib"
         encoder_path = model_dir / "team_encoder.joblib"
         assert model_path.exists(), f"Model file not found for market={market}"
-        assert encoder_path.exists(), f"Encoder file not found for market={market}"
+        assert not encoder_path.exists(), "Encoder file should not exist (replaced by defensive stats)"
 
         model = joblib.load(model_path)
         assert hasattr(model, "predict"), "Saved object must have a predict() method"
+
+    def test_feature_cols_include_opp_def_rating_normalized(self, db):
+        """get_feature_cols must include opp_def_rating_normalized."""
+        from models.nba.stat_model import get_feature_cols
+
+        cols = get_feature_cols("pts")
+        assert "opp_def_rating_normalized" in cols, "opp_def_rating_normalized must be in feature cols"
+
+    def test_feature_cols_exclude_opponent_enc(self, db):
+        """get_feature_cols must not include opponent_enc (replaced by defensive stats)."""
+        from models.nba.stat_model import get_feature_cols
+
+        cols = get_feature_cols("pts")
+        assert "opponent_enc" not in cols, "opponent_enc must not be in feature cols"
+
+    def test_feature_cols_include_days_rest(self, db):
+        """get_feature_cols must include days_rest."""
+        from models.nba.stat_model import get_feature_cols
+
+        cols = get_feature_cols("pts")
+        assert "days_rest" in cols, "days_rest must be in feature cols"
 
     @pytest.mark.parametrize("market", ALL_MARKETS)
     def test_train_no_data_does_not_raise(self, db, tmp_path, monkeypatch, market):
@@ -165,9 +183,6 @@ class TestMultiMarketModel:
         model_dir = tmp_path / "nba_models"
         model_dir.mkdir()
         monkeypatch.setattr("models.nba.stat_model.MODEL_DIR", model_dir)
-        monkeypatch.setattr(
-            "models.nba.stat_model.ENCODER_PATH", model_dir / "team_encoder.joblib"
-        )
 
         from models.nba.stat_model import train
 
@@ -186,9 +201,6 @@ class TestMultiMarketModel:
         model_dir = tmp_path / "nba_models"
         model_dir.mkdir()
         monkeypatch.setattr("models.nba.stat_model.MODEL_DIR", model_dir)
-        monkeypatch.setattr(
-            "models.nba.stat_model.ENCODER_PATH", model_dir / "team_encoder.joblib"
-        )
 
         _seed_game_logs(30)
 
@@ -213,9 +225,6 @@ class TestMultiMarketModel:
         model_dir = tmp_path / "nba_models"
         model_dir.mkdir()
         monkeypatch.setattr("models.nba.stat_model.MODEL_DIR", model_dir)
-        monkeypatch.setattr(
-            "models.nba.stat_model.ENCODER_PATH", model_dir / "team_encoder.joblib"
-        )
 
         _seed_game_logs(30)
         from models.nba.stat_model import train
@@ -236,17 +245,14 @@ class TestMultiMarketModel:
 
         model_dir = tmp_path / "nba_models"
         model_dir.mkdir()
-        encoder_path = model_dir / "team_encoder.joblib"
         monkeypatch.setattr("models.nba.stat_model.MODEL_DIR", model_dir)
-        monkeypatch.setattr("models.nba.stat_model.ENCODER_PATH", encoder_path)
 
         _seed_game_logs(30)
-        from models.nba.stat_model import train, _engineer_features, _encode_opponents, get_feature_cols
+        from models.nba.stat_model import train, _engineer_features, _lookup_opponent_defense, get_feature_cols
 
         train(market=market)
 
         model = joblib.load(model_dir / f"{market}_model.joblib")
-        encoder = joblib.load(encoder_path)
 
         df = read_dataframe(
             "SELECT player_id, player_name, team_abbreviation, season, game_id, "
@@ -254,7 +260,7 @@ class TestMultiMarketModel:
             "FROM nba_player_game_logs"
         )
         df = _engineer_features(df, market=market)
-        df, _ = _encode_opponents(df, encoder=encoder)
+        df = _lookup_opponent_defense(df, market=market)
         feature_cols = get_feature_cols(market)
         df = df.dropna(subset=feature_cols)
 
@@ -275,9 +281,7 @@ class TestMultiMarketModel:
         """predict(market) must insert rows into nba_projections with the correct market."""
         model_dir = tmp_path / "nba_models"
         model_dir.mkdir()
-        encoder_path = model_dir / "team_encoder.joblib"
         monkeypatch.setattr("models.nba.stat_model.MODEL_DIR", model_dir)
-        monkeypatch.setattr("models.nba.stat_model.ENCODER_PATH", encoder_path)
 
         _seed_game_logs(30)
         from models.nba.stat_model import train, predict
