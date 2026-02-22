@@ -29,11 +29,14 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+import json
+
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.preprocessing import LabelEncoder
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, StackingRegressor
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import TimeSeriesSplit
 
 from utils.db import executemany, read_dataframe
 from utils.nba_defense import get_nba_defense_multiplier
@@ -48,7 +51,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 MODEL_DIR = Path(__file__).parent
-ENCODER_PATH = MODEL_DIR / "team_encoder.joblib"
 
 VALID_MARKETS = {"pts", "reb", "ast", "fg3m"}
 ROLLING_WINDOWS = [5, 10]
@@ -84,7 +86,7 @@ def get_feature_cols(market: str) -> list[str]:
         for stat in stats
         for w in ROLLING_WINDOWS
     ]
-    contextual_cols = ["home_game", "b2b", "opponent_enc"]
+    contextual_cols = ["home_game", "b2b", "days_rest", "opp_def_rating_normalized"]
     usage_cols = ["fga_share", "min_share", "usage_delta"]
     return rolling_cols + contextual_cols + usage_cols
 
@@ -119,6 +121,7 @@ def _engineer_features(df: pd.DataFrame, market: str) -> pd.DataFrame:
     # Back-to-back flag
     df["prev_game_date"] = df.groupby("player_id")["game_date"].shift(1)
     df["days_rest"] = (df["game_date"] - df["prev_game_date"]).dt.days.fillna(3)
+    df["days_rest"] = df["days_rest"].clip(upper=7)
     df["b2b"] = (df["days_rest"] <= 1).astype(int)
 
     # Usage features (fga_share, min_share, usage_delta)
@@ -132,21 +135,126 @@ def _engineer_features(df: pd.DataFrame, market: str) -> pd.DataFrame:
     return df
 
 
-def _encode_opponents(
-    df: pd.DataFrame,
-    encoder: LabelEncoder | None = None,
-) -> tuple[pd.DataFrame, LabelEncoder]:
-    """Label-encode the opponent column. Returns (df, encoder)."""
+# Market -> defensive column mapping
+_MARKET_DEF_COL: dict[str, str] = {
+    "pts": "opp_pts_per100",
+    "reb": "opp_reb_per100",
+    "ast": "opp_ast_per100",
+    "fg3m": "opp_fg3m_per100",
+}
+
+
+def _lookup_opponent_defense(df: pd.DataFrame, market: str) -> pd.DataFrame:
+    """Merge opponent defensive ratings into the feature DataFrame."""
     df = df.copy()
-    if encoder is None:
-        encoder = LabelEncoder()
-        df["opponent_enc"] = encoder.fit_transform(df["opponent"].fillna("UNK"))
+    def_col = _MARKET_DEF_COL.get(market, "def_rating")
+
+    # Load defensive stats
+    def_stats = read_dataframe(
+        f"SELECT team_abbreviation, season, {def_col}, def_rating "
+        "FROM nba_team_defensive_stats "
+        "ORDER BY team_abbreviation, season, as_of_date DESC"
+    )
+
+    if def_stats.empty:
+        df["opp_def_rating_normalized"] = 0.0
+        return df
+
+    # Keep most recent per team+season
+    def_stats = def_stats.drop_duplicates(subset=["team_abbreviation", "season"], keep="first")
+
+    # Z-score normalize the defensive column
+    col_vals = def_stats[def_col].dropna()
+    if len(col_vals) > 1:
+        mean_val = float(col_vals.mean())
+        std_val = float(col_vals.std())
+        if std_val > 0:
+            def_stats = def_stats.copy()
+            def_stats["opp_def_norm"] = (def_stats[def_col] - mean_val) / std_val
+        else:
+            def_stats = def_stats.copy()
+            def_stats["opp_def_norm"] = 0.0
     else:
-        known = set(encoder.classes_)
-        df["opponent_enc"] = df["opponent"].apply(
-            lambda t: encoder.transform([t])[0] if t in known else -1
+        def_stats = def_stats.copy()
+        def_stats["opp_def_norm"] = 0.0
+
+    # Ensure opponent column exists
+    if "opponent" not in df.columns:
+        df["opponent"] = df["matchup"].str.strip().str[-3:]
+
+    merge_df = def_stats[["team_abbreviation", "season", "opp_def_norm"]].rename(
+        columns={"team_abbreviation": "opponent", "opp_def_norm": "opp_def_rating_normalized"}
+    )
+
+    # Merge on opponent + season if season column exists
+    if "season" in df.columns:
+        df = df.merge(merge_df, on=["opponent", "season"], how="left")
+    else:
+        merge_df_no_season = (
+            merge_df.drop(columns=["season"])
+            .drop_duplicates(subset=["opponent"])
         )
-    return df, encoder
+        df = df.merge(merge_df_no_season, on=["opponent"], how="left")
+
+    df["opp_def_rating_normalized"] = df["opp_def_rating_normalized"].fillna(0.0)
+    return df
+
+
+def _load_best_params(market: str) -> dict | None:
+    """Load Optuna-tuned params if available."""
+    params_path = MODEL_DIR / f"best_params_{market}.json"
+    if params_path.exists():
+        with open(params_path) as f:
+            return json.load(f)
+    return None
+
+
+def _build_model(market: str) -> StackingRegressor:
+    """Build a StackingRegressor ensemble for the given market."""
+    params = _load_best_params(market) or {}
+    default_depth = {"pts": 5, "reb": 4, "ast": 4, "fg3m": 3}.get(market, 4)
+    depth = params.get("gbr_depth", default_depth)
+
+    gbr = GradientBoostingRegressor(
+        n_estimators=params.get("gbr_n", 400),
+        learning_rate=params.get("gbr_lr", 0.04),
+        max_depth=depth,
+        subsample=params.get("gbr_sub", 0.8),
+        min_samples_leaf=5,
+        random_state=42,
+    )
+    rf = RandomForestRegressor(
+        n_estimators=300,
+        max_depth=depth + 2,
+        min_samples_leaf=5,
+        max_features=0.7,
+        n_jobs=-1,
+        random_state=42,
+    )
+
+    try:
+        import xgboost as xgb
+        xgb_model = xgb.XGBRegressor(
+            n_estimators=params.get("xgb_n", 400),
+            max_depth=params.get("xgb_depth", depth),
+            learning_rate=params.get("xgb_lr", 0.04),
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_alpha=0.05,
+            tree_method="hist",
+            n_jobs=-1,
+            random_state=42,
+        )
+        estimators = [("gbr", gbr), ("rf", rf), ("xgb", xgb_model)]
+    except ImportError:
+        estimators = [("gbr", gbr), ("rf", rf)]
+
+    return StackingRegressor(
+        estimators=estimators,
+        final_estimator=Ridge(alpha=1.0),
+        cv=4,
+        n_jobs=-1,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +290,7 @@ def train(market: str) -> None:
 
     log.info("[%s] Engineering features on %d rows …", market, len(df))
     df = _engineer_features(df, market)
-    df, encoder = _encode_opponents(df)
+    df = _lookup_opponent_defense(df, market)
 
     df = df.dropna(subset=feature_cols + [market])
     log.info("[%s] Training on %d rows after dropping NaN rows", market, len(df))
@@ -190,31 +298,22 @@ def train(market: str) -> None:
     X = df[feature_cols].values
     y = df[market].values
 
-    # Chronological 80/20 validation split
-    split = int(len(X) * 0.8)
-    if split > 0 and split < len(X):
-        X_train, X_val = X[:split], X[split:]
-        y_train, y_val = y[:split], y[split:]
-        val_model = GradientBoostingRegressor(
-            n_estimators=300,
-            learning_rate=0.05,
-            max_depth=4,
-            subsample=0.8,
-            random_state=42,
-        )
-        val_model.fit(X_train, y_train)
-        val_preds = val_model.predict(X_val)
-        val_mae = float(np.mean(np.abs(val_preds - y_val)))
-        log.info("[%s] Validation MAE: %.3f (held-out 20%%)", market, val_mae)
+    # TimeSeriesSplit cross-validation for honest MAE tracking
+    tscv = TimeSeriesSplit(n_splits=4)
+    fold_maes = []
+    for fold_idx, (train_idx, val_idx) in enumerate(tscv.split(X)):
+        fold_model = _build_model(market)
+        fold_model.fit(X[train_idx], y[train_idx])
+        fold_preds = fold_model.predict(X[val_idx])
+        fold_mae = float(np.mean(np.abs(fold_preds - y[val_idx])))
+        fold_maes.append(fold_mae)
+        log.info("[%s] Fold %d MAE: %.3f", market, fold_idx + 1, fold_mae)
+    log.info(
+        "[%s] CV MAE: %.3f +/- %.3f", market, float(np.mean(fold_maes)), float(np.std(fold_maes))
+    )
 
     # Final model on full dataset
-    model = GradientBoostingRegressor(
-        n_estimators=300,
-        learning_rate=0.05,
-        max_depth=4,
-        subsample=0.8,
-        random_state=42,
-    )
+    model = _build_model(market)
     model.fit(X, y)
 
     train_preds = model.predict(X)
@@ -222,7 +321,6 @@ def train(market: str) -> None:
     log.info("[%s] Training MAE: %.3f (full training set)", market, train_mae)
 
     joblib.dump(model, model_path)
-    joblib.dump(encoder, ENCODER_PATH)
     log.info("[%s] Model saved to %s", market, model_path)
 
 
@@ -297,7 +395,6 @@ def predict(market: str, game_date: str | None = None) -> None:
         return
 
     model = joblib.load(model_path)
-    encoder = joblib.load(ENCODER_PATH)
     feature_cols = get_feature_cols(market)
 
     if game_date:
@@ -334,7 +431,7 @@ def predict(market: str, game_date: str | None = None) -> None:
         return
 
     df_all = _engineer_features(df_all, market)
-    df_all, _ = _encode_opponents(df_all, encoder=encoder)
+    df_all = _lookup_opponent_defense(df_all, market)
 
     # For each player, grab their latest row (most recent rolling features)
     latest = df_all.sort_values("game_date").groupby("player_id").last().reset_index()
@@ -365,7 +462,7 @@ def predict(market: str, game_date: str | None = None) -> None:
         return g["away_team"] if team == g.get("home_team") else g.get("home_team", "UNK")
 
     players_today["opponent"] = players_today["team_abbreviation"].map(_get_opponent)
-    players_today, _ = _encode_opponents(players_today, encoder=encoder)
+    players_today = _lookup_opponent_defense(players_today, market)
 
     X = players_today[feature_cols].fillna(0).values
     preds = model.predict(X)

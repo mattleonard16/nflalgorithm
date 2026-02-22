@@ -14,6 +14,7 @@ import argparse
 import logging
 import sys
 import time
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -157,6 +158,66 @@ def _upsert_rows(rows: list[dict[str, Any]]) -> int:
     return len(rows)
 
 
+def _fetch_team_defensive_stats(season_year: int) -> pd.DataFrame:
+    """Fetch team defensive ratings for a season from nba_api."""
+    from nba_api.stats.endpoints import LeagueDashTeamStats
+
+    season_str = _season_str(season_year)
+    log.info("Fetching team defensive stats for %s ...", season_str)
+
+    try:
+        stats = LeagueDashTeamStats(
+            season=season_str,
+            per_mode_detailed="Per100Possessions",
+        )
+        df = stats.get_data_frames()[0]
+        time.sleep(REQUEST_DELAY_SECONDS)
+    except Exception as exc:
+        log.warning("Could not fetch defensive stats for %s: %s", season_str, exc)
+        return pd.DataFrame()
+
+    if df.empty:
+        return pd.DataFrame()
+
+    today = date.today().isoformat()
+    result = pd.DataFrame({
+        "team_abbreviation": df["TEAM_ABBREVIATION"],
+        "season": season_year,
+        "as_of_date": today,
+        "def_rating": df.get("DEF_RATING", pd.Series([None] * len(df))),
+        "opp_pts_per100": df.get("OPP_PTS", pd.Series([None] * len(df))),
+        "opp_reb_per100": df.get("OPP_REB", pd.Series([None] * len(df))),
+        "opp_ast_per100": df.get("OPP_AST", pd.Series([None] * len(df))),
+        "opp_fg3m_per100": df.get("OPP_FG3M", pd.Series([None] * len(df))),
+        "games_played": df.get("GP", pd.Series([0] * len(df))).fillna(0).astype(int),
+    })
+
+    return result
+
+
+def ingest_defensive_stats(seasons: list[int] = DEFAULT_SEASONS) -> None:
+    """Ingest team defensive stats for the given seasons."""
+    for season in seasons:
+        df = _fetch_team_defensive_stats(season)
+        if df.empty:
+            log.warning("No defensive stats for season %d", season)
+            continue
+        cols = [
+            "team_abbreviation", "season", "as_of_date",
+            "def_rating", "opp_pts_per100", "opp_reb_per100",
+            "opp_ast_per100", "opp_fg3m_per100", "games_played",
+        ]
+        rows = [tuple(row) for row in df[cols].values]
+        executemany(
+            "INSERT OR REPLACE INTO nba_team_defensive_stats "
+            "(team_abbreviation, season, as_of_date, def_rating, opp_pts_per100, "
+            "opp_reb_per100, opp_ast_per100, opp_fg3m_per100, games_played) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        log.info("Stored defensive stats for %d teams (season %d)", len(rows), season)
+
+
 def ingest(seasons: list[int] = DEFAULT_SEASONS) -> None:
     total = 0
     for i, season_year in enumerate(seasons):
@@ -189,6 +250,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     ingest(args.seasons)
+    ingest_defensive_stats(args.seasons)
 
 
 if __name__ == "__main__":
