@@ -75,6 +75,14 @@ def prob_over(mu: float, sigma: float, line: float) -> float:
     return 1.0 - _standard_norm_cdf(z)
 
 
+def prob_under(mu: float, sigma: float, line: float) -> float:
+    """Probability that a player falls short of *line* given N(mu, sigma)."""
+    if sigma <= 0:
+        return 0.0 if line <= mu else 1.0
+    z = (line - mu) / sigma
+    return _standard_norm_cdf(z)
+
+
 def kelly_fraction(win_prob: float, odds: int, fraction: float = 0.25) -> float:
     """Fractional Kelly criterion stake as a fraction of bankroll, capped at 10%."""
     if odds == 0:
@@ -129,7 +137,8 @@ def rank_nba_value(
     8. Return sorted by edge_percentage descending.
     """
     projections = read_dataframe(
-        "SELECT player_id, player_name, team, market, projected_value, confidence, sigma "
+        "SELECT player_id, player_name, team, market, projected_value, confidence, sigma, "
+        "volatility_score, usage_rate "
         "FROM nba_projections WHERE game_date = ?",
         (game_date,),
     )
@@ -251,30 +260,65 @@ def rank_nba_value(
         if injury_boost > 1.0:
             sigma *= (1.0 + SIGMA_INFLATION)
 
-        p_win = prob_over(mu=projected_value, sigma=sigma, line=line)
-        implied_prob = implied_probability(over_price)
-        edge_pct = p_win - implied_prob
+        # --- Over evaluation ---
+        p_over = prob_over(mu=projected_value, sigma=sigma, line=line)
+        implied_prob_over = implied_probability(over_price)
+        over_edge = p_over - implied_prob_over
 
-        if edge_pct < min_edge:
-            continue
-
-        roi = expected_roi(p_win, over_price)
-        kelly = kelly_fraction(p_win, over_price)
-
+        # --- Under evaluation ---
         under_price_raw = row.get("under_price")
-        under_price: int | None = None
+        under_price_val: int | None = None
         if under_price_raw is not None and not (
             isinstance(under_price_raw, float) and math.isnan(under_price_raw)
         ):
-            under_price = int(under_price_raw)
+            under_price_val = int(under_price_raw)
 
-        # Phase 4: Confidence engine scoring
+        p_under = prob_under(mu=projected_value, sigma=sigma, line=line)
+        under_edge = 0.0
+        if under_price_val is not None:
+            implied_prob_under = implied_probability(under_price_val)
+            under_edge = p_under - implied_prob_under
+
+        # Pick the better side, or skip if neither meets threshold
+        if over_edge >= min_edge and over_edge >= under_edge:
+            side = "over"
+            p_win = p_over
+            edge_pct = over_edge
+            price_used = over_price
+        elif under_edge >= min_edge:
+            side = "under"
+            p_win = p_under
+            edge_pct = under_edge
+            price_used = under_price_val
+        else:
+            continue
+
+        roi = expected_roi(p_win, price_used)
+        kelly = kelly_fraction(p_win, price_used)
+
+        under_price: int | None = under_price_val
+
+        # Confidence engine scoring
+        raw_fga = row.get("usage_rate")
+        fga_share = (
+            float(raw_fga)
+            if raw_fga is not None and not (isinstance(raw_fga, float) and math.isnan(raw_fga))
+            else 0.0
+        )
+
+        raw_vol = row.get("volatility_score")
+        vol_score = (
+            float(raw_vol)
+            if raw_vol is not None and not (isinstance(raw_vol, float) and math.isnan(raw_vol))
+            else 50.0
+        )
+
         conf_input = {
             "edge_percentage": edge_pct,
             "mu": projected_value,
             "sigma": sigma,
-            "fga_share": 0.0,  # populated downstream when usage data available
-            "volatility_score": 50.0,  # neutral default
+            "fga_share": fga_share,
+            "volatility_score": vol_score,
             "usage_spike": injury_boost > 1.0,  # usage spike during injury periods
         }
         confidence_score = compute_nba_confidence_score(conf_input)
@@ -306,6 +350,7 @@ def rank_nba_value(
                 "injury_adjusted_mu": injury_adjusted_mu,
                 "injury_boost_multiplier": injury_boost,
                 "injury_boost_players": injury_players_json,
+                "side": side,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
             }
         )
@@ -334,13 +379,15 @@ def materialize_nba_value(
             event_id, market, sportsbook, line, over_price, under_price,
             mu, sigma, p_win, edge_percentage, expected_roi, kelly_fraction,
             confidence, confidence_score, confidence_tier, generated_at,
-            base_mu, injury_adjusted_mu, injury_boost_multiplier, injury_boost_players
+            base_mu, injury_adjusted_mu, injury_boost_multiplier, injury_boost_players,
+            side
         ) VALUES (
             ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?,
-            ?, ?, ?, ?
+            ?, ?, ?, ?,
+            ?
         )
     """
 
@@ -371,6 +418,7 @@ def materialize_nba_value(
             r.get("injury_adjusted_mu"),
             r.get("injury_boost_multiplier"),
             r.get("injury_boost_players"),
+            r.get("side", "over"),
         )
         for r in rows
     ]
