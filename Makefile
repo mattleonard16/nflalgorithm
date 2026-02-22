@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report
+.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune
 
 # Environment detection - defaults to UV if available
 ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && echo "uv" || echo "venv")
@@ -362,6 +362,14 @@ nba-report:
 	@echo "Generating NBA learning report..."
 	$(DB_ENV) $(PYTHON) nba_learning_loop.py report --start-date $(NBA_DATE) --end-date $(GAME_DATE)
 
+# Grade NBA bets and compute line accuracy for a given date
+nba-accuracy:
+	$(DB_ENV) uv run python scripts/record_nba_outcomes.py --game-date $(GAME_DATE)
+
+# Run full NBA production pipeline for a given date
+nba-run:
+	$(DB_ENV) uv run python scripts/nba_production_runner.py --date $(NBA_DATE)
+
 # Full NBA refresh: ingest -> train -> predict -> injuries -> odds -> value -> risk -> agents
 nba-full:
 	@echo "Running full NBA pipeline..."
@@ -373,6 +381,10 @@ nba-full:
 	$(MAKE) nba-value
 	$(MAKE) nba-risk
 	$(MAKE) nba-agents
+
+# Optuna hyperparameter tuning for NBA stat models (writes best_params_{market}.json)
+nba-tune:
+	$(DB_ENV) uv run python scripts/nba_optuna_tuning.py --market all
 
 # Individual market training targets
 nba-train-pts:
@@ -390,6 +402,9 @@ nba-train-ast:
 nba-train-fg3m:
 	@echo "Training NBA 3-pointers made (FG3M) model..."
 	$(DB_ENV) $(PYTHON) models/nba/stat_model.py --train --market fg3m
+
+nba-defense:
+	$(DB_ENV) uv run python -c "from scripts.ingest_nba_data import ingest_defensive_stats; ingest_defensive_stats()"
 
 # Populate historical data (helper target)
 populate-data:
