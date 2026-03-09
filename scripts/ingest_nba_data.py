@@ -40,10 +40,57 @@ REQUEST_DELAY_SECONDS = 1.0
 # 2024 => "2024-25" season, 2025 => "2025-26" season.
 DEFAULT_SEASONS = [2024, 2025]
 
+# Retry configuration for NBA.com requests.
+MAX_RETRIES = 3
+RETRY_BASE_DELAY_SECONDS = 2
+
 
 def _season_str(season_year: int) -> str:
     """Convert 2024 -> '2024-25'."""
     return f"{season_year}-{str(season_year + 1)[-2:]}"
+
+
+def _fetch_with_retry(fetch_fn: Any, label: str) -> pd.DataFrame:
+    """Call fetch_fn() with exponential-backoff retry on transient errors.
+
+    Retries up to MAX_RETRIES times on requests.exceptions.Timeout and
+    requests.exceptions.ConnectionError.  All other exceptions are re-raised
+    immediately.  Returns an empty DataFrame after all retries are exhausted.
+
+    Args:
+        fetch_fn: Zero-argument callable that returns a pd.DataFrame.
+        label: Human-readable label for log messages (e.g. season string).
+    """
+    import requests.exceptions
+
+    last_exc: Exception | None = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            return fetch_fn()
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            last_exc = exc
+            if attempt < MAX_RETRIES:
+                delay = RETRY_BASE_DELAY_SECONDS ** (attempt + 1)
+                log.warning(
+                    "Transient error fetching %s (attempt %d/%d): %s — retrying in %ds",
+                    label,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
+            else:
+                log.warning(
+                    "All %d retries exhausted for %s: %s — returning empty DataFrame",
+                    MAX_RETRIES,
+                    label,
+                    exc,
+                )
+        except Exception:
+            raise
+
+    return pd.DataFrame()
 
 
 def _fetch_season_logs(season_year: int) -> pd.DataFrame:
@@ -53,7 +100,7 @@ def _fetch_season_logs(season_year: int) -> pd.DataFrame:
     season = _season_str(season_year)
     log.info("Fetching game logs for NBA season %s …", season)
 
-    try:
+    def _call() -> pd.DataFrame:
         endpoint = playergamelogs.PlayerGameLogs(
             season_nullable=season,
             season_type_nullable="Regular Season",
@@ -62,6 +109,9 @@ def _fetch_season_logs(season_year: int) -> pd.DataFrame:
         df = endpoint.get_data_frames()[0]
         log.info("  Fetched %d rows for %s", len(df), season)
         return df
+
+    try:
+        return _fetch_with_retry(_call, season)
     except Exception as exc:
         log.warning("  Failed to fetch %s: %s", season, exc)
         return pd.DataFrame()
@@ -159,38 +209,67 @@ def _upsert_rows(rows: list[dict[str, Any]]) -> int:
 
 
 def _fetch_team_defensive_stats(season_year: int) -> pd.DataFrame:
-    """Fetch team defensive ratings for a season from nba_api."""
+    """Fetch team defensive ratings and pace for a season from nba_api."""
     from nba_api.stats.endpoints import LeagueDashTeamStats
 
     season_str = _season_str(season_year)
     log.info("Fetching team defensive stats for %s ...", season_str)
 
-    try:
+    # Per-100 possessions stats for defensive ratings
+    def _fetch_per100() -> pd.DataFrame:
         stats = LeagueDashTeamStats(
             season=season_str,
             per_mode_detailed="Per100Possessions",
         )
         df = stats.get_data_frames()[0]
         time.sleep(REQUEST_DELAY_SECONDS)
+        return df
+
+    try:
+        df_per100 = _fetch_with_retry(_fetch_per100, f"{season_str} per100")
     except Exception as exc:
-        log.warning("Could not fetch defensive stats for %s: %s", season_str, exc)
+        log.warning("Could not fetch per100 defensive stats for %s: %s", season_str, exc)
         return pd.DataFrame()
 
-    if df.empty:
+    # Base stats for PACE (pace lives in Base measure type)
+    def _fetch_pace() -> pd.DataFrame:
+        stats = LeagueDashTeamStats(
+            season=season_str,
+            per_mode_detailed="PerGame",
+            measure_type_detailed_defense="Advanced",
+        )
+        df = stats.get_data_frames()[0]
+        time.sleep(REQUEST_DELAY_SECONDS)
+        return df
+
+    df_pace = pd.DataFrame()
+    try:
+        df_pace = _fetch_with_retry(_fetch_pace, f"{season_str} pace")
+    except Exception as exc:
+        log.warning("Could not fetch pace stats for %s: %s", season_str, exc)
+
+    if df_per100.empty:
         return pd.DataFrame()
 
     today = date.today().isoformat()
     result = pd.DataFrame({
-        "team_abbreviation": df["TEAM_ABBREVIATION"],
+        "team_abbreviation": df_per100["TEAM_ABBREVIATION"],
         "season": season_year,
         "as_of_date": today,
-        "def_rating": df.get("DEF_RATING", pd.Series([None] * len(df))),
-        "opp_pts_per100": df.get("OPP_PTS", pd.Series([None] * len(df))),
-        "opp_reb_per100": df.get("OPP_REB", pd.Series([None] * len(df))),
-        "opp_ast_per100": df.get("OPP_AST", pd.Series([None] * len(df))),
-        "opp_fg3m_per100": df.get("OPP_FG3M", pd.Series([None] * len(df))),
-        "games_played": df.get("GP", pd.Series([0] * len(df))).fillna(0).astype(int),
+        "def_rating": df_per100.get("DEF_RATING", pd.Series([None] * len(df_per100))),
+        "opp_pts_per100": df_per100.get("OPP_PTS", pd.Series([None] * len(df_per100))),
+        "opp_reb_per100": df_per100.get("OPP_REB", pd.Series([None] * len(df_per100))),
+        "opp_ast_per100": df_per100.get("OPP_AST", pd.Series([None] * len(df_per100))),
+        "opp_fg3m_per100": df_per100.get("OPP_FG3M", pd.Series([None] * len(df_per100))),
+        "games_played": df_per100.get("GP", pd.Series([0] * len(df_per100))).fillna(0).astype(int),
     })
+
+    # Merge PACE from advanced stats if available
+    if not df_pace.empty and "PACE" in df_pace.columns:
+        pace_map = dict(zip(df_pace["TEAM_ABBREVIATION"], df_pace["PACE"]))
+        result["opp_pace"] = result["team_abbreviation"].map(pace_map)
+    else:
+        result["opp_pace"] = None
 
     return result
 
@@ -205,17 +284,51 @@ def ingest_defensive_stats(seasons: list[int] = DEFAULT_SEASONS) -> None:
         cols = [
             "team_abbreviation", "season", "as_of_date",
             "def_rating", "opp_pts_per100", "opp_reb_per100",
-            "opp_ast_per100", "opp_fg3m_per100", "games_played",
+            "opp_ast_per100", "opp_fg3m_per100", "games_played", "opp_pace",
         ]
         rows = [tuple(row) for row in df[cols].values]
         executemany(
             "INSERT OR REPLACE INTO nba_team_defensive_stats "
             "(team_abbreviation, season, as_of_date, def_rating, opp_pts_per100, "
-            "opp_reb_per100, opp_ast_per100, opp_fg3m_per100, games_played) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "opp_reb_per100, opp_ast_per100, opp_fg3m_per100, games_played, opp_pace) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             rows,
         )
         log.info("Stored defensive stats for %d teams (season %d)", len(rows), season)
+
+
+def data_freshness_check(db_path: str, max_stale_days: int = 3) -> None:
+    """Warn if the most recent game_date in nba_player_game_logs is stale.
+
+    Args:
+        db_path: Path to the SQLite database (used only for logging context).
+        max_stale_days: Number of days before the absence of new data is a warning.
+    """
+    try:
+        result = read_dataframe("SELECT MAX(game_date) as latest FROM nba_player_game_logs")
+        if result.empty or result.iloc[0]["latest"] is None:
+            log.warning("data_freshness_check: nba_player_game_logs has no data in %s", db_path)
+            return
+
+        latest_str = result.iloc[0]["latest"]
+        latest_date = date.fromisoformat(str(latest_str)[:10])
+        gap = (date.today() - latest_date).days
+
+        if gap > max_stale_days:
+            log.warning(
+                "data_freshness_check: latest game_date is %s (%d days ago) — data may be stale (db=%s)",
+                latest_str,
+                gap,
+                db_path,
+            )
+        else:
+            log.info(
+                "data_freshness_check: latest game_date is %s (%d days ago) — OK",
+                latest_str,
+                gap,
+            )
+    except Exception as exc:
+        log.warning("data_freshness_check failed: %s", exc)
 
 
 def ingest(seasons: list[int] = DEFAULT_SEASONS) -> None:
@@ -237,6 +350,10 @@ def ingest(seasons: list[int] = DEFAULT_SEASONS) -> None:
     )
     log.info("Ingestion complete. %d total rows upserted.", total)
     log.info("\n%s", summary.to_string(index=False))
+
+    import os
+    db_path = os.environ.get("SQLITE_DB_PATH", "nfl_data.db")
+    data_freshness_check(db_path)
 
 
 def main() -> None:

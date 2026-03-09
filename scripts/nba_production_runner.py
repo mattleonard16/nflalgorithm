@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 MARKETS = ["pts", "reb", "ast", "fg3m"]
 
 # Ordered stage names used to filter via --stages CLI flag
-ALL_STAGE_NAMES = ["ingest", "injuries", "predict", "odds", "value", "risk", "agents"]
+ALL_STAGE_NAMES = ["ingest", "injuries", "predict", "odds", "value", "risk", "agents", "drift"]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -60,13 +60,15 @@ def stage_ingest(game_date: str, season: int) -> Dict[str, Any]:
     """Stage 1: Refresh player game logs from NBA.com."""
     t0 = time.monotonic()
     try:
-        from scripts.ingest_nba_data import ingest
+        from scripts.ingest_nba_data import ingest, ingest_defensive_stats
     except ImportError as exc:
         return _result("ingest", "skipped", f"module not found: {exc}")
 
     try:
         logger.info("[ingest] starting")
         ingest(seasons=[season])
+        logger.info("[ingest] ingesting defensive stats season=%s", season)
+        ingest_defensive_stats(seasons=[season])
         elapsed = round(time.monotonic() - t0, 1)
         logger.info("[ingest] done in %ss", elapsed)
         return _result("ingest", "ok", f"season={season} elapsed={elapsed}s")
@@ -97,12 +99,48 @@ def stage_injuries(game_date: str, season: int) -> Dict[str, Any]:
 
 
 def stage_predict(game_date: str, season: int) -> Dict[str, Any]:
-    """Stage 3: Train + predict all markets via stat_model."""
+    """Stage 3: Train MinutesModel then train + predict all stat markets."""
     t0 = time.monotonic()
     try:
-        from models.nba.stat_model import predict, train
+        from models.nba.stat_model import predict, train, _load_minutes_predictions
     except ImportError as exc:
         return _result("predict", "skipped", f"module not found: {exc}")
+
+    # Train (or load) MinutesModel once before running stat markets so that
+    # the minutes lookup is shared across all predict() calls.
+    minutes_lookup: Dict[str, Any] = {}
+    try:
+        from models.nba.minutes_model import MinutesModel
+        import os
+        from pathlib import Path
+
+        db_path = os.environ.get("SQLITE_DB_PATH", "nfl_data.db")
+        minutes_model_path = Path(__file__).parent.parent / "models" / "nba" / "minutes_model.joblib"
+
+        mm = MinutesModel()
+        logger.info("[predict] training MinutesModel …")
+        result_mm = mm.train(db_path)
+        logger.info(
+            "[predict] MinutesModel cv_mae=%.3f n_samples=%d",
+            result_mm["cv_mae"],
+            result_mm["n_samples"],
+        )
+        try:
+            mm.save(str(minutes_model_path))
+        except Exception as exc:
+            logger.warning("[predict] could not save MinutesModel: %s", exc)
+
+        predictions = mm.predict(db_path, target_date=game_date)
+        minutes_lookup = {
+            p["player_id"]: {
+                "predicted_minutes": p["predicted_minutes"],
+                "minutes_sigma": p["minutes_sigma"],
+            }
+            for p in predictions
+        }
+        logger.info("[predict] MinutesModel produced %d player predictions", len(minutes_lookup))
+    except Exception as exc:
+        logger.warning("[predict] MinutesModel stage failed (%s); stat models will use fallback minutes", exc)
 
     errors: List[str] = []
     for market in MARKETS:
@@ -110,7 +148,7 @@ def stage_predict(game_date: str, season: int) -> Dict[str, Any]:
             logger.info("[predict] training market=%s", market)
             train(market)
             logger.info("[predict] predicting market=%s date=%s", market, game_date)
-            predict(market, game_date)
+            predict(market, game_date, _minutes_lookup=minutes_lookup)
         except Exception as exc:
             logger.error("[predict] market=%s failed: %s", market, exc)
             errors.append(f"{market}: {exc}")
@@ -145,7 +183,12 @@ def stage_odds(game_date: str, season: int) -> Dict[str, Any]:
         return _result("odds", "error", str(exc))
 
 
-def stage_value(game_date: str, season: int) -> Dict[str, Any]:
+def stage_value(
+    game_date: str,
+    season: int,
+    use_monte_carlo: bool = False,
+    calibrated: bool = False,
+) -> Dict[str, Any]:
     """Stage 5: Compute Kelly value bets and materialise view."""
     t0 = time.monotonic()
     try:
@@ -154,8 +197,11 @@ def stage_value(game_date: str, season: int) -> Dict[str, Any]:
         return _result("value", "skipped", f"module not found: {exc}")
 
     try:
-        logger.info("[value] materialising date=%s season=%d", game_date, season)
-        n = materialize_nba_value(game_date, season)
+        logger.info(
+            "[value] materialising date=%s season=%d monte_carlo=%s calibrated=%s",
+            game_date, season, use_monte_carlo, calibrated,
+        )
+        n = materialize_nba_value(game_date, season, use_monte_carlo=use_monte_carlo, calibrated=calibrated)
         elapsed = round(time.monotonic() - t0, 1)
         logger.info("[value] %d value bets written in %ss", n, elapsed)
         return _result("value", "ok", f"value_bets={n} elapsed={elapsed}s")
@@ -219,6 +265,22 @@ def stage_agents(game_date: str, season: int) -> Dict[str, Any]:
         return _result("agents", "error", str(exc))
 
 
+def stage_drift(game_date: str, season: int) -> Dict[str, Any]:
+    """Stage 8: Non-blocking drift detection checks."""
+    try:
+        from utils.nba_drift_detector import run_drift_checks
+    except ImportError as exc:
+        return _result("drift", "skipped", f"module not found: {exc}")
+
+    try:
+        alerts = run_drift_checks(game_date)
+        n_alerts = sum(1 for a in alerts if a.get("alert_level") == "alert")
+        return _result("drift", "ok", f"checks={len(alerts)} alerts={n_alerts}")
+    except Exception as exc:
+        logger.error("[drift] failed: %s", exc)
+        return _result("drift", "ok", f"non-blocking error: {exc}")  # Never fails pipeline
+
+
 # ── Stage registry ────────────────────────────────────────────────────────────
 
 STAGES: List[tuple[str, Any]] = [
@@ -229,6 +291,7 @@ STAGES: List[tuple[str, Any]] = [
     ("value", stage_value),
     ("risk", stage_risk),
     ("agents", stage_agents),
+    ("drift", stage_drift),
 ]
 
 
@@ -241,6 +304,8 @@ def run_nba_pipeline(
     stages: Optional[List[str]] = None,
     skip_ingest: bool = False,
     skip_odds: bool = False,
+    use_monte_carlo: bool = False,
+    calibrated: bool = False,
 ) -> List[Dict[str, Any]]:
     """Execute the NBA production pipeline for a given game date.
 
@@ -250,6 +315,7 @@ def run_nba_pipeline(
         stages:    If provided, run only these named stages in order.
         skip_ingest: Shorthand to skip the 'ingest' stage.
         skip_odds:   Shorthand to skip the 'odds' stage.
+        calibrated:  Use probability calibration in the value stage.
 
     Returns:
         List of per-stage result dicts.
@@ -273,7 +339,10 @@ def run_nba_pipeline(
             continue
 
         logger.info("=== Stage: %s ===", stage_name)
-        result = stage_fn(game_date, season)
+        if stage_name == "value":
+            result = stage_fn(game_date, season, use_monte_carlo=use_monte_carlo, calibrated=calibrated)
+        else:
+            result = stage_fn(game_date, season)
         results.append(result)
         logger.info("Stage %s -> %s", stage_name, result["status"])
 
@@ -341,6 +410,18 @@ def main() -> None:
         metavar="STAGE[,STAGE,...]",
         help=f"Comma-separated subset of stages to run. Valid: {','.join(ALL_STAGE_NAMES)}",
     )
+    parser.add_argument(
+        "--monte-carlo",
+        action="store_true",
+        dest="monte_carlo",
+        help="Use Monte Carlo simulation for probability estimates in the value stage",
+    )
+    parser.add_argument(
+        "--calibrated",
+        action="store_true",
+        dest="calibrated",
+        help="Use probability calibration in the value stage (requires trained calibration model)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -365,6 +446,8 @@ def main() -> None:
         stages=stages_list,
         skip_ingest=args.skip_ingest,
         skip_odds=args.skip_odds,
+        use_monte_carlo=args.monte_carlo,
+        calibrated=args.calibrated,
     )
 
     success = all(r["status"] != "error" for r in results)

@@ -51,8 +51,8 @@ def grade_nba_bets(game_date: str) -> List[Dict]:
         """
         SELECT
             season, game_date, player_id, player_name, event_id, team,
-            market, sportsbook, line, over_price, mu, sigma, p_win,
-            edge_percentage, expected_roi, kelly_fraction, confidence,
+            market, sportsbook, line, over_price, under_price, mu, sigma, p_win,
+            edge_percentage, expected_roi, kelly_fraction, confidence, side,
             generated_at
         FROM nba_materialized_value_view
         WHERE game_date = ?
@@ -87,12 +87,16 @@ def grade_nba_bets(game_date: str) -> List[Dict]:
         player_id = pred["player_id"]
         market = pred["market"]
         line = pred["line"]
-        price = int(pred["over_price"])
         edge_pct = pred["edge_percentage"]
         season = pred["season"]
 
-        # Side is always "over" - the value engine uses over_price for Kelly criterion
-        side = NBA_DEFAULT_SIDE
+        # Use the side stored in the materialized view (over or under)
+        side = pred.get("side", "over") or "over"
+        if side == "under":
+            under_price_raw = pred.get("under_price")
+            price = int(under_price_raw) if under_price_raw is not None else int(pred["over_price"])
+        else:
+            price = int(pred["over_price"])
 
         stat_column = NBA_MARKET_TO_STAT.get(market)
         if not stat_column:
@@ -134,6 +138,7 @@ def grade_nba_bets(game_date: str) -> List[Dict]:
             "sportsbook": pred["sportsbook"],
             "side": side,
             "line": float(line),
+            "placed_at_line": float(line),
             "price": price,
             "actual_result": actual_result,
             "result": result,
@@ -174,10 +179,10 @@ def save_nba_outcomes(outcomes: List[Dict]) -> None:
     insert_sql = """
         INSERT OR REPLACE INTO nba_bet_outcomes (
             bet_id, season, game_date, player_id, player_name, market,
-            sportsbook, side, line, price, actual_result, result,
+            sportsbook, side, line, placed_at_line, price, actual_result, result,
             profit_units, confidence_tier, edge_at_placement, recorded_at
         ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
     """
 
@@ -185,7 +190,7 @@ def save_nba_outcomes(outcomes: List[Dict]) -> None:
         (
             o["bet_id"], o["season"], o["game_date"], o["player_id"],
             o["player_name"], o["market"], o["sportsbook"], o["side"],
-            o["line"], o["price"], o["actual_result"], o["result"],
+            o["line"], o.get("placed_at_line"), o["price"], o["actual_result"], o["result"],
             o["profit_units"], o["confidence_tier"], o["edge_at_placement"],
             o["recorded_at"],
         )
@@ -271,7 +276,7 @@ def compute_and_save_clv(game_date: str) -> int:
 
     bet_outcomes = read_dataframe(
         """
-        SELECT bet_id, player_id, market, sportsbook, game_date
+        SELECT bet_id, player_id, market, sportsbook, game_date, placed_at_line
         FROM nba_bet_outcomes
         WHERE game_date = ?
         """,
@@ -344,7 +349,9 @@ def compute_and_save_clv(game_date: str) -> int:
 
     records = []
     for _, row in merged.iterrows():
-        open_line = float(row["open_line"])
+        # Use placed_at_line (actual line taken) when available; fall back to open line
+        placed = row.get("placed_at_line")
+        open_line = float(placed) if placed is not None and not pd.isna(placed) else float(row["open_line"])
         close_line = float(row["close_line"])
         clv_points = open_line - close_line
         clv_pct = (clv_points / open_line * 100) if open_line != 0 else 0.0

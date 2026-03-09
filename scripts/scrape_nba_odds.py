@@ -42,6 +42,9 @@ MARKET_MAP: Dict[str, str] = {
     "player_turnovers": "tov",
 }
 
+# Markets that have trained models — others are skipped to conserve API quota
+MODELED_MARKETS: frozenset = frozenset({"pts", "reb", "ast", "fg3m"})
+
 _SUFFIX_TOKENS = {"jr", "sr", "ii", "iii", "iv", "v"}
 
 _MARKET_BASES = {
@@ -334,6 +337,12 @@ def _parse_events(events: List[Dict], season: int) -> List[Dict]:
                 api_market = market_data.get("key", "")
                 internal_market = MARKET_MAP.get(api_market)
                 if internal_market is None:
+                    continue
+                if internal_market not in MODELED_MARKETS:
+                    logger.debug(
+                        "Skipping unmodeled market '%s' (api_key=%s) — no trained model",
+                        internal_market, api_market,
+                    )
                     continue
 
                 outcomes = market_data.get("outcomes", [])
