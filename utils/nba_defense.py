@@ -15,7 +15,7 @@ Example:
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
+import time
 from typing import Dict, Optional, Tuple
 
 import pandas as pd
@@ -31,8 +31,18 @@ _NBA_MARKETS = ("pts", "reb", "ast", "fg3m")
 _CLAMP_MIN = 0.75
 _CLAMP_MAX = 1.25
 
+# TTL-based cache (avoids stale data after intra-day ingest in same process)
+_DEFENSE_CACHE_TTL = 900  # 15 minutes
+_defense_cache: Dict[tuple, Dict[Tuple[str, str], float]] = {}
+_cache_timestamps: Dict[tuple, float] = {}
 
-@lru_cache(maxsize=32)
+
+def clear_defense_cache() -> None:
+    """Clear the defense multiplier cache. Useful for tests and after ingest."""
+    _defense_cache.clear()
+    _cache_timestamps.clear()
+
+
 def compute_nba_defense_multipliers(
     season: int,
     through_date: str,
@@ -58,6 +68,12 @@ def compute_nba_defense_multipliers(
         Mapping of (opponent, market) -> multiplier float.
         Multiplier > 1.0 = weak defense, < 1.0 = strong defense.
     """
+    cache_key = (season, through_date, min_games)
+    now = time.monotonic()
+    if cache_key in _defense_cache:
+        if now - _cache_timestamps[cache_key] < _DEFENSE_CACHE_TTL:
+            return _defense_cache[cache_key]
+
     stats = read_dataframe(
         "SELECT player_id, player_name, team_abbreviation, game_date, "
         "matchup, pts, reb, ast, fg3m "
@@ -123,6 +139,8 @@ def compute_nba_defense_multipliers(
         "Computed %d NBA defense multipliers (season=%d, through=%s)",
         len(multipliers), season, through_date,
     )
+    _defense_cache[cache_key] = multipliers
+    _cache_timestamps[cache_key] = time.monotonic()
     return multipliers
 
 

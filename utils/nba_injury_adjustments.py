@@ -29,6 +29,10 @@ DAMPING_FACTOR = 0.6
 # Sigma inflation when an injury boost is applied — less certainty.
 SIGMA_INFLATION = 0.20  # +20%
 
+# Maximum allowed boost multiplier — prevents runaway projections when
+# many starters are simultaneously OUT (e.g. 3-4x would be unrealistic).
+MAX_BOOST_MULTIPLIER = 1.50
+
 # ── Market → game log column ─────────────────────────────────────────────────
 
 _MARKET_TO_STAT: Dict[str, str] = {
@@ -153,7 +157,7 @@ def compute_teammate_absence_boost(
     # Redistribution: damped freed share * player's proportion of actives
     redistribution = freed_share * DAMPING_FACTOR * player_proportion
 
-    boost_multiplier = 1.0 + redistribution
+    boost_multiplier = min(1.0 + redistribution, MAX_BOOST_MULTIPLIER)
     adjusted_mu = base_mu * boost_multiplier
 
     out_names = [p["player_name"] for p in out_teammates]
@@ -219,6 +223,11 @@ def apply_injury_adjustments(
         new_row["injury_adjusted_mu"] = adj_mu
         new_row["injury_boost_multiplier"] = boost
         new_row["injury_boost_players"] = json.dumps(out_names) if out_names else None
+
+        # When a boost is applied, inflate sigma to reflect increased uncertainty.
+        if boost > 1.0:
+            base_sigma = float(new_row.get("sigma", 0.0) or 0.0)
+            new_row = {**new_row, "sigma": base_sigma * (1 + SIGMA_INFLATION)}
 
         # Update the projection mu so downstream sigma/p_win use the adjusted value
         if "projected_value" in new_row:
