@@ -646,6 +646,65 @@ class MigrationManager:
                 PRIMARY KEY (season, game_date, player_id, market, sportsbook)
             )
             """,
+            # ============================================
+            # Phase 5: Probability Calibration
+            # ============================================
+            """
+            CREATE TABLE IF NOT EXISTS nba_calibration_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trained_at TEXT NOT NULL,
+                market TEXT NOT NULL,
+                n_samples INTEGER NOT NULL,
+                brier_score REAL,
+                ece REAL,
+                UNIQUE(trained_at, market)
+            )
+            """,
+            # ============================================
+            # Phase 8 — Feature Importance & Drift Detection
+            # ============================================
+            """
+            CREATE TABLE IF NOT EXISTS nba_feature_importance_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_date TEXT NOT NULL,
+                market TEXT NOT NULL,
+                feature TEXT NOT NULL,
+                mean_abs_shap REAL,
+                rank INTEGER,
+                UNIQUE(game_date, market, feature)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS nba_drift_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_date TEXT NOT NULL,
+                market TEXT NOT NULL,
+                check_type TEXT NOT NULL,
+                psi_score REAL,
+                alert_level TEXT NOT NULL,
+                explanation TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(game_date, market, check_type)
+            )
+            """,
+            # ============================================
+            # Phase 6 — Historical Backtest
+            # ============================================
+            """
+            CREATE TABLE IF NOT EXISTS nba_backtest_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL UNIQUE,
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
+                config_json TEXT NOT NULL,
+                results_json TEXT NOT NULL,
+                total_bets INTEGER NOT NULL,
+                roi_pct REAL,
+                sharpe_ratio REAL,
+                max_drawdown REAL,
+                created_at TEXT NOT NULL
+            )
+            """,
         )
 
     def _ensure_columns(self, cursor) -> None:
@@ -694,6 +753,18 @@ class MigrationManager:
             if not column_exists("nba_projections", "volatility_score", conn=cursor.connection):
                 cursor.execute("ALTER TABLE nba_projections ADD COLUMN volatility_score REAL")
 
+        # Task #4: Rate-based projections — predicted_minutes and predicted_rate
+        if table_exists("nba_projections", conn=cursor.connection):
+            if not column_exists("nba_projections", "predicted_minutes", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_projections ADD COLUMN predicted_minutes REAL")
+            if not column_exists("nba_projections", "predicted_rate", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_projections ADD COLUMN predicted_rate REAL")
+
+        # Phase 4 (Monte Carlo): rate_sigma for rate markets in nba_projections
+        if table_exists("nba_projections", conn=cursor.connection):
+            if not column_exists("nba_projections", "rate_sigma", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_projections ADD COLUMN rate_sigma REAL")
+
         # Phase 4+6: Add confidence and injury columns to nba_materialized_value_view
         if table_exists("nba_materialized_value_view", conn=cursor.connection):
             if not column_exists("nba_materialized_value_view", "confidence_score", conn=cursor.connection):
@@ -710,9 +781,29 @@ class MigrationManager:
                 cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN injury_adjusted_mu REAL")
             if not column_exists("nba_materialized_value_view", "side", conn=cursor.connection):
                 cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN side TEXT DEFAULT 'over'")
+            # Phase 4 (Monte Carlo): mc_p_win for simulation-based probability
+            if not column_exists("nba_materialized_value_view", "mc_p_win", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN mc_p_win REAL")
+
+        # Accuracy Upgrade: Add opp_pace to nba_team_defensive_stats
+        if table_exists("nba_team_defensive_stats", conn=cursor.connection):
+            if not column_exists("nba_team_defensive_stats", "opp_pace", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_team_defensive_stats ADD COLUMN opp_pace REAL")
+
+        # Phase 5 calibration: Add p_win_raw and calibrated columns
+        if table_exists("nba_materialized_value_view", conn=cursor.connection):
+            if not column_exists("nba_materialized_value_view", "p_win_raw", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN p_win_raw REAL")
+            if not column_exists("nba_materialized_value_view", "calibrated", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN calibrated INTEGER DEFAULT 0")
 
         # Phase 5: Migrate nba_odds PK to include as_of
         self._migrate_nba_odds_pk(cursor)
+
+        # CLV tracking: Add placed_at_line to nba_bet_outcomes
+        if table_exists("nba_bet_outcomes", conn=cursor.connection):
+            if not column_exists("nba_bet_outcomes", "placed_at_line", conn=cursor.connection):
+                cursor.execute("ALTER TABLE nba_bet_outcomes ADD COLUMN placed_at_line REAL")
 
         # Add passing columns to player_stats_enhanced
         if table_exists("player_stats_enhanced", conn=cursor.connection):
@@ -877,6 +968,21 @@ class MigrationManager:
         # Phase 5: nba_line_accuracy_history index
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_nba_line_accuracy_lookup ON nba_line_accuracy_history(season, game_date, market)"
+        )
+        # Phase 5 calibration: nba_calibration_history index
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_calibration_history ON nba_calibration_history(market, trained_at)"
+        )
+        # Phase 8: Feature importance & drift detection indexes
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_importance_lookup ON nba_feature_importance_history(game_date, market)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_drift_lookup ON nba_drift_alerts(game_date, market)"
+        )
+        # Phase 6: Historical backtest index
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nba_backtest_runs_dates ON nba_backtest_runs(start_date, end_date)"
         )
 
 

@@ -25,6 +25,14 @@ from nba_confidence_engine import compute_nba_confidence_score, assign_nba_tier
 from utils.db import executemany, read_dataframe
 from utils.nba_injury_adjustments import apply_injury_adjustments, SIGMA_INFLATION
 from utils.nba_sigma import get_sigma_or_default
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Default path for pre-trained calibration model
+_DEFAULT_CALIBRATION_PATH = str(
+    Path(__file__).parent / "models" / "nba" / "calibration.joblib"
+)
 
 # ---------------------------------------------------------------------------
 # Normal CDF approximation (avoids scipy dependency)
@@ -60,6 +68,19 @@ def implied_probability(odds: int) -> float:
     return 100 / (odds + 100)
 
 
+def implied_probability_no_vig(over_odds: int, under_odds: int) -> tuple[float, float]:
+    """Return (p_over, p_under) with vig removed by normalizing to sum=1.0.
+
+    Raw book probabilities sum to > 1.0 due to the bookmaker's margin (vig).
+    Dividing each raw probability by their sum removes this systematic bias,
+    giving fair-market implied probabilities that sum exactly to 1.0.
+    """
+    raw_over = implied_probability(over_odds)
+    raw_under = implied_probability(under_odds)
+    total = raw_over + raw_under
+    return raw_over / total, raw_under / total
+
+
 def american_to_decimal(odds: int) -> float:
     """Convert American odds to decimal (European) odds."""
     if odds < 0:
@@ -81,6 +102,57 @@ def prob_under(mu: float, sigma: float, line: float) -> float:
         return 0.0 if line <= mu else 1.0
     z = (line - mu) / sigma
     return _standard_norm_cdf(z)
+
+
+# ---------------------------------------------------------------------------
+# Poisson distribution helpers for discrete markets (fg3m)
+# ---------------------------------------------------------------------------
+
+def _poisson_pmf(k: int, lam: float) -> float:
+    """Probability mass function P(X=k) for Poisson(lam)."""
+    if lam <= 0:
+        return 1.0 if k == 0 else 0.0
+    return math.exp(-lam) * (lam ** k) / math.factorial(k)
+
+
+def _poisson_cdf(k_max: int, lam: float) -> float:
+    """Cumulative probability P(X <= k_max) for Poisson(lam).
+
+    Sums PMF up to k_max capped at max(50, 5*lam) to avoid infinite loops.
+    """
+    if k_max < 0:
+        return 0.0
+    cap = max(50, int(5 * lam) + 1)
+    k_max = min(k_max, cap)
+    return sum(_poisson_pmf(k, lam) for k in range(k_max + 1))
+
+
+def prob_over_poisson(mu: float, line: float) -> float:
+    """P(X > line) for a Poisson(mu) variable.
+
+    For half-point lines (e.g. 2.5), over means X >= ceil(line).
+    For integer lines (e.g. 3.0), over means X >= line+1 (strictly more than).
+    """
+    if mu <= 0:
+        return 0.0
+    # floor(line) gives the largest integer <= line
+    k_floor = int(math.floor(line))
+    return 1.0 - _poisson_cdf(k_floor, mu)
+
+
+def prob_under_poisson(mu: float, line: float) -> float:
+    """P(X < line) for a Poisson(mu) variable.
+
+    For half-point lines (e.g. 2.5), under means X <= floor(line).
+    For integer lines (e.g. 3.0), under means X <= line-1 (strictly less than).
+    """
+    if mu <= 0:
+        return 1.0
+    k_floor = int(math.floor(line))
+    # If line is an integer, "under" is strictly less than line, so X <= line-1
+    if line == k_floor:
+        k_floor -= 1
+    return _poisson_cdf(k_floor, mu)
 
 
 def kelly_fraction(win_prob: float, odds: int, fraction: float = 0.25) -> float:
@@ -123,6 +195,9 @@ def rank_nba_value(
     game_date: str,
     season: int,
     min_edge: float = 0.08,
+    use_monte_carlo: bool = False,
+    n_monte_carlo_sims: int = 10_000,
+    calibrated: bool = False,
 ) -> list[dict]:
     """Return ranked NBA value bets for *game_date*.
 
@@ -138,7 +213,7 @@ def rank_nba_value(
     """
     projections = read_dataframe(
         "SELECT player_id, player_name, team, market, projected_value, confidence, sigma, "
-        "volatility_score, usage_rate "
+        "volatility_score, usage_rate, predicted_minutes, rate_sigma "
         "FROM nba_projections WHERE game_date = ?",
         (game_date,),
     )
@@ -217,6 +292,24 @@ def rank_nba_value(
     # ------------------------------------------------------------------ #
     results: list[dict] = []
 
+    # ------------------------------------------------------------------ #
+    # Calibration: load calibrator once if calibrated=True                #
+    # ------------------------------------------------------------------ #
+    calibrator = None
+    if calibrated:
+        try:
+            from utils.nba_calibration import NBACalibrator
+            _cal = NBACalibrator()
+            _cal.load(_DEFAULT_CALIBRATION_PATH)
+            calibrator = _cal
+        except FileNotFoundError:
+            logger.warning(
+                "Calibration file not found at %s; proceeding uncalibrated",
+                _DEFAULT_CALIBRATION_PATH,
+            )
+        except Exception as exc:
+            logger.warning("Failed to load calibration model: %s", exc)
+
     for _, row in matched.iterrows():
         try:
             projected_value = float(row["projected_value"])
@@ -260,10 +353,59 @@ def rank_nba_value(
         if injury_boost > 1.0:
             sigma *= (1.0 + SIGMA_INFLATION)
 
-        # --- Over evaluation ---
-        p_over = prob_over(mu=projected_value, sigma=sigma, line=line)
-        implied_prob_over = implied_probability(over_price)
-        over_edge = p_over - implied_prob_over
+        # --- Over / Under evaluation ---
+        # Optionally use Monte Carlo simulation instead of analytic CDF.
+        mc_p_win_val: float | None = None
+
+        if use_monte_carlo:
+            try:
+                from utils.nba_monte_carlo import monte_carlo_prob
+
+                raw_pred_min = row.get("predicted_minutes")
+                raw_rate_sigma = row.get("rate_sigma")
+                minutes_mu_val: float | None = None
+                minutes_sigma_val: float | None = None
+
+                if (
+                    raw_pred_min is not None
+                    and not (isinstance(raw_pred_min, float) and math.isnan(raw_pred_min))
+                    and raw_rate_sigma is not None
+                    and not (isinstance(raw_rate_sigma, float) and math.isnan(raw_rate_sigma))
+                    and market_str != "fg3m"
+                ):
+                    minutes_mu_val = float(raw_pred_min)
+                    minutes_sigma_val = float(raw_rate_sigma)
+
+                p_over, p_under = monte_carlo_prob(
+                    mu=injury_adjusted_mu,
+                    sigma=sigma,
+                    line=line,
+                    market=market_str,
+                    n_sims=n_monte_carlo_sims,
+                    minutes_mu=minutes_mu_val,
+                    minutes_sigma=minutes_sigma_val,
+                )
+                mc_p_win_val = None  # set to chosen side's p_win after side selection
+            except Exception as _mc_exc:
+                import warnings
+                warnings.warn(f"Monte Carlo failed for {row.get('player_name')}: {_mc_exc}; falling back to analytic")
+                use_monte_carlo_row = False
+                if market_str == "fg3m":
+                    p_over = prob_over_poisson(mu=injury_adjusted_mu, line=line)
+                    p_under = prob_under_poisson(mu=injury_adjusted_mu, line=line)
+                else:
+                    p_over = prob_over(mu=injury_adjusted_mu, sigma=sigma, line=line)
+                    p_under = prob_under(mu=injury_adjusted_mu, sigma=sigma, line=line)
+            else:
+                use_monte_carlo_row = True
+        else:
+            use_monte_carlo_row = False
+            # fg3m is a discrete count (0-10 range): use Poisson CDF for accuracy.
+            # All other markets use the Normal CDF approximation.
+            if market_str == "fg3m":
+                p_over = prob_over_poisson(mu=injury_adjusted_mu, line=line)
+            else:
+                p_over = prob_over(mu=injury_adjusted_mu, sigma=sigma, line=line)
 
         # --- Under evaluation ---
         under_price_raw = row.get("under_price")
@@ -273,10 +415,25 @@ def rank_nba_value(
         ):
             under_price_val = int(under_price_raw)
 
-        p_under = prob_under(mu=projected_value, sigma=sigma, line=line)
-        under_edge = 0.0
+        if not use_monte_carlo_row:
+            if market_str == "fg3m":
+                p_under = prob_under_poisson(mu=injury_adjusted_mu, line=line)
+            else:
+                p_under = prob_under(mu=injury_adjusted_mu, sigma=sigma, line=line)
+
+        # Use no-vig implied probs when both sides are available; fall back to
+        # raw implied probability when only the over side is present.
         if under_price_val is not None:
-            implied_prob_under = implied_probability(under_price_val)
+            implied_prob_over, implied_prob_under = implied_probability_no_vig(
+                over_price, under_price_val
+            )
+        else:
+            implied_prob_over = implied_probability(over_price)
+            implied_prob_under = None
+
+        over_edge = p_over - implied_prob_over
+        under_edge = 0.0
+        if under_price_val is not None and implied_prob_under is not None:
             under_edge = p_under - implied_prob_under
 
         # Pick the better side, or skip if neither meets threshold
@@ -292,6 +449,22 @@ def rank_nba_value(
             price_used = under_price_val
         else:
             continue
+
+        if use_monte_carlo_row:
+            mc_p_win_val = p_win
+
+        # Apply probability calibration if requested
+        p_win_raw: float | None = None
+        is_calibrated = False
+        if calibrator is not None:
+            p_win_raw = p_win
+            p_win = calibrator.calibrate(p_win, market_str)
+            # Recompute edge, ROI, Kelly with calibrated p_win
+            if side == "over":
+                edge_pct = p_win - implied_prob_over
+            else:
+                edge_pct = p_win - (implied_prob_under if implied_prob_under is not None else implied_probability(price_used))
+            is_calibrated = True
 
         roi = expected_roi(p_win, price_used)
         kelly = kelly_fraction(p_win, price_used)
@@ -351,6 +524,9 @@ def rank_nba_value(
                 "injury_boost_multiplier": injury_boost,
                 "injury_boost_players": injury_players_json,
                 "side": side,
+                "mc_p_win": mc_p_win_val,
+                "p_win_raw": p_win_raw,
+                "calibrated": is_calibrated,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
             }
         )
@@ -363,12 +539,22 @@ def materialize_nba_value(
     game_date: str,
     season: int,
     min_edge: float = 0.08,
+    use_monte_carlo: bool = False,
+    n_monte_carlo_sims: int = 10_000,
+    calibrated: bool = False,
 ) -> int:
     """Persist ranked NBA value bets to *nba_materialized_value_view*.
 
     Returns the number of rows written.
     """
-    rows = rank_nba_value(game_date=game_date, season=season, min_edge=min_edge)
+    rows = rank_nba_value(
+        game_date=game_date,
+        season=season,
+        min_edge=min_edge,
+        use_monte_carlo=use_monte_carlo,
+        n_monte_carlo_sims=n_monte_carlo_sims,
+        calibrated=calibrated,
+    )
 
     if not rows:
         return 0
@@ -380,14 +566,14 @@ def materialize_nba_value(
             mu, sigma, p_win, edge_percentage, expected_roi, kelly_fraction,
             confidence, confidence_score, confidence_tier, generated_at,
             base_mu, injury_adjusted_mu, injury_boost_multiplier, injury_boost_players,
-            side
+            side, p_win_raw, calibrated
         ) VALUES (
             ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?, ?,
-            ?
+            ?, ?, ?
         )
     """
 
@@ -419,6 +605,8 @@ def materialize_nba_value(
             r.get("injury_boost_multiplier"),
             r.get("injury_boost_players"),
             r.get("side", "over"),
+            r.get("p_win_raw"),
+            1 if r.get("calibrated") else 0,
         )
         for r in rows
     ]

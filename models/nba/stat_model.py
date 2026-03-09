@@ -39,7 +39,6 @@ from sklearn.linear_model import Ridge
 from sklearn.model_selection import TimeSeriesSplit
 
 from utils.db import executemany, read_dataframe
-from utils.nba_defense import get_nba_defense_multiplier
 from utils.nba_sigma import compute_player_sigma
 from utils.nba_usage import compute_usage_features
 
@@ -77,18 +76,63 @@ _ALL_STAT_COLS = sorted(
 
 
 def get_feature_cols(market: str) -> list[str]:
-    """Return the ordered feature column list for a given market."""
+    """Return the ordered feature column list for a given market.
+
+    For pts/reb/ast the model predicts per-minute rate, so min_last*_avg
+    features are excluded (minutes prediction is handled by MinutesModel).
+    For fg3m the model predicts raw counts and retains all original features.
+    """
     if market not in VALID_MARKETS:
         raise ValueError(f"Unknown market '{market}'. Valid: {VALID_MARKETS}")
     stats = _MARKET_STATS[market]
-    rolling_cols = [
-        f"{stat}_last{w}_avg"
-        for stat in stats
-        for w in ROLLING_WINDOWS
+
+    if market == "fg3m":
+        # fg3m stays count-based with Poisson CDF — keep all features
+        rolling_cols = [
+            f"{stat}_last{w}_avg"
+            for stat in stats
+            for w in ROLLING_WINDOWS
+        ]
+    else:
+        # pts/reb/ast: predict per-minute rate; exclude min_last*_avg features
+        rolling_cols = [
+            f"{stat}_last{w}_avg"
+            for stat in stats
+            for w in ROLLING_WINDOWS
+            if stat != "min"
+        ]
+
+    contextual_cols = [
+        "home_game", "b2b", "days_rest",
+        "opp_def_rating_normalized", "opp_pace_normalized",
+        "opp_days_rest", "opp_b2b",
     ]
-    contextual_cols = ["home_game", "b2b", "days_rest", "opp_def_rating_normalized"]
     usage_cols = ["fga_share", "min_share", "usage_delta"]
     return rolling_cols + contextual_cols + usage_cols
+
+
+def _compute_team_rest_schedule(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute each team's days-of-rest per game from the full game log.
+
+    Returns a DataFrame with columns [team_abbreviation, game_date,
+    team_days_rest, team_b2b] — one row per unique (team, game_date).
+    Uses shift(1) within each team so there is no lookahead.
+    """
+    # One row per team per game_date
+    schedule = (
+        df[["team_abbreviation", "game_date"]]
+        .drop_duplicates()
+        .sort_values(["team_abbreviation", "game_date"])
+        .copy()
+    )
+    schedule["prev_date"] = schedule.groupby("team_abbreviation")["game_date"].shift(1)
+    schedule["team_days_rest"] = (
+        (schedule["game_date"] - schedule["prev_date"]).dt.days
+        .fillna(3)
+        .clip(upper=7)
+    )
+    schedule["team_b2b"] = (schedule["team_days_rest"] <= 1).astype(int)
+    return schedule[["team_abbreviation", "game_date", "team_days_rest", "team_b2b"]]
 
 
 def _engineer_features(df: pd.DataFrame, market: str) -> pd.DataFrame:
@@ -118,11 +162,23 @@ def _engineer_features(df: pd.DataFrame, market: str) -> pd.DataFrame:
     # Opponent team abbreviation (last 3 chars of matchup)
     df["opponent"] = df["matchup"].str.strip().str[-3:]
 
-    # Back-to-back flag
+    # Player rest
     df["prev_game_date"] = df.groupby("player_id")["game_date"].shift(1)
     df["days_rest"] = (df["game_date"] - df["prev_game_date"]).dt.days.fillna(3)
-    df["days_rest"] = df["days_rest"].clip(upper=7)
+    df["days_rest"] = df["days_rest"].clip(lower=1, upper=7)
     df["b2b"] = (df["days_rest"] <= 1).astype(int)
+
+    # Opponent rest differential: opponents on B2B allow ~2-3 extra pts.
+    # Build team schedule then merge on opponent + game_date.
+    team_rest = _compute_team_rest_schedule(df)
+    opp_rest = team_rest.rename(columns={
+        "team_abbreviation": "opponent",
+        "team_days_rest": "opp_days_rest",
+        "team_b2b": "opp_b2b",
+    })
+    df = df.merge(opp_rest, on=["opponent", "game_date"], how="left")
+    df["opp_days_rest"] = df["opp_days_rest"].fillna(3.0)
+    df["opp_b2b"] = df["opp_b2b"].fillna(0).astype(int)
 
     # Usage features (fga_share, min_share, usage_delta)
     if "fga" in df.columns and "min" in df.columns:
@@ -144,23 +200,49 @@ _MARKET_DEF_COL: dict[str, str] = {
 }
 
 
-def _lookup_opponent_defense(df: pd.DataFrame, market: str) -> pd.DataFrame:
-    """Merge opponent defensive ratings into the feature DataFrame."""
+def _lookup_opponent_defense(
+    df: pd.DataFrame,
+    market: str,
+    as_of_date: str | None = None,
+) -> pd.DataFrame:
+    """Merge opponent defensive ratings and pace into the feature DataFrame.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Feature DataFrame with 'opponent' and 'season' columns.
+    market : str
+        Stat market (pts, reb, ast, fg3m).
+    as_of_date : str or None
+        If provided, only use defensive stats with as_of_date <= this date
+        (prevents lookahead bias during training). Use None for prediction
+        (latest available data).
+    """
     df = df.copy()
     def_col = _MARKET_DEF_COL.get(market, "def_rating")
 
-    # Load defensive stats
-    def_stats = read_dataframe(
-        f"SELECT team_abbreviation, season, {def_col}, def_rating "
-        "FROM nba_team_defensive_stats "
-        "ORDER BY team_abbreviation, season, as_of_date DESC"
-    )
+    # Load defensive stats — filtered by as_of_date to prevent lookahead bias
+    if as_of_date is not None:
+        def_stats = read_dataframe(
+            f"SELECT team_abbreviation, season, {def_col}, def_rating, opp_pace "
+            "FROM nba_team_defensive_stats "
+            "WHERE as_of_date <= ? "
+            "ORDER BY team_abbreviation, season, as_of_date DESC",
+            [as_of_date],
+        )
+    else:
+        def_stats = read_dataframe(
+            f"SELECT team_abbreviation, season, {def_col}, def_rating, opp_pace "
+            "FROM nba_team_defensive_stats "
+            "ORDER BY team_abbreviation, season, as_of_date DESC"
+        )
 
     if def_stats.empty:
         df["opp_def_rating_normalized"] = 0.0
+        df["opp_pace_normalized"] = 0.0
         return df
 
-    # Keep most recent per team+season
+    # Keep most recent per team+season (already sorted DESC above)
     def_stats = def_stats.drop_duplicates(subset=["team_abbreviation", "season"], keep="first")
 
     # Z-score normalize the defensive column
@@ -178,12 +260,28 @@ def _lookup_opponent_defense(df: pd.DataFrame, market: str) -> pd.DataFrame:
         def_stats = def_stats.copy()
         def_stats["opp_def_norm"] = 0.0
 
+    # Z-score normalize opp_pace
+    pace_vals = def_stats["opp_pace"].dropna() if "opp_pace" in def_stats.columns else pd.Series([], dtype=float)
+    if len(pace_vals) > 1:
+        pace_mean = float(pace_vals.mean())
+        pace_std = float(pace_vals.std())
+        if pace_std > 0:
+            def_stats["opp_pace_norm"] = (def_stats["opp_pace"] - pace_mean) / pace_std
+        else:
+            def_stats["opp_pace_norm"] = 0.0
+    else:
+        def_stats["opp_pace_norm"] = 0.0
+
     # Ensure opponent column exists
     if "opponent" not in df.columns:
         df["opponent"] = df["matchup"].str.strip().str[-3:]
 
-    merge_df = def_stats[["team_abbreviation", "season", "opp_def_norm"]].rename(
-        columns={"team_abbreviation": "opponent", "opp_def_norm": "opp_def_rating_normalized"}
+    merge_df = def_stats[["team_abbreviation", "season", "opp_def_norm", "opp_pace_norm"]].rename(
+        columns={
+            "team_abbreviation": "opponent",
+            "opp_def_norm": "opp_def_rating_normalized",
+            "opp_pace_norm": "opp_pace_normalized",
+        }
     )
 
     # Merge on opponent + season if season column exists
@@ -197,6 +295,7 @@ def _lookup_opponent_defense(df: pd.DataFrame, market: str) -> pd.DataFrame:
         df = df.merge(merge_df_no_season, on=["opponent"], how="left")
 
     df["opp_def_rating_normalized"] = df["opp_def_rating_normalized"].fillna(0.0)
+    df["opp_pace_normalized"] = df["opp_pace_normalized"].fillna(0.0)
     return df
 
 
@@ -224,10 +323,10 @@ def _build_model(market: str) -> StackingRegressor:
         random_state=42,
     )
     rf = RandomForestRegressor(
-        n_estimators=300,
-        max_depth=depth + 2,
+        n_estimators=params.get("rf_n", 300),
+        max_depth=params.get("rf_max_depth", depth + 2),
         min_samples_leaf=5,
-        max_features=0.7,
+        max_features=params.get("rf_max_features", 0.7),
         n_jobs=-1,
         random_state=42,
     )
@@ -248,6 +347,24 @@ def _build_model(market: str) -> StackingRegressor:
         estimators = [("gbr", gbr), ("rf", rf), ("xgb", xgb_model)]
     except ImportError:
         estimators = [("gbr", gbr), ("rf", rf)]
+
+    try:
+        import lightgbm as lgb
+        lgb_model = lgb.LGBMRegressor(
+            n_estimators=params.get("lgb_n", 400),
+            max_depth=params.get("lgb_depth", depth),
+            learning_rate=params.get("lgb_lr", 0.04),
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_alpha=0.05,
+            n_jobs=-1,
+            random_state=42,
+            verbose=-1,
+        )
+        estimators = [*estimators, ("lgb", lgb_model)]
+    except (ImportError, OSError):
+        # OSError can occur when LightGBM native library (libomp) is missing
+        pass
 
     return StackingRegressor(
         estimators=estimators,
@@ -290,13 +407,34 @@ def train(market: str) -> None:
 
     log.info("[%s] Engineering features on %d rows …", market, len(df))
     df = _engineer_features(df, market)
-    df = _lookup_opponent_defense(df, market)
+
+    # Apply defense lookup per-row with as_of_date to prevent lookahead bias
+    # We vectorize by computing defense stats once per unique game_date present in data
+    unique_dates = sorted(df["game_date"].astype(str).unique())
+    date_def_cache: dict[str, pd.DataFrame] = {}
+    for udate in unique_dates:
+        date_def_cache[udate] = _lookup_opponent_defense(
+            df[df["game_date"].astype(str) == udate], market, as_of_date=udate
+        )
+    df = pd.concat(list(date_def_cache.values()), ignore_index=True)
+    df = df.sort_values(["player_id", "game_date"]).reset_index(drop=True)
 
     df = df.dropna(subset=feature_cols + [market])
+
+    # For pts/reb/ast: train on per-minute rate to enable minutes × rate decomposition.
+    # Filter out rows where min < 5 to avoid noisy division.
+    if market in {"pts", "reb", "ast"}:
+        df = df[df["min"] >= 5].copy()
+        df = df.copy()
+        df["_rate_target"] = df[market] / df["min"]
+        y_col = "_rate_target"
+    else:
+        y_col = market
+
     log.info("[%s] Training on %d rows after dropping NaN rows", market, len(df))
 
     X = df[feature_cols].values
-    y = df[market].values
+    y = df[y_col].values
 
     # TimeSeriesSplit cross-validation for honest MAE tracking
     tscv = TimeSeriesSplit(n_splits=4)
@@ -381,8 +519,71 @@ def _get_games_for_date(game_date: str) -> list[dict[str, Any]]:
     return [g for g in games.values() if g["home_team"] and g["away_team"]]
 
 
-def predict(market: str, game_date: str | None = None) -> None:
-    """Generate projections for the given market. Uses today if game_date is None."""
+def _load_minutes_predictions(game_date: str) -> dict[str, dict[str, float]]:
+    """Load or train MinutesModel and return a {player_id: {predicted_minutes, minutes_sigma}} lookup.
+
+    player_id keys are strings (as returned by MinutesModel.predict()).
+    Falls back to an empty dict if the model or data is unavailable.
+    """
+    try:
+        from models.nba.minutes_model import MinutesModel
+    except ImportError as exc:
+        log.warning("[minutes] MinutesModel unavailable: %s", exc)
+        return {}
+
+    minutes_model_path = MODEL_DIR / "minutes_model.joblib"
+    mm = MinutesModel()
+    if minutes_model_path.exists():
+        try:
+            mm.load(str(minutes_model_path))
+            log.info("[minutes] Loaded pre-trained minutes model from %s", minutes_model_path)
+        except Exception as exc:
+            log.warning("[minutes] Could not load saved minutes model (%s); will train fresh.", exc)
+            mm.train(str(MODEL_DIR.parent.parent / "nfl_data.db"))
+            mm.save(str(minutes_model_path))
+    else:
+        import os
+        db_path = os.environ.get("SQLITE_DB_PATH", str(MODEL_DIR.parent.parent / "nfl_data.db"))
+        log.info("[minutes] No saved model found; training MinutesModel …")
+        result = mm.train(db_path)
+        log.info("[minutes] MinutesModel trained: cv_mae=%.3f n_samples=%d", result["cv_mae"], result["n_samples"])
+        try:
+            mm.save(str(minutes_model_path))
+        except Exception as exc:
+            log.warning("[minutes] Could not save minutes model: %s", exc)
+
+    import os
+    db_path = os.environ.get("SQLITE_DB_PATH", str(MODEL_DIR.parent.parent / "nfl_data.db"))
+    try:
+        predictions = mm.predict(db_path, target_date=game_date)
+    except Exception as exc:
+        log.warning("[minutes] MinutesModel.predict() failed: %s", exc)
+        return {}
+
+    return {
+        p["player_id"]: {
+            "predicted_minutes": p["predicted_minutes"],
+            "minutes_sigma": p["minutes_sigma"],
+        }
+        for p in predictions
+    }
+
+
+def predict(market: str, game_date: str | None = None, _minutes_lookup: dict | None = None) -> None:
+    """Generate projections for the given market. Uses today if game_date is None.
+
+    Parameters
+    ----------
+    market : str
+        One of pts, reb, ast, fg3m.
+    game_date : str or None
+        Target date in YYYY-MM-DD format. Uses live scoreboard if None.
+    _minutes_lookup : dict or None
+        Pre-built {player_id: {predicted_minutes, minutes_sigma}} mapping.
+        If None, the MinutesModel is loaded/trained automatically.
+        Pass an existing dict when calling predict() for multiple markets to
+        avoid reloading the MinutesModel on every call.
+    """
     if market not in VALID_MARKETS:
         raise ValueError(f"Unknown market '{market}'. Valid: {VALID_MARKETS}")
 
@@ -407,6 +608,9 @@ def predict(market: str, game_date: str | None = None) -> None:
 
     today = games[0]["game_date"]
     log.info("[%s] Generating projections for %s (%d games) …", market, today, len(games))
+
+    # Load minutes predictions once (caller may pass a pre-built lookup for multi-market runs)
+    minutes_lookup = _minutes_lookup if _minutes_lookup is not None else _load_minutes_predictions(today)
 
     # Build team -> game context mapping
     team_game: dict[str, dict] = {}
@@ -464,6 +668,35 @@ def predict(market: str, game_date: str | None = None) -> None:
     players_today["opponent"] = players_today["team_abbreviation"].map(_get_opponent)
     players_today = _lookup_opponent_defense(players_today, market)
 
+    # Opponent rest: compute days since each opponent team last played
+    # using the historical game logs (game_date < today).
+    opp_last_game = (
+        df_all.groupby("team_abbreviation")["game_date"]
+        .max()
+        .reset_index()
+        .rename(columns={"team_abbreviation": "opponent", "game_date": "opp_last_game_date"})
+    )
+    today_dt = pd.to_datetime(today)
+    opp_last_game["opp_days_rest"] = (
+        (today_dt - opp_last_game["opp_last_game_date"]).dt.days
+        .fillna(3)
+        .clip(upper=7)
+    )
+    opp_last_game["opp_b2b"] = (opp_last_game["opp_days_rest"] <= 1).astype(int)
+    players_today = players_today.merge(
+        opp_last_game[["opponent", "opp_days_rest", "opp_b2b"]],
+        on="opponent",
+        how="left",
+    )
+    if "opp_days_rest" not in players_today.columns:
+        players_today["opp_days_rest"] = 3.0
+    else:
+        players_today["opp_days_rest"] = players_today["opp_days_rest"].fillna(3.0)
+    if "opp_b2b" not in players_today.columns:
+        players_today["opp_b2b"] = 0
+    else:
+        players_today["opp_b2b"] = players_today["opp_b2b"].fillna(0).astype(int)
+
     X = players_today[feature_cols].fillna(0).values
     preds = model.predict(X)
 
@@ -481,23 +714,69 @@ def predict(market: str, game_date: str | None = None) -> None:
     # Pre-compute player history for sigma (Phase 1)
     player_history = df_all.groupby("player_id")[market].apply(list)
 
+    is_rate_market = market in {"pts", "reb", "ast"}
+
     rows = []
-    for (_, row), proj in zip(players_today.iterrows(), preds):
+    for (_, row), rate_or_count in zip(players_today.iterrows(), preds):
         g = team_game.get(row["team_abbreviation"], {})
         pid = int(row["player_id"])
         season_val = int(row.get("season", date.today().year))
         opponent = str(row.get("opponent", "UNK"))
 
-        # Phase 3: Apply defense multiplier to base projection
-        defense_mult = get_nba_defense_multiplier(
-            opponent=opponent, market=market,
-            season=season_val, through_date=today,
-        )
-        adjusted_proj = float(proj) * defense_mult
+        # Look up minutes prediction for this player (keyed as string)
+        min_info = minutes_lookup.get(str(pid), {})
+        pred_minutes = min_info.get("predicted_minutes", None)
+
+        if is_rate_market:
+            # Model predicts per-minute rate; multiply by predicted_minutes for final stat
+            predicted_rate = float(rate_or_count)
+            if pred_minutes is not None and pred_minutes > 0:
+                adjusted_proj = float(predicted_rate * pred_minutes)
+            else:
+                # Fallback: use player's recent average minutes if no minutes prediction
+                recent_min = float(row.get("min_last5_avg", 0.0) or 0.0)
+                fallback_min = max(recent_min, 10.0)
+                adjusted_proj = float(predicted_rate * fallback_min)
+                pred_minutes = fallback_min
+            stored_rate: float | None = float(round(predicted_rate, 6))
+        else:
+            # fg3m: direct count prediction — no rate conversion
+            adjusted_proj = float(rate_or_count)
+            stored_rate = None
 
         # Phase 1: Compute player-specific sigma from historical variance
         history = player_history.get(pid, [])
         sigma = compute_player_sigma(history, market=market)
+
+        # volatility_score: coefficient of variation (sigma / projection)
+        # clamped to [0.0, 2.0] to avoid extreme outliers on tiny projections
+        volatility_score = float(
+            round(min(2.0, sigma / max(adjusted_proj, 0.5)), 4)
+        )
+
+        # usage_rate: player's recent minutes share (proxy for volume certainty)
+        usage_rate = float(round(float(row.get("min_share", 0.0) or 0.0), 4))
+
+        # Build a deterministic game_id to avoid "unknown" collisions.
+        # Use the real game_id when available; otherwise synthesize one from
+        # date + sorted team abbreviations so all players in the same game
+        # share the same id and the UNIQUE(player_id, game_id, market)
+        # constraint works correctly.
+        raw_game_id = g.get("game_id")
+        if raw_game_id:
+            game_id_val = str(raw_game_id)
+        else:
+            home = g.get("home_team", row["team_abbreviation"])
+            away = g.get("away_team", opponent)
+            teams_key = "_".join(sorted([str(home), str(away)]))
+            game_id_val = f"{today}_{teams_key}"
+
+        # Phase 4: rate_sigma — uncertainty in per-minute rate for rate markets.
+        # rate_sigma = sigma / predicted_minutes so MC can reconstruct the rate distribution.
+        if is_rate_market and pred_minutes is not None and pred_minutes > 0:
+            rate_sigma_val: float | None = float(round(sigma / pred_minutes, 6))
+        else:
+            rate_sigma_val = None
 
         rows.append(
             (
@@ -506,19 +785,26 @@ def predict(market: str, game_date: str | None = None) -> None:
                 str(row["team_abbreviation"]),
                 season_val,
                 today,
-                str(g.get("game_id", "unknown")),
+                game_id_val,
                 market,
                 float(round(adjusted_proj, 2)),
                 float(round(row["confidence"], 4)),
                 float(round(sigma, 4)),
+                volatility_score,
+                usage_rate,
+                float(round(pred_minutes, 4)) if pred_minutes is not None else None,
+                float(round(stored_rate, 6)) if stored_rate is not None else None,
+                rate_sigma_val,
             )
         )
 
     sql = """
         INSERT OR REPLACE INTO nba_projections (
             player_id, player_name, team, season, game_date,
-            game_id, market, projected_value, confidence, sigma
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            game_id, market, projected_value, confidence, sigma,
+            volatility_score, usage_rate, predicted_minutes, predicted_rate,
+            rate_sigma
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     executemany(sql, rows)
     log.info("[%s] Wrote %d projections to nba_projections for %s", market, len(rows), today)
