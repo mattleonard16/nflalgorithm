@@ -154,8 +154,17 @@ make nba-predict
 # Full pipeline (ingest → predict → odds → value ranking)
 make nba-full
 
+# Daily production pipeline
+make nba-run
+
 # Hyperparameter tuning with Optuna
 make nba-tune
+
+# Backtesting, drift detection, feature importance, calibration
+make nba-backtest
+make nba-drift
+make nba-importance
+make nba-calibrate
 
 # Launch dashboard
 make fullstack    # Visit http://localhost:3000/nba
@@ -294,18 +303,24 @@ make validate      # Cross-season validation
 - [x] Multi-strategy player matching
 - [x] SQLite/MySQL dual backend support
 
-### In Progress
-- [ ] Game script adjustments (implied totals)
-- [ ] Weather factor integration
-- [ ] Injury status weighting
-
-### Recently Completed
 - [x] NBA module with full pipeline (ingest, models, odds, value engine, dashboard)
 - [x] StackingRegressor ensemble (GBR + RF + XGBoost + Ridge)
 - [x] Opponent defensive ratings with z-score normalization
 - [x] Under-bet evaluation and dual-side value ranking
 - [x] Optuna hyperparameter tuning per market
 - [x] NBA production runner (7-stage orchestrator)
+- [x] Minutes × Rate decomposition with dedicated minutes model
+- [x] Monte Carlo simulation (5000 draws, correlated portfolios)
+- [x] Isotonic regression probability calibration per market
+- [x] Walk-forward backtesting with no lookahead bias
+- [x] PSI-based drift detection with 3-tier alerting
+- [x] SHAP/permutation feature importance tracking
+- [x] Injury adjustment redistribution system
+- [x] Explainability payloads (model inputs, trends, variance, confidence)
+
+### In Progress
+- [ ] Game script adjustments (implied totals)
+- [ ] Weather factor integration
 
 ### Planned
 - [ ] Line movement tracking
