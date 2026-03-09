@@ -78,6 +78,7 @@ class NbaPlayerSummary(BaseModel):
     avg_pts: float
     avg_reb: float
     avg_ast: float
+    avg_fg3m: float
     avg_min: float
 
 
@@ -105,6 +106,8 @@ class NbaBetOutcome(BaseModel):
     result: str | None = None
     profit_units: float | None = None
     confidence_tier: str | None = None
+    side: str | None = None
+    sportsbook: str | None = None
 
 
 class NbaDailyPerformance(BaseModel):
@@ -136,6 +139,7 @@ class NbaPerformanceResponse(BaseModel):
 class NbaValueBetItem(BaseModel):
     model_config = {"from_attributes": True}
 
+    game_date: str
     player_id: int | None = None
     player_name: str
     team: str | None = None
@@ -153,6 +157,7 @@ class NbaValueBetItem(BaseModel):
     kelly_fraction: float
     confidence: float | None = None
     generated_at: str | None = None
+    side: str | None = None
     why: dict | None = None
 
 
@@ -174,6 +179,7 @@ class NbaCorrelationMember(BaseModel):
     player_id: int
     market: str
     sportsbook: str
+    player_name: str | None = None
 
 
 class NbaCorrelationResponse(BaseModel):
@@ -201,6 +207,18 @@ _schedule_lock = threading.Lock()
 _CACHE_TTL = 300  # 5 minutes
 
 VALID_MARKETS = {"pts", "reb", "ast", "fg3m"}
+_PLAYERS_SORT_COLS = {"pts": "avg_pts", "reb": "avg_reb", "ast": "avg_ast", "fg3m": "avg_fg3m"}
+
+
+def _resolve_game_date(game_date: str | None) -> str:
+    """Default to today and validate YYYY-MM-DD format."""
+    if game_date is None:
+        return date.today().isoformat()
+    try:
+        datetime.strptime(game_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="game_date must be YYYY-MM-DD")
+    return game_date
 
 
 def _fetch_live_schedule() -> list[dict]:
@@ -272,13 +290,42 @@ def nba_meta() -> NbaMeta:
 
 
 @router.get("/schedule", response_model=NbaScheduleResponse)
-def nba_schedule() -> NbaScheduleResponse:
-    """Return today's NBA games from live scoreboard."""
-    games_raw = _fetch_live_schedule()
+def nba_schedule(
+    game_date: str | None = Query(None, description="ISO date; defaults to today (live)"),
+) -> NbaScheduleResponse:
+    """Return NBA games for a date. Today uses live scoreboard; past dates query game logs."""
     today = date.today().isoformat()
 
-    games = [NbaGame(**g) for g in games_raw]
-    return NbaScheduleResponse(games=games, game_date=today)
+    if game_date is None or game_date == today:
+        games_raw = _fetch_live_schedule()
+        games = [NbaGame(**g) for g in games_raw]
+        return NbaScheduleResponse(games=games, game_date=today)
+
+    try:
+        datetime.strptime(game_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="game_date must be YYYY-MM-DD")
+
+    rows = fetchall(
+        "SELECT DISTINCT game_id, game_date, "
+        "SUBSTR(matchup, 1, 3) as away_team, "
+        "SUBSTR(matchup, -3) as home_team "
+        "FROM nba_player_game_logs "
+        "WHERE game_date = ? AND matchup LIKE '%vs.%' "
+        "ORDER BY game_id",
+        (game_date,),
+    )
+    games = [
+        NbaGame(
+            game_id=str(r[0]),
+            game_date=str(r[1]),
+            home_team=str(r[3]),
+            away_team=str(r[2]),
+            status="Final",
+        )
+        for r in rows
+    ]
+    return NbaScheduleResponse(games=games, game_date=game_date)
 
 
 @router.get("/projections", response_model=NbaProjectionsResponse)
@@ -292,14 +339,7 @@ def nba_projections(
     if market not in VALID_MARKETS:
         raise HTTPException(status_code=400, detail=f"Invalid market '{market}'. Must be one of: {', '.join(sorted(VALID_MARKETS))}")
 
-    if game_date is None:
-        game_date = date.today().isoformat()
-
-    # Validate date format
-    try:
-        datetime.strptime(game_date, "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="game_date must be YYYY-MM-DD")
+    game_date = _resolve_game_date(game_date)
 
     df = read_dataframe(
         "SELECT p.player_id, p.player_name, p.team, p.game_date, p.market, "
@@ -375,6 +415,7 @@ def nba_players(
     season: int = Query(2025),
     team: str | None = Query(None),
     search: str | None = Query(None, description="Partial player name search"),
+    sort: str = Query("pts", description="Sort by market: pts, reb, ast, fg3m"),
     limit: int = Query(100, ge=1, le=500),
 ) -> NbaPlayersResponse:
     """Return players with season averages."""
@@ -392,16 +433,19 @@ def nba_players(
     where = " AND ".join(where_clauses)
     params.append(limit)
 
+    order_col = _PLAYERS_SORT_COLS.get(sort, "avg_pts")
+
     df = read_dataframe(
         "SELECT player_id, player_name, team_abbreviation as team, "
         "COUNT(*) as games_played, "
         "ROUND(AVG(pts), 1) as avg_pts, "
         "ROUND(AVG(reb), 1) as avg_reb, "
         "ROUND(AVG(ast), 1) as avg_ast, "
+        "ROUND(AVG(fg3m), 1) as avg_fg3m, "
         "ROUND(AVG(min), 1) as avg_min "
         "FROM nba_player_game_logs WHERE " + where + " "
         "GROUP BY player_id, player_name, team_abbreviation "
-        "ORDER BY avg_pts DESC LIMIT ?",
+        f"ORDER BY {order_col} DESC LIMIT ?",
         params,
     )
 
@@ -414,6 +458,7 @@ def nba_players(
             avg_pts=float(row["avg_pts"] or 0),
             avg_reb=float(row["avg_reb"] or 0),
             avg_ast=float(row["avg_ast"] or 0),
+            avg_fg3m=float(row["avg_fg3m"] or 0),
             avg_min=float(row["avg_min"] or 0),
         )
         for _, row in df.iterrows()
@@ -439,13 +484,7 @@ def nba_value_bets(
             detail=f"Invalid market '{market}'. Must be one of: {', '.join(sorted(VALID_MARKETS))}",
         )
 
-    if game_date is None:
-        game_date = date.today().isoformat()
-
-    try:
-        datetime.strptime(game_date, "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="game_date must be YYYY-MM-DD")
+    game_date = _resolve_game_date(game_date)
 
     df = _query_value_bets(game_date, market, min_edge, sportsbook, limit)
     df = _apply_best_line_filter(df, best_line_only)
@@ -472,9 +511,9 @@ def _query_value_bets(
 ) -> Any:
     """Build and execute the value bets query."""
     sql = (
-        "SELECT player_id, player_name, team, event_id, market, sportsbook, "
+        "SELECT game_date, player_id, player_name, team, event_id, market, sportsbook, "
         "line, over_price, under_price, mu, sigma, p_win, edge_percentage, "
-        "expected_roi, kelly_fraction, confidence, generated_at "
+        "expected_roi, kelly_fraction, confidence, generated_at, side "
         "FROM nba_materialized_value_view "
         "WHERE game_date = ? AND market = ? AND edge_percentage >= ?"
     )
@@ -507,6 +546,7 @@ def _build_bet_items(df: Any) -> list[NbaValueBetItem]:
     """Convert a dataframe of value bet rows into NbaValueBetItem objects."""
     return [
         NbaValueBetItem(
+            game_date=str(row["game_date"]),
             player_id=int(row["player_id"]) if row.get("player_id") is not None else None,
             player_name=str(row["player_name"]),
             team=str(row["team"]) if row.get("team") is not None else None,
@@ -524,6 +564,7 @@ def _build_bet_items(df: Any) -> list[NbaValueBetItem]:
             kelly_fraction=float(row["kelly_fraction"]),
             confidence=float(row["confidence"]) if row.get("confidence") is not None else None,
             generated_at=str(row["generated_at"]) if row.get("generated_at") is not None else None,
+            side=str(row["side"]) if row.get("side") is not None else None,
         )
         for _, row in df.iterrows()
     ]
@@ -625,7 +666,7 @@ def nba_outcomes(
 
     rows = fetchall(
         "SELECT bet_id, player_name, market, line, actual_result, result, "
-        "profit_units, confidence_tier "
+        "profit_units, confidence_tier, side, sportsbook "
         "FROM nba_bet_outcomes WHERE game_date = ? "
         "ORDER BY profit_units DESC",
         (game_date,),
@@ -641,6 +682,8 @@ def nba_outcomes(
             result=r[5],
             profit_units=r[6],
             confidence_tier=r[7],
+            side=r[8] if len(r) > 8 else None,
+            sportsbook=r[9] if len(r) > 9 else None,
         )
         for r in rows
     ]
@@ -651,6 +694,7 @@ def nba_explain(
     player_id: int,
     market: str,
     game_date: str | None = Query(None, description="ISO date e.g. 2026-02-17"),
+    sportsbook: str | None = Query(None, description="Filter confidence by sportsbook"),
 ) -> NbaExplainResponse:
     """Return a single bet explanation for a player/market."""
     if market not in VALID_MARKETS:
@@ -658,14 +702,9 @@ def nba_explain(
             status_code=400,
             detail=f"Invalid market '{market}'. Must be one of: {', '.join(sorted(VALID_MARKETS))}",
         )
-    if game_date is None:
-        game_date = date.today().isoformat()
-    try:
-        datetime.strptime(game_date, "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="game_date must be YYYY-MM-DD")
+    game_date = _resolve_game_date(game_date)
 
-    payload = build_why_payload(game_date, player_id, market)
+    payload = build_why_payload(game_date, player_id, market, sportsbook=sportsbook)
     return NbaExplainResponse(
         player_id=player_id, market=market, game_date=game_date, why=payload
     )
@@ -676,21 +715,19 @@ def nba_correlation(
     game_date: str | None = Query(None, description="ISO date e.g. 2026-02-17"),
 ) -> NbaCorrelationResponse:
     """Return correlation groups and team stacks for a game date."""
-    if game_date is None:
-        game_date = date.today().isoformat()
-    try:
-        datetime.strptime(game_date, "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="game_date must be YYYY-MM-DD")
+    game_date = _resolve_game_date(game_date)
 
     groups: dict[str, list[NbaCorrelationMember]] = {}
     team_stacks: dict[str, int] = {}
 
     try:
         rows = fetchall(
-            "SELECT player_id, market, sportsbook, correlation_group "
-            "FROM nba_risk_assessments "
-            "WHERE game_date = ? AND correlation_group IS NOT NULL",
+            "SELECT r.player_id, r.market, r.sportsbook, r.correlation_group, v.player_name "
+            "FROM nba_risk_assessments r "
+            "LEFT JOIN nba_materialized_value_view v "
+            "  ON r.game_date = v.game_date AND r.player_id = v.player_id "
+            "  AND r.market = v.market AND r.sportsbook = v.sportsbook "
+            "WHERE r.game_date = ? AND r.correlation_group IS NOT NULL",
             (game_date,),
         )
         for r in rows:
@@ -699,6 +736,7 @@ def nba_correlation(
                 player_id=r[0],
                 market=r[1],
                 sportsbook=r[2],
+                player_name=r[4] if r[4] else None,
             ))
     except Exception as exc:
         log.warning("Could not query nba_risk_assessments: %s", exc)
@@ -727,12 +765,7 @@ def nba_risk_summary(
     game_date: str | None = Query(None, description="ISO date e.g. 2026-02-17"),
 ) -> NbaRiskSummaryResponse:
     """Return exposure summary for a game date."""
-    if game_date is None:
-        game_date = date.today().isoformat()
-    try:
-        datetime.strptime(game_date, "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="game_date must be YYYY-MM-DD")
+    game_date = _resolve_game_date(game_date)
 
     empty = NbaRiskSummaryResponse(
         game_date=game_date,

@@ -20,7 +20,7 @@ _MARKET_COL: Dict[str, str] = {"pts": "pts", "reb": "reb", "ast": "ast", "fg3m":
 
 
 def build_why_payload(
-    game_date: str, player_id: int, market: str
+    game_date: str, player_id: int, market: str, *, sportsbook: str | None = None
 ) -> Dict[str, Any]:
     """Build a structured explainability payload for a single NBA bet.
 
@@ -30,7 +30,7 @@ def build_why_payload(
         "model": _get_model_section(game_date, player_id, market),
         "recency": _get_recency_section(game_date, player_id, market),
         "variance": _get_variance_section(game_date, player_id, market),
-        "confidence": _get_confidence_section(game_date, player_id, market),
+        "confidence": _get_confidence_section(game_date, player_id, market, sportsbook=sportsbook),
         "risk": _get_risk_section(game_date, player_id, market),
         "agents": _get_agents_section(game_date, player_id, market),
     }
@@ -392,17 +392,19 @@ def _get_variance_section(
 
 
 def _get_confidence_section(
-    game_date: str, player_id: int, market: str
+    game_date: str, player_id: int, market: str, *, sportsbook: str | None = None
 ) -> Dict[str, Any]:
-    row = fetchone(
-        """
-        SELECT p_win, edge_percentage, expected_roi, kelly_fraction
-        FROM nba_materialized_value_view
-        WHERE game_date = ? AND player_id = ? AND market = ?
-        LIMIT 1
-        """,
-        params=(game_date, player_id, market),
+    sql = (
+        "SELECT p_win, edge_percentage, expected_roi, kelly_fraction "
+        "FROM nba_materialized_value_view "
+        "WHERE game_date = ? AND player_id = ? AND market = ?"
     )
+    params: list[Any] = [game_date, player_id, market]
+    if sportsbook is not None:
+        sql += " AND sportsbook = ?"
+        params.append(sportsbook)
+    sql += " LIMIT 1"
+    row = fetchone(sql, params=tuple(params))
     if not row:
         return {
             "p_win": None,
