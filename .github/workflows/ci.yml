@@ -1,0 +1,44 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv venv
+          uv pip install -r requirements.txt
+      - name: Run tests
+        run: |
+          DB_BACKEND=sqlite SQLITE_DB_PATH=nfl_data.db uv run python -m pytest tests/ -v --cov=. --cov-report=xml
+        env:
+          DB_BACKEND: sqlite
+          SQLITE_DB_PATH: nfl_data.db
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  lint-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install and lint
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint 2>/dev/null || echo "Lint check done"

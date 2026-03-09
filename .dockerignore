@@ -1,0 +1,12 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.git/
+.github/
+node_modules/
+.next/
+htmlcov/
+*.db
+.env
+config.py

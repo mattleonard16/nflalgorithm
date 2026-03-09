@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune
+.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest
 
 # Environment detection - defaults to UV if available
 ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && echo "uv" || echo "venv")
@@ -331,6 +331,11 @@ nba-value:
 	@echo "Computing NBA value bets for $(NBA_DATE)..."
 	$(DB_ENV) $(PYTHON) nba_value_engine.py --date $(NBA_DATE)
 
+# Train NBA calibration model
+nba-calibrate:
+	@echo "Training NBA calibration model..."
+	$(DB_ENV) $(PYTHON) scripts/train_nba_calibration.py
+
 # Run NBA risk assessment
 nba-risk:
 	@echo "Running NBA risk assessment for $(NBA_DATE)..."
@@ -382,6 +387,19 @@ nba-full:
 	$(MAKE) nba-risk
 	$(MAKE) nba-agents
 
+# ============================================================
+# NFL Model Training Targets
+# ============================================================
+
+# Train NFL weekly models for all markets (StackingRegressor ensemble)
+nfl-train:
+	@echo "Training NFL weekly models for all markets..."
+	$(DB_ENV) $(PYTHON) -c "from models.position_specific.weekly import train_weekly_models; from utils.db import read_dataframe; df = read_dataframe('SELECT DISTINCT season, week FROM player_stats_enhanced ORDER BY season DESC, week DESC LIMIT 20'); train_weekly_models(list(df.itertuples(index=False, name=None)))"
+
+# Optuna hyperparameter tuning for NFL stat models (writes best_params_{market}.json)
+nfl-tune:
+	$(DB_ENV) uv run python scripts/nfl_optuna_tuning.py --market all
+
 # Optuna hyperparameter tuning for NBA stat models (writes best_params_{market}.json)
 nba-tune:
 	$(DB_ENV) uv run python scripts/nba_optuna_tuning.py --market all
@@ -405,6 +423,29 @@ nba-train-fg3m:
 
 nba-defense:
 	$(DB_ENV) uv run python -c "from scripts.ingest_nba_data import ingest_defensive_stats; ingest_defensive_stats()"
+
+# Compute NBA feature importance for all trained markets
+nba-importance:
+	@echo "Computing NBA feature importance..."
+	$(DB_ENV) $(PYTHON) scripts/run_nba_importance.py
+
+# Run NBA drift detection checks for a given date
+nba-drift:
+	@echo "Running NBA drift detection..."
+	$(DB_ENV) $(PYTHON) scripts/run_nba_drift.py
+
+# Run NBA walk-forward backtest over a date range
+nba-backtest:
+	@echo "Running NBA walk-forward backtest..."
+	$(DB_ENV) $(PYTHON) scripts/run_nba_backtest.py --start-date $(NBA_DATE) --end-date $(GAME_DATE)
+
+# Demo mode: install, migrate schema, seed synthetic data
+demo:
+	@echo "Setting up demo environment..."
+	$(MAKE) install
+	$(DB_ENV) $(PYTHON) -c "from schema_migrations import MigrationManager; MigrationManager('nfl_data.db').run()"
+	$(DB_ENV) $(PYTHON) scripts/seed_demo_data.py
+	@echo "Demo data loaded! Run: make fullstack"
 
 # Populate historical data (helper target)
 populate-data:
