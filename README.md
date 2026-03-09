@@ -106,12 +106,38 @@ Full NBA player props pipeline with ML-powered projections and value betting.
 
 | Component | Description |
 |-----------|-------------|
+| **Minutes × Rate Decomposition** | Dedicated minutes model (StackingRegressor) feeds per-minute rate projections |
 | **StackingRegressor Ensemble** | GBR + RandomForest + XGBoost with Ridge meta-learner |
 | **Opponent Defense Ratings** | Z-score normalized per-market defensive adjustments |
 | **4-Market Coverage** | Points, rebounds, assists, and 3-pointers |
 | **Under-Bet Evaluation** | Evaluates both over and under sides per line |
 | **EWMA Sigma** | Player-specific volatility with market floors |
 | **Optuna Tuning** | Automated hyperparameter search per market |
+| **Monte Carlo Simulation** | 5000-draw simulation with correlated multi-stat portfolios, Gamma-Poisson for fg3m |
+| **Probability Calibration** | Isotonic regression per market trained on historical outcomes |
+| **Injury Adjustments** | Redistributes absent players' expected production among active teammates |
+| **Walk-Forward Backtesting** | Historical bet grading with no lookahead bias |
+| **Drift Detection** | PSI-based monitoring with 3-tier alerting (stable/monitor/alert) |
+| **Feature Importance** | SHAP/permutation importance tracking per market |
+| **Explainability** | "Why" payloads with model inputs, recency trends, variance, confidence, risk, agent verdicts |
+
+### NBA Architecture
+
+```
+nba_api → ingest → injuries → minutes model → stat models (4 markets)
+    → odds scraping → value engine (Kelly) → calibration → Monte Carlo
+    → risk assessment → agent coordination → materialized view → dashboard
+```
+
+### NBA Dashboard
+
+| Page | Description |
+|------|-------------|
+| `/nba` | Projections dashboard with market filters and explainability |
+| `/nba/players` | Player browser with search and season filter |
+| `/nba/schedule` | Live game schedule |
+| `/nba/analytics` | Correlation and risk analysis charts |
+| `/nba/performance` | P&L tracking and bet outcomes |
 
 ### NBA Quick Start
 
