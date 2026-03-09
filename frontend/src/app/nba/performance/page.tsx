@@ -229,6 +229,7 @@ export default function NbaPerformancePage() {
                   <TableHead className="text-slate-400">Market</TableHead>
                   <TableHead className="text-slate-400 text-right">Line</TableHead>
                   <TableHead className="text-slate-400 text-right">Actual</TableHead>
+                  <TableHead className="text-slate-400">Book</TableHead>
                   <TableHead className="text-slate-400 text-right">Profit</TableHead>
                 </TableRow>
               </TableHeader>
@@ -245,10 +246,13 @@ export default function NbaPerformancePage() {
                       {bet.market}
                     </TableCell>
                     <TableCell className="text-right text-slate-300">
-                      O {bet.line}
+                      {bet.side?.toUpperCase() === "U" ? "U" : "O"} {bet.line}
                     </TableCell>
                     <TableCell className="text-right text-slate-100 font-medium">
                       {bet.actual_result?.toFixed(0) ?? "-"}
+                    </TableCell>
+                    <TableCell className="text-slate-500 text-xs">
+                      {bet.sportsbook ?? "-"}
                     </TableCell>
                     <TableCell className={`text-right font-medium ${(bet.profit_units ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>
                       {bet.profit_units !== null

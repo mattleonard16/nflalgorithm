@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -57,6 +55,7 @@ import type {
 } from "@/lib/types";
 import { ExplainPopover } from "@/components/explain-popover";
 import { RiskPanel } from "@/components/risk-panel";
+import { AddToSlipModal } from "@/components/add-to-slip-modal";
 import {
   TrendingUp,
   Trophy,
@@ -68,6 +67,7 @@ import {
   FileJson,
   ShieldCheck,
   Info,
+  PlusCircle,
 } from "lucide-react";
 
 /* ─── Tier color system ─── */
@@ -378,6 +378,8 @@ function DataHealthBadge({ overall }: { overall: string }) {
 
 /* ─── Bets Table ─── */
 function BetsTable({ bets, tier, season, week }: { bets: ValueBet[]; tier: string; season: number; week: number }) {
+  const [slipBet, setSlipBet] = useState<ValueBet | null>(null);
+
   if (bets.length === 0) return null;
 
   const config = getTierConfig(tier);
@@ -434,6 +436,7 @@ function BetsTable({ bets, tier, season, week }: { bets: ValueBet[]; tier: strin
               <TableHead className="text-[11px] text-slate-500 uppercase tracking-wider font-medium h-9 text-center w-20">
                 Tier
               </TableHead>
+              <TableHead className="text-[11px] text-slate-500 uppercase tracking-wider font-medium h-9 w-10" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -478,11 +481,29 @@ function BetsTable({ bets, tier, season, week }: { bets: ValueBet[]; tier: strin
                 <TableCell className="text-center">
                   <ConfidenceBadge tier={bet.confidence_tier || "Pass"} />
                 </TableCell>
+                <TableCell className="text-center">
+                  <button
+                    onClick={() => setSlipBet(bet)}
+                    title="Add to bet slip"
+                    className="text-slate-600 hover:text-blue-400 transition-colors"
+                  >
+                    <PlusCircle className="h-4 w-4" />
+                  </button>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+
+      {slipBet && (
+        <AddToSlipModal
+          bet={slipBet}
+          season={season}
+          week={week}
+          onClose={() => setSlipBet(null)}
+        />
+      )}
     </div>
   );
 }
@@ -578,24 +599,24 @@ export default function DashboardPage() {
 
   // Fetch bets, performance, risk, and correlations when filters change
   useEffect(() => {
-    setLoading(true);
-    setError(null);
+    async function loadData() {
+      setLoading(true);
+      setError(null);
 
-    Promise.all([
-      getValueBets(filters, false),
-      getPerformance(filters.season),
-      getCorrelationAnalysis(filters.season, filters.week).catch(() => null),
-      getRiskSummary(filters.season, filters.week).catch(() => null),
-      getLatestRun(filters.season, filters.week).catch(() => null),
-    ])
-      .then(async ([betsData, perfData, corrData, riskData, latestRun]) => {
+      try {
+        const [betsData, perfData, corrData, riskData, latestRun] = await Promise.all([
+          getValueBets(filters, false),
+          getPerformance(filters.season),
+          getCorrelationAnalysis(filters.season, filters.week).catch(() => null),
+          getRiskSummary(filters.season, filters.week).catch(() => null),
+          getLatestRun(filters.season, filters.week).catch(() => null),
+        ]);
         setBets(betsData.bets);
         setPerformance(perfData);
         setCorrelations(corrData);
         setRiskSummary(riskData);
         if (latestRun) {
           setPipelineRun(latestRun);
-          // Check agent review status
           try {
             const review = await getAgentReviewStatus(latestRun.run_id, filters.season, filters.week);
             setReviewStatus(review);
@@ -603,9 +624,13 @@ export default function DashboardPage() {
             setReviewStatus(null);
           }
         }
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load data");
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadData();
   }, [filters]);
 
   // Group bets by tier

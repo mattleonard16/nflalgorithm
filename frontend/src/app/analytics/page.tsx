@@ -65,21 +65,26 @@ export default function AnalyticsPage() {
 
   // Fetch analytics data when season/week changes
   useEffect(() => {
-    setLoading(true);
-    setError(null);
+    async function load() {
+      setLoading(true);
+      setError(null);
 
-    Promise.all([
-      getEdgeDistribution(season, week),
-      getAnalyticsByPosition(season, week),
-      getAnalyticsByMarket(season, week),
-    ])
-      .then(([edge, pos, mkt]) => {
+      try {
+        const [edge, pos, mkt] = await Promise.all([
+          getEdgeDistribution(season, week),
+          getAnalyticsByPosition(season, week),
+          getAnalyticsByMarket(season, week),
+        ]);
         setEdgeDist(edge);
         setPositions(pos.positions);
         setMarkets(mkt.markets);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load analytics");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
   }, [season, week]);
 
   // Prepare chart data

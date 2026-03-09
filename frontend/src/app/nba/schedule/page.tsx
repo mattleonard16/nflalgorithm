@@ -10,11 +10,14 @@ export default function NbaSchedulePage() {
   const [games, setGames] = useState<NbaGame[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string>("");
 
   useEffect(() => {
     async function load() {
+      setLoading(true);
+      setError(null);
       try {
-        const res = await getNbaSchedule();
+        const res = await getNbaSchedule(selectedDate || undefined);
         setGames(res.games);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load schedule");
@@ -23,7 +26,7 @@ export default function NbaSchedulePage() {
       }
     }
     load();
-  }, []);
+  }, [selectedDate]);
 
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",
@@ -33,9 +36,19 @@ export default function NbaSchedulePage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-100">Today's Schedule</h1>
-        <p className="text-sm text-slate-500 mt-0.5">{today}</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-100">
+            {selectedDate ? "Schedule" : "Today's Schedule"}
+          </h1>
+          <p className="text-sm text-slate-500 mt-0.5">{selectedDate || today}</p>
+        </div>
+        <input
+          type="date"
+          value={selectedDate}
+          onChange={(e) => setSelectedDate(e.target.value)}
+          className="text-xs bg-slate-900 border border-slate-700 text-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+        />
       </div>
 
       {error && (

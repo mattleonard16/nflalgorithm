@@ -13,21 +13,25 @@ export default function NbaPlayersPage() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [season, setSeason] = useState<number | null>(null);
-  const [seasonLabel, setSeasonLabel] = useState("Loading…");
+  const [availableSeasons, setAvailableSeasons] = useState<number[]>([]);
+  const [teamFilter, setTeamFilter] = useState<string>("");
+
+  const seasonLabel = season
+    ? `${season}–${String(season + 1).slice(-2)} season averages`
+    : "Loading…";
 
   // Fetch meta once to get latest season
   useEffect(() => {
     async function loadMeta() {
       try {
         const meta = await getNbaMeta();
+        setAvailableSeasons(meta.available_seasons);
         const latest = meta.available_seasons.length > 0
           ? meta.available_seasons[meta.available_seasons.length - 1]
           : new Date().getFullYear();
         setSeason(latest);
-        setSeasonLabel(`${latest}–${String(latest + 1).slice(-2)} season averages`);
       } catch {
         setSeason(new Date().getFullYear());
-        setSeasonLabel("Season averages");
       }
     }
     loadMeta();
@@ -45,7 +49,11 @@ export default function NbaPlayersPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await getNbaPlayers(season!, undefined, debouncedSearch || undefined, 200);
+        const res = await getNbaPlayers({
+          season: season!,
+          search: debouncedSearch || undefined,
+          limit: 200,
+        });
         setPlayers(res.players);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load players");
@@ -56,20 +64,49 @@ export default function NbaPlayersPage() {
     load();
   }, [debouncedSearch, season]);
 
+  const filteredPlayers = teamFilter
+    ? players.filter((p) => p.team === teamFilter)
+    : players;
+
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-100">Players</h1>
           <p className="text-sm text-slate-500 mt-0.5">{seasonLabel}</p>
         </div>
-        <div className="w-64">
-          <Input
-            placeholder="Search player name…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="bg-slate-900/60 border-slate-700 text-slate-200 placeholder:text-slate-600"
-          />
+        <div className="flex items-center gap-3">
+          {availableSeasons.length > 1 && (
+            <select
+              value={season ?? ""}
+              onChange={(e) => setSeason(parseInt(e.target.value))}
+              className="text-xs bg-slate-900 border border-slate-700 text-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+            >
+              {availableSeasons.map((s) => (
+                <option key={s} value={s}>
+                  {s}–{String(s + 1).slice(-2)}
+                </option>
+              ))}
+            </select>
+          )}
+          <select
+            value={teamFilter}
+            onChange={(e) => setTeamFilter(e.target.value)}
+            className="text-xs bg-slate-900 border border-slate-700 text-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+          >
+            <option value="">All Teams</option>
+            {Array.from(new Set(players.map((p) => p.team))).sort().map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+          <div className="w-56">
+            <Input
+              placeholder="Search player name…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="bg-slate-900/60 border-slate-700 text-slate-200 placeholder:text-slate-600"
+            />
+          </div>
         </div>
       </div>
 
@@ -82,7 +119,7 @@ export default function NbaPlayersPage() {
       <Card className="bg-[#0d1220] border-slate-800/50">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium text-slate-400 uppercase tracking-wider">
-            {loading ? "Loading…" : `${players.length} players`}
+            {loading ? "Loading…" : `${filteredPlayers.length} players`}
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -101,7 +138,7 @@ export default function NbaPlayersPage() {
                 </tr>
               </thead>
               <tbody>
-                {players.map((p, i) => (
+                {filteredPlayers.map((p, i) => (
                   <tr
                     key={`${p.player_id}-${p.team}-${i}`}
                     className="border-b border-slate-800/30 hover:bg-slate-800/20 transition-colors"
@@ -129,7 +166,7 @@ export default function NbaPlayersPage() {
                     </td>
                   </tr>
                 ))}
-                {!loading && players.length === 0 && !error && (
+                {!loading && filteredPlayers.length === 0 && !error && (
                   <tr>
                     <td colSpan={7} className="px-4 py-12 text-center text-slate-600 text-sm">
                       No players found.

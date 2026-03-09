@@ -288,3 +288,71 @@ export interface WeeklySummaryItem {
 export interface WeeklySummaryResponse {
   weeks: WeeklySummaryItem[];
 }
+
+// ── Backtest ──────────────────────────────────────────────────────────────────
+
+export interface BacktestSummary {
+  avg_model_mae: number | null;
+  avg_line_mae: number | null;
+  model_beats_line_pct: number | null;
+  total_bets: number;
+}
+
+export interface BacktestPick {
+  game_date: string;
+  player_name: string | null;
+  market: string;
+  line: number;
+  actual: number;
+  mu: number | null;
+  model_abs_error: number | null;
+  line_abs_error: number | null;
+  model_beats_line: number | null;
+}
+
+export interface BacktestResponse {
+  summary: BacktestSummary;
+  recent_picks: BacktestPick[];
+}
+
+// ── User Bet Slip ─────────────────────────────────────────────────────────────
+
+export interface UserBet {
+  bet_id: string;
+  season: number | null;
+  week: number | null;
+  player_id: string;
+  market: string;
+  sportsbook: string;
+  line: number;
+  price: number;
+  stake: number;
+  edge_at_placement: number | null;
+  placed_at: string;
+  actual_result: number | null;
+  result: string | null;
+  profit_units: number | null;
+  settled_at: string | null;
+}
+
+export interface UserStats {
+  total_bets: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  total_profit: number;
+  avg_edge: number;
+  roi: number;
+}
+
+export interface RecordBetPayload {
+  season: number;
+  week: number;
+  player_id: string;
+  market: string;
+  sportsbook: string;
+  line: number;
+  price: number;
+  stake: number;
+  edge_at_placement?: number;
+}

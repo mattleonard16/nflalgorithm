@@ -10,11 +10,12 @@ import {
   Settings,
   Activity,
   ChevronLeft,
-  ChevronRight,
   LogOut,
   User,
   Calendar,
   Users,
+  History,
+  DollarSign,
 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,8 @@ const nflNavItems: NavItem[] = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
   { title: "Performance", href: "/performance", icon: TrendingUp },
   { title: "Analytics", href: "/analytics", icon: BarChart3 },
+  { title: "Backtest", href: "/backtest", icon: History },
+  { title: "Bets", href: "/bets", icon: DollarSign },
   { title: "System", href: "/system", icon: Activity },
 ];
 
@@ -43,6 +46,8 @@ const nbaNavItems: NavItem[] = [
   { title: "Players", href: "/nba/players", icon: Users },
   { title: "Schedule", href: "/nba/schedule", icon: Calendar },
   { title: "Analytics", href: "/nba/analytics", icon: BarChart3 },
+  { title: "Backtest", href: "/backtest?sport=nba", icon: History },
+  { title: "Bets", href: "/bets", icon: DollarSign },
 ];
 
 export function Sidebar() {

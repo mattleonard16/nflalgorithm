@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useState, useCallback } from "react";
 import { getNbaProjections, getNbaSchedule, fetchNbaValueBets, getNbaExplanation } from "@/lib/nba-api";
+import { NBA_MARKETS, type NbaMarket } from "@/lib/nba-types";
 import type { NbaProjection, NbaGame, NbaValueBet, NbaWhyPayload } from "@/lib/nba-types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -17,14 +18,8 @@ function SortIcon({ col, sortKey, sortAsc }: { col: SortKey; sortKey: SortKey; s
   );
 }
 
-const MARKETS = [
-  { value: "pts", label: "Points" },
-  { value: "reb", label: "Rebounds" },
-  { value: "ast", label: "Assists" },
-  { value: "fg3m", label: "3-Pointers" },
-] as const;
-
-type Market = (typeof MARKETS)[number]["value"];
+const MARKETS = NBA_MARKETS;
+type Market = NbaMarket;
 
 export default function NbaDashboardPage() {
   const [projections, setProjections] = useState<NbaProjection[]>([]);
@@ -33,6 +28,10 @@ export default function NbaDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("projected_value");
   const [sortAsc, setSortAsc] = useState(false);
+  const [projectionMarket, setProjectionMarket] = useState<Market>("pts");
+
+  // Date state
+  const [selectedDate, setSelectedDate] = useState<string>("");
 
   // Value bets state
   const [valueBets, setValueBets] = useState<NbaValueBet[]>([]);
@@ -46,23 +45,41 @@ export default function NbaDashboardPage() {
   const [whyCache, setWhyCache] = useState<Record<string, NbaWhyPayload>>({});
   const [whyLoading, setWhyLoading] = useState<string | null>(null);
 
+  // Clear caches when date changes
   useEffect(() => {
-    async function load() {
+    setWhyCache({});
+    setExpandedBet(null);
+  }, [selectedDate]);
+
+  // Fetch schedule only when date changes
+  useEffect(() => {
+    async function loadSchedule() {
       try {
-        const [projRes, schedRes] = await Promise.all([
-          getNbaProjections(undefined, "pts", 0, 100),
-          getNbaSchedule(),
-        ]);
-        setProjections(projRes.projections);
+        const schedRes = await getNbaSchedule(selectedDate || undefined);
         setGames(schedRes.games);
+      } catch {
+        // schedule is non-critical; projections effect handles the error
+      }
+    }
+    loadSchedule();
+  }, [selectedDate]);
+
+  // Fetch projections when date or market changes
+  useEffect(() => {
+    async function loadProjections() {
+      setLoading(true);
+      setError(null);
+      try {
+        const projRes = await getNbaProjections(selectedDate || undefined, projectionMarket, 0, 100);
+        setProjections(projRes.projections);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load NBA data");
       } finally {
         setLoading(false);
       }
     }
-    load();
-  }, []);
+    loadProjections();
+  }, [selectedDate, projectionMarket]);
 
   useEffect(() => {
     async function loadValueBets() {
@@ -70,6 +87,7 @@ export default function NbaDashboardPage() {
       setValueBetsError(null);
       try {
         const res = await fetchNbaValueBets({
+          game_date: selectedDate || undefined,
           market: valueBetsMarket,
           best_line_only: bestLineOnly,
         });
@@ -82,10 +100,10 @@ export default function NbaDashboardPage() {
       }
     }
     loadValueBets();
-  }, [valueBetsMarket, bestLineOnly]);
+  }, [valueBetsMarket, bestLineOnly, selectedDate]);
 
   const handleToggleWhy = useCallback(async (bet: NbaValueBet) => {
-    const key = `${bet.player_id}:${bet.market}`;
+    const key = `${bet.game_date}:${bet.player_id}:${bet.market}:${bet.sportsbook}`;
     if (expandedBet === key) {
       setExpandedBet(null);
       return;
@@ -96,7 +114,7 @@ export default function NbaDashboardPage() {
     if (bet.player_id == null) return;
     setWhyLoading(key);
     try {
-      const res = await getNbaExplanation(bet.player_id, bet.market);
+      const res = await getNbaExplanation(bet.player_id, bet.market, { gameDate: bet.game_date, sportsbook: bet.sportsbook });
       setWhyCache((prev) => ({ ...prev, [key]: res.why }));
     } catch {
       setExpandedBet(null);
@@ -144,8 +162,14 @@ export default function NbaDashboardPage() {
           <p className="text-sm text-slate-500 mt-0.5">{today}</p>
         </div>
         <div className="flex items-center gap-3">
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className="text-xs bg-slate-900 border border-slate-700 text-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+          />
           <div className="text-right">
-            <p className="text-xs text-slate-600 uppercase tracking-wider">Games Today</p>
+            <p className="text-xs text-slate-600 uppercase tracking-wider">Games</p>
             <p className="text-2xl font-bold text-blue-400 font-[family-name:var(--font-jetbrains)]">
               {games.length}
             </p>
@@ -174,7 +198,7 @@ export default function NbaDashboardPage() {
       {games.length > 0 && (
         <div>
           <h2 className="text-xs font-medium text-slate-600 uppercase tracking-[0.15em] mb-3">
-            Today's Slate
+            Today&apos;s Slate
           </h2>
           <div className="flex flex-wrap gap-2">
             {games.map((g) => (
@@ -206,9 +230,22 @@ export default function NbaDashboardPage() {
       {/* Projections Table */}
       <Card className="bg-[#0d1220] border-slate-800/50">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium text-slate-400 uppercase tracking-wider">
-            Points Projections
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-medium text-slate-400 uppercase tracking-wider">
+              {MARKETS.find((m) => m.value === projectionMarket)?.label ?? "Points"} Projections
+            </CardTitle>
+            <select
+              value={projectionMarket}
+              onChange={(e) => setProjectionMarket(e.target.value as Market)}
+              className="text-xs bg-slate-900 border border-slate-700 text-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+            >
+              {MARKETS.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           {projections.length === 0 ? (
@@ -238,7 +275,7 @@ export default function NbaDashboardPage() {
                       className="text-right px-4 py-3 text-xs font-medium text-slate-600 uppercase tracking-wider cursor-pointer hover:text-slate-400 select-none"
                       onClick={() => handleSort("projected_value")}
                     >
-                      Proj PTS
+                      Proj {projectionMarket.toUpperCase()}
                       <SortIcon col="projected_value" sortKey={sortKey} sortAsc={sortAsc} />
                     </th>
                     <th
@@ -405,7 +442,7 @@ export default function NbaDashboardPage() {
                 </thead>
                 <tbody>
                   {valueBets.map((bet) => {
-                    const betKey = `${bet.player_id}:${bet.market}:${bet.sportsbook}`;
+                    const betKey = `${bet.game_date}:${bet.player_id}:${bet.market}:${bet.sportsbook}`;
                     const isExpanded = expandedBet === betKey;
                     const why = whyCache[betKey];
                     const isLoadingWhy = whyLoading === betKey;

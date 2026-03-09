@@ -20,6 +20,10 @@ import type {
   CorrelationResponse,
   RiskSummary,
   AgentReviewStatus,
+  BacktestResponse,
+  UserBet,
+  UserStats,
+  RecordBetPayload,
 } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -399,4 +403,54 @@ export async function getCurrentUser(): Promise<User | null> {
   }
 }
 
+// ============================================================================
+// Backtest API
+// ============================================================================
 
+/**
+ * Get backtest summary (model vs line accuracy) for a given sport/season
+ */
+export async function getBacktestSummary(
+  sport: "nfl" | "nba" = "nfl",
+  season?: number,
+  startDate?: string,
+  endDate?: string
+): Promise<BacktestResponse> {
+  const params = new URLSearchParams({ sport });
+  if (season != null) params.set("season", String(season));
+  if (startDate) params.set("start_date", startDate);
+  if (endDate) params.set("end_date", endDate);
+  return fetchAPI<BacktestResponse>(`/api/backtest/summary?${params.toString()}`);
+}
+
+// ============================================================================
+// User Bet Slip API
+// ============================================================================
+
+/**
+ * Record a new bet on the slip (auth required)
+ */
+export async function recordBet(payload: RecordBetPayload): Promise<{ message: string }> {
+  return fetchAPIAuth<{ message: string }>("/api/user/bets", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Get the current user's bets (auth required)
+ */
+export async function getUserBets(season?: number, week?: number): Promise<{ bets: UserBet[]; total: number }> {
+  const params = new URLSearchParams();
+  if (season != null) params.set("season", String(season));
+  if (week != null) params.set("week", String(week));
+  const qs = params.toString();
+  return fetchAPIAuth<{ bets: UserBet[]; total: number }>(`/api/user/bets${qs ? `?${qs}` : ""}`);
+}
+
+/**
+ * Get the current user's aggregate betting statistics (auth required)
+ */
+export async function getUserStats(): Promise<UserStats> {
+  return fetchAPIAuth<UserStats>("/api/user/stats");
+}

@@ -29,8 +29,10 @@ export async function getNbaMeta(): Promise<NbaMeta> {
   return fetchJson<NbaMeta>("/api/nba/meta")
 }
 
-export async function getNbaSchedule(): Promise<NbaScheduleResponse> {
-  return fetchJson<NbaScheduleResponse>("/api/nba/schedule")
+export async function getNbaSchedule(gameDate?: string): Promise<NbaScheduleResponse> {
+  const params: Record<string, string | number> = {}
+  if (gameDate) params.game_date = gameDate
+  return fetchJson<NbaScheduleResponse>("/api/nba/schedule", params)
 }
 
 export async function getNbaProjections(
@@ -44,15 +46,18 @@ export async function getNbaProjections(
   return fetchJson<NbaProjectionsResponse>("/api/nba/projections", params)
 }
 
-export async function getNbaPlayers(
-  season = 2025,
-  team?: string,
-  search?: string,
-  limit = 100
-): Promise<NbaPlayersResponse> {
+export async function getNbaPlayers(opts?: {
+  season?: number
+  team?: string
+  search?: string
+  limit?: number
+  sort?: string
+}): Promise<NbaPlayersResponse> {
+  const { season = 2025, team, search, limit = 100, sort } = opts ?? {}
   const params: Record<string, string | number> = { season, limit }
   if (team) params.team = team
   if (search) params.search = search
+  if (sort) params.sort = sort
   return fetchJson<NbaPlayersResponse>("/api/nba/players", params)
 }
 
@@ -91,10 +96,11 @@ export async function getNbaOutcomes(
 export async function getNbaExplanation(
   playerId: number,
   market: string,
-  gameDate?: string
+  opts?: { gameDate?: string; sportsbook?: string }
 ): Promise<NbaExplainResponse> {
   const params: Record<string, string | number> = {}
-  if (gameDate) params.game_date = gameDate
+  if (opts?.gameDate) params.game_date = opts.gameDate
+  if (opts?.sportsbook) params.sportsbook = opts.sportsbook
   return fetchJson<NbaExplainResponse>(`/api/nba/explain/${playerId}/${market}`, params)
 }
 

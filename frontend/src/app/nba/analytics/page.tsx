@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getNbaMeta, getNbaProjections, getNbaPlayers, getNbaCorrelation, getNbaRiskSummary } from "@/lib/nba-api";
+import { NBA_MARKETS, MARKET_AVG_KEY, type NbaMarket } from "@/lib/nba-types";
 import type { NbaProjection, NbaPlayerSummary, NbaCorrelationResponse, NbaRiskSummary } from "@/lib/nba-types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -48,14 +49,8 @@ function CustomTooltip({
   return null;
 }
 
-const MARKETS = [
-  { value: "pts", label: "Points" },
-  { value: "reb", label: "Rebounds" },
-  { value: "ast", label: "Assists" },
-  { value: "fg3m", label: "3-Pointers" },
-] as const;
-
-type Market = (typeof MARKETS)[number]["value"];
+const MARKETS = NBA_MARKETS;
+type Market = NbaMarket;
 
 export default function NbaAnalyticsPage() {
   const [projections, setProjections] = useState<NbaProjection[]>([]);
@@ -86,13 +81,13 @@ export default function NbaAnalyticsPage() {
 
   useEffect(() => {
     if (season === null) return;
-    setLoading(true);
-    setError(null);
     async function load() {
+      setLoading(true);
+      setError(null);
       try {
         const [projRes, playersRes] = await Promise.all([
           getNbaProjections(undefined, market, 0, 15),
-          getNbaPlayers(season!, undefined, undefined, 10),
+          getNbaPlayers({ season: season!, limit: 10, sort: market }),
         ]);
         setProjections(projRes.projections);
         setTopScorers(playersRes.players);
@@ -132,7 +127,7 @@ export default function NbaAnalyticsPage() {
 
   const scorersChartData = topScorers.map((p) => ({
     name: p.player_name.split(" ").slice(-1)[0],
-    value: p.avg_pts,
+    value: p[MARKET_AVG_KEY[market]] as number,
     full: p.player_name,
   }));
 
@@ -143,7 +138,7 @@ export default function NbaAnalyticsPage() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-100">NBA Analytics</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Season leaders and today's projections</p>
+          <p className="text-sm text-slate-500 mt-0.5">Season leaders and today&apos;s projections</p>
         </div>
         <div className="flex flex-col items-end gap-1">
           <label className="text-xs text-slate-600 uppercase tracking-wider">Market</label>
@@ -180,7 +175,7 @@ export default function NbaAnalyticsPage() {
           <Card className="bg-[#0d1220] border-slate-800/50">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-slate-400 uppercase tracking-wider">
-                Today's {selectedMarketLabel} Projections (Top 15)
+                Today&apos;s {selectedMarketLabel} Projections (Top 15)
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -231,7 +226,7 @@ export default function NbaAnalyticsPage() {
           <Card className="bg-[#0d1220] border-slate-800/50">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-slate-400 uppercase tracking-wider">
-                {season ? `${season}–${String(season + 1).slice(-2)}` : ""} Season Scoring Leaders
+                {season ? `${season}–${String(season + 1).slice(-2)}` : ""} Season {selectedMarketLabel} Leaders
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -419,7 +414,7 @@ export default function NbaAnalyticsPage() {
                                   key={j}
                                   className="text-[10px] font-mono text-slate-400 bg-slate-700/40 px-1.5 py-0.5 rounded"
                                 >
-                                  #{m.player_id} {m.market} ({m.sportsbook})
+                                  {m.player_name ?? `#${m.player_id}`} {m.market} ({m.sportsbook})
                                 </span>
                               ))}
                             </div>

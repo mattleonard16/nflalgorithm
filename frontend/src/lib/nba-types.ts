@@ -1,3 +1,12 @@
+export const NBA_MARKETS = [
+  { value: "pts", label: "Points" },
+  { value: "reb", label: "Rebounds" },
+  { value: "ast", label: "Assists" },
+  { value: "fg3m", label: "3-Pointers" },
+] as const
+
+export type NbaMarket = (typeof NBA_MARKETS)[number]["value"]
+
 export interface NbaProjection {
   player_id: number
   player_name: string
@@ -43,7 +52,12 @@ export interface NbaPlayerSummary {
   avg_pts: number
   avg_reb: number
   avg_ast: number
+  avg_fg3m: number
   avg_min: number
+}
+
+export const MARKET_AVG_KEY: Record<NbaMarket, keyof NbaPlayerSummary> = {
+  pts: "avg_pts", reb: "avg_reb", ast: "avg_ast", fg3m: "avg_fg3m",
 }
 
 export interface NbaPlayersResponse {
@@ -106,6 +120,7 @@ export interface NbaWhyPayload {
 }
 
 export interface NbaValueBet {
+  game_date: string
   player_id: number | null
   player_name: string
   team: string | null
@@ -123,6 +138,7 @@ export interface NbaValueBet {
   kelly_fraction: number
   confidence: number | null
   generated_at: string | null
+  side: string | null
   why?: NbaWhyPayload | null
 }
 
@@ -142,6 +158,8 @@ export interface NbaBetOutcome {
   result: string | null
   profit_units: number | null
   confidence_tier: string | null
+  side: string | null
+  sportsbook: string | null
 }
 
 export interface NbaDailyPerformance {
@@ -172,6 +190,7 @@ export interface NbaCorrelationMember {
   player_id: number
   market: string
   sportsbook: string
+  player_name?: string | null
 }
 
 export interface NbaCorrelationResponse {
