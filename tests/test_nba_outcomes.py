@@ -73,14 +73,16 @@ def _seed_value_view(
     sportsbook: str = SPORTSBOOK,
     game_date: str = GAME_DATE,
     season: int = SEASON,
+    side: str = "over",
 ) -> None:
     executemany(
         """
         INSERT OR REPLACE INTO nba_materialized_value_view (
             season, game_date, player_id, player_name, team, event_id, market,
             sportsbook, line, over_price, under_price, mu, sigma, p_win,
-            edge_percentage, expected_roi, kelly_fraction, confidence, generated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            edge_percentage, expected_roi, kelly_fraction, confidence, generated_at,
+            side
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -103,6 +105,7 @@ def _seed_value_view(
                 kelly_fraction,
                 confidence,
                 "2026-02-17T08:00:00+00:00",
+                side,
             )
         ],
     )
@@ -255,15 +258,69 @@ class TestGradeNbaBets:
         missing = required_keys - set(outcomes[0].keys())
         assert not missing, f"Outcome is missing keys: {missing}"
 
-    def test_bet_side_is_always_over(self, db):
-        """The grading pipeline always grades the over side."""
-        _seed_value_view(market="pts", line=25.5)
+    def test_bet_side_defaults_to_over_when_seeded_as_over(self, db):
+        """When the materialized view has side='over', outcome side is 'over'."""
+        _seed_value_view(market="pts", line=25.5, side="over")
         _seed_game_log(pts=31)
 
         from scripts.record_nba_outcomes import grade_nba_bets
 
         outcomes = grade_nba_bets(GAME_DATE)
         assert outcomes[0]["side"] == "over"
+
+    def test_over_bet_graded_correctly(self, db):
+        """Over bet: actual 31 > line 25.5 -> win; uses over_price for payout."""
+        _seed_value_view(market="pts", line=25.5, over_price=-115, side="over")
+        _seed_game_log(pts=31)
+
+        from scripts.record_nba_outcomes import grade_nba_bets
+
+        outcomes = grade_nba_bets(GAME_DATE)
+        assert len(outcomes) == 1
+        assert outcomes[0]["result"] == "win"
+        assert outcomes[0]["side"] == "over"
+        expected_profit = 100.0 / 115
+        assert abs(outcomes[0]["profit_units"] - expected_profit) < 0.001
+
+    def test_under_bet_graded_correctly(self, db):
+        """Under bet: actual 20 < line 25.5 -> win; uses under_price for payout."""
+        _seed_value_view(
+            market="pts",
+            line=25.5,
+            over_price=-115,
+            under_price=-105,
+            side="under",
+        )
+        _seed_game_log(pts=20)
+
+        from scripts.record_nba_outcomes import grade_nba_bets
+
+        outcomes = grade_nba_bets(GAME_DATE)
+        assert len(outcomes) == 1
+        assert outcomes[0]["result"] == "win"
+        assert outcomes[0]["side"] == "under"
+        # Under bet wins: payout at under_price (-105)
+        expected_profit = 100.0 / 105
+        assert abs(outcomes[0]["profit_units"] - expected_profit) < 0.001
+
+    def test_under_bet_loss_when_actual_exceeds_line(self, db):
+        """Under bet: actual 31 > line 25.5 -> loss."""
+        _seed_value_view(
+            market="pts",
+            line=25.5,
+            over_price=-115,
+            under_price=-105,
+            side="under",
+        )
+        _seed_game_log(pts=31)
+
+        from scripts.record_nba_outcomes import grade_nba_bets
+
+        outcomes = grade_nba_bets(GAME_DATE)
+        assert len(outcomes) == 1
+        assert outcomes[0]["result"] == "loss"
+        assert outcomes[0]["side"] == "under"
+        assert outcomes[0]["profit_units"] == -1.0
 
     def test_correct_player_metadata(self, db):
         """Outcome records player_id, player_name, market, line from the value view."""

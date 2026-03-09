@@ -77,9 +77,9 @@ class TestComputeDefenseMultipliers:
     """Test defense multiplier computation."""
 
     def setup_method(self):
-        """Clear lru_cache before each test to avoid stale data."""
-        from utils.nba_defense import compute_nba_defense_multipliers
-        compute_nba_defense_multipliers.cache_clear()
+        """Clear TTL cache before each test to avoid stale data."""
+        from utils.nba_defense import clear_defense_cache
+        clear_defense_cache()
 
     @patch("utils.nba_defense.read_dataframe")
     def test_returns_dict(self, mock_read):
@@ -146,8 +146,8 @@ class TestDefenseClamping:
     """Defense multipliers must be clamped to [0.75, 1.25]."""
 
     def setup_method(self):
-        from utils.nba_defense import compute_nba_defense_multipliers
-        compute_nba_defense_multipliers.cache_clear()
+        from utils.nba_defense import clear_defense_cache
+        clear_defense_cache()
 
     @patch("utils.nba_defense.read_dataframe")
     def test_clamped_at_upper_bound(self, mock_read):
@@ -191,8 +191,8 @@ class TestMinGamesFilter:
     """Teams with fewer games than min_games should be excluded."""
 
     def setup_method(self):
-        from utils.nba_defense import compute_nba_defense_multipliers
-        compute_nba_defense_multipliers.cache_clear()
+        from utils.nba_defense import clear_defense_cache
+        clear_defense_cache()
 
     @patch("utils.nba_defense.read_dataframe")
     def test_insufficient_games_excluded(self, mock_read):
@@ -232,8 +232,8 @@ class TestDefenseMarkets:
     """Multipliers should be computed for pts, reb, ast, fg3m."""
 
     def setup_method(self):
-        from utils.nba_defense import compute_nba_defense_multipliers
-        compute_nba_defense_multipliers.cache_clear()
+        from utils.nba_defense import clear_defense_cache
+        clear_defense_cache()
 
     @patch("utils.nba_defense.read_dataframe")
     def test_all_markets_present(self, mock_read):
@@ -257,8 +257,8 @@ class TestDefenseEmptyData:
     """Edge case when no game log data is available."""
 
     def setup_method(self):
-        from utils.nba_defense import compute_nba_defense_multipliers
-        compute_nba_defense_multipliers.cache_clear()
+        from utils.nba_defense import clear_defense_cache
+        clear_defense_cache()
 
     @patch("utils.nba_defense.read_dataframe")
     def test_empty_df_returns_empty_dict(self, mock_read):
@@ -286,3 +286,74 @@ class TestDefenseEmptyData:
         except (KeyError, AttributeError):
             # Acceptable: implementation may raise on missing columns
             pass
+
+
+# ---------------------------------------------------------------------------
+# TTL cache tests
+# ---------------------------------------------------------------------------
+
+
+class TestTTLCache:
+    """TTL-based cache replaces lru_cache — entries expire after 15 minutes."""
+
+    def setup_method(self):
+        from utils.nba_defense import clear_defense_cache
+        clear_defense_cache()
+
+    @patch("utils.nba_defense.read_dataframe")
+    def test_cache_returns_same_result_within_ttl(self, mock_read):
+        """Two calls within TTL should return same object (cache hit)."""
+        from utils.nba_defense import compute_nba_defense_multipliers
+
+        mock_read.return_value = _make_game_logs_df(20)
+        result1 = compute_nba_defense_multipliers(
+            season=2025, through_date="2026-02-17", min_games=3
+        )
+        result2 = compute_nba_defense_multipliers(
+            season=2025, through_date="2026-02-17", min_games=3
+        )
+        # Should be the same dict object (cache hit — read_dataframe called once)
+        assert result1 is result2
+        assert mock_read.call_count == 1
+
+    @patch("utils.nba_defense.time")
+    @patch("utils.nba_defense.read_dataframe")
+    def test_cache_expires_after_ttl(self, mock_read, mock_time):
+        """After TTL seconds, a fresh DB read should be triggered."""
+        from utils.nba_defense import _DEFENSE_CACHE_TTL, compute_nba_defense_multipliers
+
+        mock_read.return_value = _make_game_logs_df(20)
+
+        # First call at t=0
+        mock_time.monotonic.return_value = 0.0
+        compute_nba_defense_multipliers(
+            season=2025, through_date="2026-02-17", min_games=3
+        )
+
+        # Second call after TTL has elapsed
+        mock_time.monotonic.return_value = float(_DEFENSE_CACHE_TTL + 1)
+        compute_nba_defense_multipliers(
+            season=2025, through_date="2026-02-17", min_games=3
+        )
+
+        # read_dataframe should have been called twice (cache miss on second)
+        assert mock_read.call_count == 2
+
+    @patch("utils.nba_defense.read_dataframe")
+    def test_clear_defense_cache_forces_reread(self, mock_read):
+        """clear_defense_cache() must invalidate the cache so next call hits DB."""
+        from utils.nba_defense import clear_defense_cache, compute_nba_defense_multipliers
+
+        mock_read.return_value = _make_game_logs_df(20)
+
+        compute_nba_defense_multipliers(
+            season=2025, through_date="2026-02-17", min_games=3
+        )
+        assert mock_read.call_count == 1
+
+        clear_defense_cache()
+
+        compute_nba_defense_multipliers(
+            season=2025, through_date="2026-02-17", min_games=3
+        )
+        assert mock_read.call_count == 2

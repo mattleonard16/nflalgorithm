@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+
+# Ensure project root is on sys.path so tests can import top-level modules
+# like schema_migrations, config, utils, scripts, etc.
+_project_root = str(Path(__file__).parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
 # Force tests to run against a local SQLite database regardless of .env settings.
 TEST_DB_DIR = Path(__file__).parent / "_tmp"

@@ -31,7 +31,10 @@ def db(tmp_path, monkeypatch):
 
 
 def _seed_game_logs(n_games: int = 20, player_id: int = 1628369) -> None:
-    """Insert synthetic game logs for one player."""
+    """Insert synthetic game logs for one player.
+
+    All rows have min >= 5 (required for rate-based training targets).
+    """
     rows = []
     for i in range(n_games):
         rows.append(
@@ -44,7 +47,7 @@ def _seed_game_logs(n_games: int = 20, player_id: int = 1628369) -> None:
                 f"2025-01-{i + 1:02d}" if i < 28 else f"2025-02-{i - 27:02d}",
                 "BOS vs. MIA" if i % 2 == 0 else "BOS @ MIA",
                 "W",
-                float(34 + (i % 5)),
+                float(30 + (i % 10)),  # min ranges 30-39, always >= 5
                 int(20 + (i % 15)),  # pts varies 20-34
                 int(5 + (i % 6)),
                 int(4 + (i % 4)),
@@ -236,11 +239,26 @@ class TestMultiMarketModel:
     # Prediction ranges
     # ------------------------------------------------------------------
 
-    @pytest.mark.parametrize("market,expected_range", list(MARKET_RANGES.items()))
+    # Rate-based markets predict per-minute rates (not raw totals).
+    # pts/reb/ast rates: typical range 0.05–3.0 per minute covers all realistic players.
+    # fg3m stays count-based with its original range.
+    RATE_MARKET_RANGES = {
+        "pts": (0.0, 3.0),
+        "reb": (0.0, 1.5),
+        "ast": (0.0, 1.5),
+        "fg3m": MARKET_RANGES["fg3m"],  # count-based, unchanged
+    }
+
+    @pytest.mark.parametrize("market,expected_range", list(RATE_MARKET_RANGES.items()))
     def test_model_predicts_in_reasonable_range(
         self, db, tmp_path, monkeypatch, market, expected_range
     ):
-        """After training, in-sample predictions should be within realistic NBA bounds."""
+        """After training, in-sample model output should be within realistic bounds.
+
+        For pts/reb/ast the model predicts per-minute rate (not raw totals),
+        so the expected range is a per-minute rate range, not a game-total range.
+        For fg3m the model still predicts raw count.
+        """
         import joblib
 
         model_dir = tmp_path / "nba_models"
@@ -308,3 +326,321 @@ class TestMultiMarketModel:
         )
         assert len(rows) > 0, f"No rows in nba_projections for market={market}"
         assert (rows["market"] == market).all(), "market column has wrong value"
+
+    # ------------------------------------------------------------------
+    # Rate-based projection tests (Task #4)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize("market", ["pts", "reb", "ast"])
+    def test_rate_markets_exclude_min_rolling_features(self, db, market):
+        """pts/reb/ast feature cols must NOT include min_last*_avg (rate-based training)."""
+        from models.nba.stat_model import get_feature_cols
+
+        cols = get_feature_cols(market)
+        assert "min_last5_avg" not in cols, (
+            f"[{market}] min_last5_avg should be excluded from rate-market features"
+        )
+        assert "min_last10_avg" not in cols, (
+            f"[{market}] min_last10_avg should be excluded from rate-market features"
+        )
+
+    def test_fg3m_retains_min_rolling_features(self, db):
+        """fg3m feature cols must retain min_last*_avg (count-based, no rate conversion)."""
+        from models.nba.stat_model import get_feature_cols
+
+        cols = get_feature_cols("fg3m")
+        # fg3m uses _MARKET_STATS["fg3m"] = ["fg3m", "fga"] — no "min" stat, so
+        # min_last*_avg would never have been there anyway. The important check is
+        # that fg3m has its own rolling features intact.
+        assert "fg3m_last5_avg" in cols, "fg3m_last5_avg must be present for fg3m market"
+        assert "fga_last5_avg" in cols, "fga_last5_avg must be present for fg3m market"
+
+    @pytest.mark.parametrize("market", ["pts", "reb", "ast"])
+    def test_rate_market_projected_value_equals_rate_times_minutes(
+        self, db, tmp_path, monkeypatch, market
+    ):
+        """For pts/reb/ast: projected_value ≈ predicted_rate × predicted_minutes."""
+        model_dir = tmp_path / "nba_models"
+        model_dir.mkdir()
+        monkeypatch.setattr("models.nba.stat_model.MODEL_DIR", model_dir)
+
+        _seed_game_logs(30)
+        from models.nba.stat_model import train, predict
+
+        train(market=market)
+
+        fake_games = [
+            {
+                "game_id": "fake002",
+                "game_date": "2025-01-16",
+                "home_team": "BOS",
+                "away_team": "MIA",
+            }
+        ]
+        monkeypatch.setattr("models.nba.stat_model._get_todays_games", lambda: fake_games)
+
+        # Provide a fixed minutes lookup so the test is deterministic
+        fake_minutes_lookup = {"1628369": {"predicted_minutes": 32.0, "minutes_sigma": 3.0}}
+        predict(market=market, _minutes_lookup=fake_minutes_lookup)
+
+        rows = read_dataframe(
+            "SELECT projected_value, predicted_rate, predicted_minutes "
+            "FROM nba_projections WHERE market = ?",
+            [market],
+        )
+        assert len(rows) > 0, f"No rows for market={market}"
+        for _, row in rows.iterrows():
+            if row["predicted_rate"] is not None and row["predicted_minutes"] is not None:
+                expected = round(row["predicted_rate"] * row["predicted_minutes"], 2)
+                actual = round(float(row["projected_value"]), 2)
+                assert abs(actual - expected) < 0.01, (
+                    f"[{market}] projected_value={actual} != "
+                    f"predicted_rate × predicted_minutes={expected}"
+                )
+
+    def test_fg3m_predicted_rate_is_null(self, db, tmp_path, monkeypatch):
+        """fg3m rows must have predicted_rate = NULL (count-based, no rate conversion)."""
+        model_dir = tmp_path / "nba_models"
+        model_dir.mkdir()
+        monkeypatch.setattr("models.nba.stat_model.MODEL_DIR", model_dir)
+
+        _seed_game_logs(30)
+        from models.nba.stat_model import train, predict
+
+        train(market="fg3m")
+
+        fake_games = [
+            {
+                "game_id": "fake003",
+                "game_date": "2025-01-16",
+                "home_team": "BOS",
+                "away_team": "MIA",
+            }
+        ]
+        monkeypatch.setattr("models.nba.stat_model._get_todays_games", lambda: fake_games)
+
+        predict(market="fg3m", _minutes_lookup={})
+
+        rows = read_dataframe(
+            "SELECT predicted_rate FROM nba_projections WHERE market = 'fg3m'"
+        )
+        assert len(rows) > 0, "No fg3m rows in nba_projections"
+        assert rows["predicted_rate"].isna().all(), (
+            "fg3m rows must have predicted_rate = NULL (count-based model)"
+        )
+
+    def test_feature_cols_pts_reb_ast_retain_contextual_cols(self, db):
+        """pts/reb/ast feature cols must retain all contextual and usage features."""
+        from models.nba.stat_model import get_feature_cols
+
+        required = {
+            "home_game", "b2b", "days_rest",
+            "opp_def_rating_normalized", "opp_pace_normalized",
+            "opp_days_rest", "opp_b2b",
+            "fga_share", "min_share", "usage_delta",
+        }
+        for market in ["pts", "reb", "ast"]:
+            cols = set(get_feature_cols(market))
+            missing = required - cols
+            assert not missing, (
+                f"[{market}] Missing contextual/usage cols: {missing}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Feature engineering correctness tests
+# ---------------------------------------------------------------------------
+
+
+def _seed_exact_games(rows: list[tuple]) -> None:
+    """Insert exact game log rows into nba_player_game_logs.
+
+    Each tuple: (player_id, player_name, team, season, game_id, game_date,
+                 matchup, wl, min, pts, reb, ast, fg3m, fgm, fga, ftm, fta,
+                 stl, blk, tov, plus_minus)
+    """
+    executemany(
+        """INSERT OR REPLACE INTO nba_player_game_logs (
+            player_id, player_name, team_abbreviation, season,
+            game_id, game_date, matchup, wl, min,
+            pts, reb, ast, fg3m, fgm, fga, ftm, fta,
+            stl, blk, tov, plus_minus
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        rows,
+    )
+
+
+class TestFeatureEngineeringCorrectness:
+    """Verify correctness of feature engineering in stat_model._engineer_features."""
+
+    def test_ewma_excludes_current_row_value(self, db):
+        """pts_last5_avg for game 3 must NOT include game 3's pts value.
+
+        Seed: pts = [10, 20, 30] for games 1-3.
+        After shift(1), game 3 sees [10, 20]. EWMA(span=5) of [10, 20]
+        ≈ 13.33. The value must be closer to 20 than to 30 (no leakage).
+        """
+        from models.nba.stat_model import _engineer_features
+
+        _seed_exact_games([
+            (9001, "P1", "BOS", 2024, "G001", "2025-01-01", "BOS vs. MIA", "W",
+             30.0, 10, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, 5.0),
+            (9001, "P1", "BOS", 2024, "G002", "2025-01-03", "BOS vs. MIA", "W",
+             30.0, 20, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, 5.0),
+            (9001, "P1", "BOS", 2024, "G003", "2025-01-05", "BOS vs. MIA", "W",
+             30.0, 30, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, 5.0),
+        ])
+
+        df = read_dataframe(
+            "SELECT player_id, player_name, team_abbreviation, season, game_id, "
+            "game_date, matchup, pts, reb, ast, fg3m, min, fga "
+            "FROM nba_player_game_logs WHERE player_id = 9001"
+        )
+        result = _engineer_features(df, market="pts")
+        result = result.sort_values("game_date").reset_index(drop=True)
+
+        # Game 3 (index 2) must not include its own pts=30 in the rolling avg
+        game3_avg = result.loc[2, "pts_last5_avg"]
+        assert not np.isnan(game3_avg), "pts_last5_avg for game 3 must not be NaN"
+        # EWMA of [10, 20] is well below 30 — must be closer to 20 than to 30
+        assert abs(game3_avg - 20) < abs(game3_avg - 30), (
+            f"pts_last5_avg={game3_avg:.4f} should be closer to 20 than 30 "
+            "(i.e. game 3's own value of 30 must not be included)"
+        )
+
+    def test_first_game_rolling_features_handled(self, db):
+        """After _engineer_features, the first game row has NaN rolling features.
+
+        The NaN must be either dropped during training (dropna) or filled
+        during prediction (fillna(0)). We verify the first game's
+        pts_last5_avg is NaN before any dropna/fillna is applied.
+        """
+        from models.nba.stat_model import _engineer_features
+
+        _seed_exact_games([
+            (9002, "P2", "LAL", 2024, "G010", "2025-01-01", "LAL vs. GSW", "W",
+             30.0, 25, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, 5.0),
+        ])
+
+        df = read_dataframe(
+            "SELECT player_id, player_name, team_abbreviation, season, game_id, "
+            "game_date, matchup, pts, reb, ast, fg3m, min, fga "
+            "FROM nba_player_game_logs WHERE player_id = 9002"
+        )
+        result = _engineer_features(df, market="pts")
+
+        first_row = result.iloc[0]
+        # shift(1) on the first row produces NaN; ewm propagates NaN when all prior values absent
+        # The feature must be NaN for the first row (no prior data to compute average from)
+        assert np.isnan(first_row["pts_last5_avg"]), (
+            "First game per player must have NaN pts_last5_avg (no prior games to shift from)"
+        )
+
+        # Verify training would drop the NaN row
+        after_dropna = result.dropna(subset=["pts_last5_avg"])
+        assert len(after_dropna) == 0, (
+            "Single-game player: all rows should be dropped by dropna on rolling features"
+        )
+
+    def test_traded_player_rolling_continues(self, db):
+        """Rolling averages at game 5 (team=LAL) must include BOS-era games.
+
+        groupby is on player_id, not team — team changes must not reset rolling history.
+        """
+        from models.nba.stat_model import _engineer_features
+
+        _seed_exact_games([
+            (9003, "P3", "BOS", 2024, "G020", "2025-01-01", "BOS vs. MIA", "W",
+             32.0, 15, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, 5.0),
+            (9003, "P3", "BOS", 2024, "G021", "2025-01-03", "BOS vs. MIA", "L",
+             31.0, 18, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, -3.0),
+            (9003, "P3", "BOS", 2024, "G022", "2025-01-05", "BOS vs. MIA", "W",
+             30.0, 20, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, 5.0),
+            (9003, "P3", "LAL", 2024, "G023", "2025-01-07", "LAL vs. GSW", "W",
+             33.0, 22, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, 4.0),
+            (9003, "P3", "LAL", 2024, "G024", "2025-01-09", "LAL vs. GSW", "L",
+             34.0, 25, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, -2.0),
+        ])
+
+        df = read_dataframe(
+            "SELECT player_id, player_name, team_abbreviation, season, game_id, "
+            "game_date, matchup, pts, reb, ast, fg3m, min, fga "
+            "FROM nba_player_game_logs WHERE player_id = 9003"
+        )
+        result = _engineer_features(df, market="pts")
+        result = result.sort_values("game_date").reset_index(drop=True)
+
+        # Game 5 (index 4): EWMA computed from games 1-4 (BOS era included)
+        game5_avg = result.loc[4, "pts_last5_avg"]
+        assert not np.isnan(game5_avg), "pts_last5_avg for game 5 must not be NaN"
+        # The average must reflect BOS games (pts ~ 15-20), not just LAL (pts ~22-25)
+        # If rolling reset on team change, game5_avg would be ~22 (only game 4 LAL data)
+        # If rolling continues across teams, it will be influenced by all 4 prior games
+        # Game 4 pts=22 alone → ewma=22. With BOS games weighted in, must be < 22
+        assert game5_avg < 22.5, (
+            f"pts_last5_avg={game5_avg:.4f} must include BOS-era data "
+            "(expected < 22.5 due to lower BOS pts values)"
+        )
+
+    def test_days_rest_consecutive_games(self, db):
+        """Verify days_rest and b2b for games on Jan 1, Jan 2, Jan 5.
+
+        Expected: days_rest = [3 (fillna default), 1, 3], b2b = [0, 1, 0].
+        """
+        from models.nba.stat_model import _engineer_features
+
+        _seed_exact_games([
+            (9004, "P4", "GSW", 2024, "G030", "2025-01-01", "GSW vs. LAL", "W",
+             30.0, 20, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, 5.0),
+            (9004, "P4", "GSW", 2024, "G031", "2025-01-02", "GSW vs. LAL", "L",
+             28.0, 15, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, -2.0),
+            (9004, "P4", "GSW", 2024, "G032", "2025-01-05", "GSW vs. LAL", "W",
+             31.0, 22, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, 3.0),
+        ])
+
+        df = read_dataframe(
+            "SELECT player_id, player_name, team_abbreviation, season, game_id, "
+            "game_date, matchup, pts, reb, ast, fg3m, min, fga "
+            "FROM nba_player_game_logs WHERE player_id = 9004"
+        )
+        result = _engineer_features(df, market="pts")
+        result = result.sort_values("game_date").reset_index(drop=True)
+
+        expected_days_rest = [3, 1, 3]
+        expected_b2b = [0, 1, 0]
+
+        for i, (exp_rest, exp_b2b) in enumerate(zip(expected_days_rest, expected_b2b)):
+            actual_rest = int(result.loc[i, "days_rest"])
+            actual_b2b = int(result.loc[i, "b2b"])
+            assert actual_rest == exp_rest, (
+                f"Game {i + 1}: days_rest={actual_rest}, expected {exp_rest}"
+            )
+            assert actual_b2b == exp_b2b, (
+                f"Game {i + 1}: b2b={actual_b2b}, expected {exp_b2b}"
+            )
+
+    def test_days_rest_clipped_lower_bound(self, db):
+        """days_rest must have a minimum of 1 (never 0 or negative)."""
+        from models.nba.stat_model import _engineer_features
+
+        # Seed two games on consecutive days to produce a natural days_rest=1
+        # The clip(lower=1) ensures even same-day games don't produce days_rest=0
+        _seed_exact_games([
+            (9005, "P5", "MIA", 2024, "G040", "2025-01-10", "MIA vs. BOS", "W",
+             30.0, 20, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, 5.0),
+            (9005, "P5", "MIA", 2024, "G041", "2025-01-11", "MIA vs. BOS", "L",
+             29.0, 18, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, -1.0),
+        ])
+
+        df = read_dataframe(
+            "SELECT player_id, player_name, team_abbreviation, season, game_id, "
+            "game_date, matchup, pts, reb, ast, fg3m, min, fga "
+            "FROM nba_player_game_logs WHERE player_id = 9005"
+        )
+        result = _engineer_features(df, market="pts")
+        valid_rest = result["days_rest"].dropna()
+
+        assert (valid_rest >= 1).all(), (
+            f"days_rest must be >= 1 after clip(lower=1). "
+            f"Found minimum: {valid_rest.min()}"
+        )

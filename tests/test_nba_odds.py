@@ -662,3 +662,116 @@ class TestIntegration:
             "SELECT player_id FROM nba_odds WHERE player_name='Jayson Tatum' LIMIT 1"
         )
         assert int(result.iloc[0]["player_id"]) == 1628369
+
+
+# ---------------------------------------------------------------------------
+# 11. MODELED_MARKETS filter tests — blk/stl/tov excluded
+# ---------------------------------------------------------------------------
+
+# Fake event with 7 markets (4 modeled + 3 unmodeled)
+FAKE_EVENTS_ALL_MARKETS = [
+    {
+        "id": "evt_all_markets",
+        "sport_key": "basketball_nba",
+        "commence_time": "2026-02-17T23:30:00Z",
+        "home_team": "Boston Celtics",
+        "away_team": "Miami Heat",
+        "bookmakers": [
+            {
+                "key": "fanduel",
+                "title": "FanDuel",
+                "markets": [
+                    {
+                        "key": "player_points",
+                        "outcomes": [
+                            {"name": "Over", "description": "Jayson Tatum", "price": -115, "point": 27.5},
+                            {"name": "Under", "description": "Jayson Tatum", "price": -105, "point": 27.5},
+                        ],
+                    },
+                    {
+                        "key": "player_rebounds",
+                        "outcomes": [
+                            {"name": "Over", "description": "Jayson Tatum", "price": -120, "point": 8.5},
+                            {"name": "Under", "description": "Jayson Tatum", "price": -100, "point": 8.5},
+                        ],
+                    },
+                    {
+                        "key": "player_assists",
+                        "outcomes": [
+                            {"name": "Over", "description": "Jayson Tatum", "price": -110, "point": 4.5},
+                            {"name": "Under", "description": "Jayson Tatum", "price": -110, "point": 4.5},
+                        ],
+                    },
+                    {
+                        "key": "player_threes",
+                        "outcomes": [
+                            {"name": "Over", "description": "Jayson Tatum", "price": -115, "point": 2.5},
+                            {"name": "Under", "description": "Jayson Tatum", "price": -105, "point": 2.5},
+                        ],
+                    },
+                    {
+                        "key": "player_blocks",
+                        "outcomes": [
+                            {"name": "Over", "description": "Jayson Tatum", "price": -130, "point": 0.5},
+                            {"name": "Under", "description": "Jayson Tatum", "price": 110, "point": 0.5},
+                        ],
+                    },
+                    {
+                        "key": "player_steals",
+                        "outcomes": [
+                            {"name": "Over", "description": "Jayson Tatum", "price": -130, "point": 0.5},
+                            {"name": "Under", "description": "Jayson Tatum", "price": 110, "point": 0.5},
+                        ],
+                    },
+                    {
+                        "key": "player_turnovers",
+                        "outcomes": [
+                            {"name": "Over", "description": "Jayson Tatum", "price": -110, "point": 2.5},
+                            {"name": "Under", "description": "Jayson Tatum", "price": -110, "point": 2.5},
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+]
+
+
+class TestModeledMarketsFilter:
+    """Verify that blk, stl, tov markets are excluded from parsed results."""
+
+    def test_parse_events_excludes_blk(self, db):
+        """blk market must not appear in _parse_events output."""
+        from scripts.scrape_nba_odds import _parse_events
+        rows = _parse_events(FAKE_EVENTS_ALL_MARKETS, season=2025)
+        markets = {r["market"] for r in rows}
+        assert "blk" not in markets
+
+    def test_parse_events_excludes_stl(self, db):
+        """stl market must not appear in _parse_events output."""
+        from scripts.scrape_nba_odds import _parse_events
+        rows = _parse_events(FAKE_EVENTS_ALL_MARKETS, season=2025)
+        markets = {r["market"] for r in rows}
+        assert "stl" not in markets
+
+    def test_parse_events_excludes_tov(self, db):
+        """tov market must not appear in _parse_events output."""
+        from scripts.scrape_nba_odds import _parse_events
+        rows = _parse_events(FAKE_EVENTS_ALL_MARKETS, season=2025)
+        markets = {r["market"] for r in rows}
+        assert "tov" not in markets
+
+    def test_parse_events_includes_only_modeled_markets(self, db):
+        """Only pts, reb, ast, fg3m should appear in _parse_events output."""
+        from scripts.scrape_nba_odds import MODELED_MARKETS, _parse_events
+        rows = _parse_events(FAKE_EVENTS_ALL_MARKETS, season=2025)
+        markets = {r["market"] for r in rows}
+        assert markets.issubset(MODELED_MARKETS), (
+            f"Unexpected markets in output: {markets - MODELED_MARKETS}"
+        )
+
+    def test_modeled_markets_constant_exported(self):
+        """MODELED_MARKETS must be a frozenset with exactly the 4 modeled markets."""
+        from scripts.scrape_nba_odds import MODELED_MARKETS
+        assert isinstance(MODELED_MARKETS, frozenset)
+        assert MODELED_MARKETS == frozenset({"pts", "reb", "ast", "fg3m"})

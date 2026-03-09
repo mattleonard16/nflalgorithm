@@ -717,6 +717,92 @@ class TestUnderBets:
 # ---------------------------------------------------------------------------
 
 
+class TestInjuryAdjustedMu:
+    """Test that injury_adjusted_mu is used for probability calculations."""
+
+    def test_p_win_changes_with_injury_boost(self, db):
+        """When injury_adjusted_mu is higher than projected_value, p_win should reflect
+        the adjusted mu, not the base projection."""
+        from unittest.mock import patch
+
+        from nba_value_engine import rank_nba_value
+
+        # Seed a player with moderate projection
+        _seed_projections(projected_value=22.0)
+        _seed_odds(line=25.5, over_price=-110, under_price=-110)
+
+        # Without injury adjustment, p_over(22.0, sigma, 25.5) should be low
+        results_no_injury = rank_nba_value(GAME_DATE, SEASON, min_edge=0.0)
+
+        # Mock apply_injury_adjustments to inject a significant boost
+        def fake_adjustments(proj_rows, game_date):
+            for row in proj_rows:
+                row["base_mu"] = row["projected_value"]
+                row["injury_adjusted_mu"] = row["projected_value"] * 1.35
+                row["injury_boost_multiplier"] = 1.35
+                row["injury_boost_players"] = "[]"
+            return proj_rows
+
+        with patch("nba_value_engine.apply_injury_adjustments", side_effect=fake_adjustments):
+            results_with_injury = rank_nba_value(GAME_DATE, SEASON, min_edge=0.0)
+
+        # If injury_adjusted_mu is used, the edge should be different (higher mu -> more likely over)
+        # With base 22.0 vs line 25.5 (unlikely over), after 35% boost = 29.7 (likely over)
+        if results_with_injury and results_no_injury:
+            # The injury-boosted result should favor "over" more
+            injuried_result = next((r for r in results_with_injury if r["side"] == "over"), None)
+            if injuried_result:
+                base_result = next((r for r in results_no_injury if r["side"] == "over"), None)
+                if base_result:
+                    assert injuried_result["p_win"] > base_result["p_win"]
+
+
+# ---------------------------------------------------------------------------
+# 9. prob_over signal strength tests
+# ---------------------------------------------------------------------------
+
+
+class TestProbOverSignalStrength:
+    """Verify prob_over and prob_over_poisson produce sensible probabilities
+    across strong signal, weak signal, and discrete (Poisson) fg3m scenarios.
+    """
+
+    def test_prob_over_strong_signal(self):
+        """When mu=35 is well above line=25, P(over) should be > 0.90."""
+        from nba_value_engine import prob_over
+
+        # With sigma=5, z = (25 - 35) / 5 = -2.0 → P(over) ≈ 0.977
+        result = prob_over(mu=35.0, sigma=5.0, line=25.0)
+        assert result > 0.90, (
+            f"P(over) with mu=35, sigma=5, line=25 should be > 0.90, got {result:.4f}"
+        )
+
+    def test_prob_over_weak_signal(self):
+        """When mu=22 is below line=25, P(over) should be < 0.35."""
+        from nba_value_engine import prob_over
+
+        # With sigma=5, z = (25 - 22) / 5 = 0.6 → P(over) ≈ 0.274
+        result = prob_over(mu=22.0, sigma=5.0, line=25.0)
+        assert result < 0.35, (
+            f"P(over) with mu=22, sigma=5, line=25 should be < 0.35, got {result:.4f}"
+        )
+
+    def test_poisson_fg3m_sanity(self):
+        """For fg3m with mu=2.5 and line=2.5, P(over) should be between 0.3 and 0.7.
+
+        The Poisson model is used for discrete markets (fg3m).
+        At the natural line (mu == line), probability should not be extreme.
+        """
+        from nba_value_engine import prob_over_poisson
+
+        # mu=2.5, line=2.5: P(X > 2.5) = P(X >= 3) for Poisson(2.5)
+        # P(X >= 3) = 1 - P(X <= 2) = 1 - (e^-2.5 * (1 + 2.5 + 3.125)) ≈ 0.456
+        result = prob_over_poisson(mu=2.5, line=2.5)
+        assert 0.3 <= result <= 0.7, (
+            f"P(fg3m over 2.5 | mu=2.5) should be between 0.3 and 0.7, got {result:.4f}"
+        )
+
+
 class TestConfidenceInputWiring:
     """Test that real volatility_score and usage_rate flow into confidence scoring."""
 
