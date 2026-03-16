@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from api.cache import nba_cache, make_cache_key
 from api.nba_explainability import build_why_payload, build_why_payloads_batch
 from utils.db import fetchall, fetchone, read_dataframe
 
@@ -266,6 +267,11 @@ def _fetch_live_schedule() -> list[dict]:
 @router.get("/meta", response_model=NbaMeta)
 def nba_meta() -> NbaMeta:
     """Return available seasons and summary counts."""
+    cache_key = make_cache_key("nba-meta")
+    cached = nba_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     seasons_rows = fetchall(
         "SELECT DISTINCT season FROM nba_player_game_logs ORDER BY season"
     )
@@ -281,12 +287,14 @@ def nba_meta() -> NbaMeta:
         "FROM nba_player_game_logs"
     )
 
-    return NbaMeta(
+    result = NbaMeta(
         available_seasons=seasons,
         latest_game_date=latest_date,
         total_players=totals[0] if totals else 0,
         total_games=totals[1] if totals else 0,
     )
+    nba_cache.set(cache_key, result)
+    return result
 
 
 @router.get("/schedule", response_model=NbaScheduleResponse)
