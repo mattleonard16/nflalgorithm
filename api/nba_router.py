@@ -349,6 +349,14 @@ def nba_projections(
 
     game_date = _resolve_game_date(game_date)
 
+    cache_key = make_cache_key(
+        "nba-projections", game_date=game_date, market=market,
+        min_confidence=min_confidence, limit=limit,
+    )
+    cached = nba_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     df = read_dataframe(
         "SELECT p.player_id, p.player_name, p.team, p.game_date, p.market, "
         "p.projected_value, p.confidence "
@@ -410,12 +418,14 @@ def nba_projections(
             )
         )
 
-    return NbaProjectionsResponse(
+    result = NbaProjectionsResponse(
         projections=projections,
         game_date=game_date,
         games_count=len(schedule),
         total_players=len(projections),
     )
+    nba_cache.set(cache_key, result)
+    return result
 
 
 @router.get("/players", response_model=NbaPlayersResponse)
@@ -503,6 +513,15 @@ def nba_value_bets(
 
     game_date = _resolve_game_date(game_date)
 
+    cache_key = make_cache_key(
+        "nba-value-bets", game_date=game_date, market=market,
+        min_edge=min_edge, sportsbook=sportsbook, limit=limit,
+        best_line_only=best_line_only, include_why=include_why,
+    )
+    cached = nba_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     df = _query_value_bets(game_date, market, min_edge, sportsbook, limit)
     df = _apply_best_line_filter(df, best_line_only)
     bets = _build_bet_items(df)
@@ -511,12 +530,14 @@ def nba_value_bets(
         bets = _enrich_with_why(game_date, bets)
 
     applied_filters = _build_filters(market, min_edge, best_line_only, sportsbook)
-    return NbaValueBetsResponse(
+    result = NbaValueBetsResponse(
         bets=bets,
         total=len(bets),
         game_date=game_date,
         filters=applied_filters,
     )
+    nba_cache.set(cache_key, result)
+    return result
 
 
 def _query_value_bets(
@@ -619,6 +640,11 @@ def nba_performance(
     season: int | None = Query(None, description="Filter by season"),
 ) -> NbaPerformanceResponse:
     """Return NBA betting performance with daily breakdown."""
+    cache_key = make_cache_key("nba-performance", season=season)
+    cached = nba_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     where = "WHERE 1=1"
     params: list[Any] = []
 
@@ -660,7 +686,7 @@ def nba_performance(
     overall_roi = (total_profit / units_risked * 100) if units_risked > 0 else 0.0
     win_rate = (total_wins / (total_wins + total_losses) * 100) if (total_wins + total_losses) > 0 else 0.0
 
-    return NbaPerformanceResponse(
+    result = NbaPerformanceResponse(
         total_bets=total_bets,
         total_wins=total_wins,
         total_losses=total_losses,
@@ -669,6 +695,8 @@ def nba_performance(
         win_rate=round(win_rate, 1),
         days=days,
     )
+    nba_cache.set(cache_key, result)
+    return result
 
 
 @router.get("/outcomes", response_model=list[NbaBetOutcome])

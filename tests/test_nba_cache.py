@@ -116,3 +116,46 @@ class TestNbaPlayersCache:
         r2 = client.get("/api/nba/players?season=2025")
         assert r2.status_code == 200
         assert r2.json()["total"] == 1  # cached!
+
+
+class TestNbaValueBetsCache:
+    def setup_method(self):
+        nba_cache.invalidate_all()
+
+    def test_value_bets_cache_keyed_by_params(self):
+        """Different filters should produce different cache keys."""
+        k1 = make_cache_key("nba-value-bets", game_date="2026-03-10", market="pts")
+        k2 = make_cache_key("nba-value-bets", game_date="2026-03-10", market="reb")
+        assert k1 != k2
+
+    def test_value_bets_cache_hit(self, monkeypatch, tmp_path):
+        """Second call to /value-bets should use cache."""
+        _setup_db(monkeypatch, tmp_path)
+
+        from utils.db import execute
+
+        execute(
+            "CREATE TABLE IF NOT EXISTS nba_materialized_value_view "
+            "(game_date TEXT, player_id INT, player_name TEXT, team TEXT, event_id TEXT, "
+            "market TEXT, sportsbook TEXT, line REAL, over_price INT, under_price INT, "
+            "mu REAL, sigma REAL, p_win REAL, edge_percentage REAL, expected_roi REAL, "
+            "kelly_fraction REAL, confidence REAL, generated_at TEXT, side TEXT)"
+        )
+        execute(
+            "INSERT INTO nba_materialized_value_view VALUES "
+            "('2026-03-10', 1, 'Test Player', 'LAL', 'E1', 'pts', 'DraftKings', "
+            "20.5, -110, 110, 22.0, 3.0, 0.65, 0.12, 0.15, 0.05, 0.8, "
+            "'2026-03-10T08:00:00', 'over')"
+        )
+
+        client = _make_client()
+
+        r1 = client.get("/api/nba/value-bets?game_date=2026-03-10&market=pts")
+        assert r1.status_code == 200
+        assert r1.json()["total"] == 1
+
+        execute("DELETE FROM nba_materialized_value_view")
+
+        r2 = client.get("/api/nba/value-bets?game_date=2026-03-10&market=pts")
+        assert r2.status_code == 200
+        assert r2.json()["total"] == 1  # cached!
