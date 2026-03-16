@@ -80,3 +80,6 @@ def make_cache_key(endpoint: str, **kwargs: Any) -> str:
 
 # Global cache instance for hot endpoints (5-minute default TTL, 500 entry max)
 value_bets_cache = EndpointCache(default_ttl=300, max_size=500)
+
+# NBA-specific cache (10-minute TTL, 200 entry max — NBA data changes less frequently)
+nba_cache = EndpointCache(default_ttl=600, max_size=200)
