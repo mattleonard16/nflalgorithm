@@ -427,6 +427,13 @@ def nba_players(
     limit: int = Query(100, ge=1, le=500),
 ) -> NbaPlayersResponse:
     """Return players with season averages."""
+    cache_key = make_cache_key(
+        "nba-players", season=season, sort=sort, team=team, search=search, limit=limit
+    )
+    cached = nba_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     where_clauses = ["season = ?"]
     params: list[Any] = [season]
 
@@ -472,7 +479,9 @@ def nba_players(
         for _, row in df.iterrows()
     ]
 
-    return NbaPlayersResponse(players=players, season=season, total=len(players))
+    result = NbaPlayersResponse(players=players, season=season, total=len(players))
+    nba_cache.set(cache_key, result)
+    return result
 
 
 @router.get("/value-bets", response_model=NbaValueBetsResponse)

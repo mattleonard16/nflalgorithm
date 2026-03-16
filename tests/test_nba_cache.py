@@ -75,3 +75,44 @@ class TestNbaMetaCache:
         r2 = client.get("/api/nba/meta")
         assert r2.status_code == 200
         assert r2.json()["total_players"] == 2  # cached!
+
+
+class TestNbaPlayersCache:
+    def setup_method(self):
+        nba_cache.invalidate_all()
+
+    def test_players_cache_keyed_by_params(self):
+        """Different query params should produce different cache keys."""
+        k1 = make_cache_key("nba-players", season=2025, sort="pts")
+        k2 = make_cache_key("nba-players", season=2025, sort="reb")
+        k3 = make_cache_key("nba-players", season=2025, sort="pts", team="LAL")
+        assert k1 != k2
+        assert k1 != k3
+
+    def test_players_cache_hit(self, monkeypatch, tmp_path):
+        """Second call to /players with same params should use cache."""
+        _setup_db(monkeypatch, tmp_path)
+
+        from utils.db import execute
+
+        execute(
+            "CREATE TABLE IF NOT EXISTS nba_player_game_logs "
+            "(season INT, player_id INT, player_name TEXT, team_abbreviation TEXT, "
+            "pts REAL, reb REAL, ast REAL, fg3m REAL, min REAL, game_date TEXT, game_id TEXT)"
+        )
+        execute(
+            "INSERT INTO nba_player_game_logs VALUES "
+            "(2025, 1, 'Test Player', 'LAL', 25.0, 5.0, 7.0, 3.0, 35.0, '2026-03-10', 'G1')"
+        )
+
+        client = _make_client()
+
+        r1 = client.get("/api/nba/players?season=2025")
+        assert r1.status_code == 200
+        assert r1.json()["total"] == 1
+
+        execute("DELETE FROM nba_player_game_logs")
+
+        r2 = client.get("/api/nba/players?season=2025")
+        assert r2.status_code == 200
+        assert r2.json()["total"] == 1  # cached!
