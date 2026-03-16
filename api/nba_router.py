@@ -857,6 +857,13 @@ def nba_risk_summary(
     )
 
 
+@router.post("/cache/invalidate")
+def nba_cache_invalidate() -> dict:
+    """Clear all NBA endpoint caches."""
+    nba_cache.invalidate_all()
+    return {"cleared": True, "message": "NBA cache invalidated"}
+
+
 @router.get("/health")
 def nba_health() -> dict:
     """Return NBA data freshness info."""
@@ -878,5 +885,10 @@ def nba_health() -> dict:
         "projections": {
             "latest_date": proj_latest[0] if proj_latest else None,
             "total_rows": proj_latest[1] if proj_latest else 0,
+        },
+        "cache": {
+            "entries": nba_cache.size(),
+            "max_size": nba_cache._max_size,
+            "ttl_seconds": nba_cache._default_ttl,
         },
     }

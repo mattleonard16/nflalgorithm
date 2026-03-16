@@ -159,3 +159,65 @@ class TestNbaValueBetsCache:
         r2 = client.get("/api/nba/value-bets?game_date=2026-03-10&market=pts")
         assert r2.status_code == 200
         assert r2.json()["total"] == 1  # cached!
+
+
+class TestNbaCacheInvalidation:
+    def setup_method(self):
+        nba_cache.invalidate_all()
+
+    def test_invalidate_endpoint(self, monkeypatch, tmp_path):
+        """POST /api/nba/cache/invalidate should clear NBA cache."""
+        _setup_db(monkeypatch, tmp_path)
+
+        from utils.db import execute
+
+        execute(
+            "CREATE TABLE IF NOT EXISTS nba_player_game_logs "
+            "(season INT, game_date TEXT, player_id INT, game_id TEXT)"
+        )
+        execute(
+            "INSERT INTO nba_player_game_logs VALUES (2025, '2026-03-10', 1, 'G1')"
+        )
+
+        client = _make_client()
+
+        # Populate cache
+        client.get("/api/nba/meta")
+        assert nba_cache.size() > 0
+
+        # Invalidate
+        r = client.post("/api/nba/cache/invalidate")
+        assert r.status_code == 200
+        assert r.json()["cleared"] is True
+        assert nba_cache.size() == 0
+
+
+class TestNbaHealthCacheStats:
+    def setup_method(self):
+        nba_cache.invalidate_all()
+
+    def test_health_includes_cache_stats(self, monkeypatch, tmp_path):
+        """GET /api/nba/health should include cache info."""
+        _setup_db(monkeypatch, tmp_path)
+
+        from utils.db import execute
+
+        execute(
+            "CREATE TABLE IF NOT EXISTS nba_player_game_logs "
+            "(season INT, game_date TEXT, player_id INT, game_id TEXT)"
+        )
+        execute(
+            "CREATE TABLE IF NOT EXISTS nba_projections "
+            "(game_date TEXT, player_id INT, player_name TEXT, team TEXT, "
+            "market TEXT, projected_value REAL, confidence REAL)"
+        )
+
+        client = _make_client()
+
+        r = client.get("/api/nba/health")
+        assert r.status_code == 200
+        body = r.json()
+        assert "cache" in body
+        assert body["cache"]["entries"] == 0
+        assert body["cache"]["max_size"] == 200
+        assert body["cache"]["ttl_seconds"] == 600
