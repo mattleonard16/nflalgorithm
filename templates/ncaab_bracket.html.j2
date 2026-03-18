@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>March Madness {{ season }} Bracket Predictor</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #1a1a2e; --surface: #16213e; --card: #0f3460;
+    --accent: #e94560; --text: #eaeaea; --muted: #9ca3af;
+    --lock: #22c55e; --likely: #eab308; --tossup: #6b7280;
+    --upset-clr: #f97316; --border: #1e3a5f;
+  }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; line-height: 1.4; }
+  a { color: inherit; text-decoration: none; }
+
+  /* HEADER */
+  .site-header { background: linear-gradient(135deg, #0f3460 0%, #16213e 50%, #1a1a2e 100%); border-bottom: 2px solid var(--accent); padding: 20px 24px; text-align: center; }
+  .site-header h1 { font-size: 1.8rem; font-weight: 800; letter-spacing: 1px; color: #fff; }
+  .site-header .subtitle { color: var(--muted); font-size: 0.8rem; margin-top: 4px; }
+  .champion-banner { display: inline-flex; align-items: center; gap: 10px; background: linear-gradient(90deg, #22c55e22, #22c55e44, #22c55e22); border: 1px solid var(--lock); border-radius: 8px; padding: 10px 20px; margin-top: 14px; }
+  .champion-banner .label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 2px; color: var(--lock); }
+  .champion-banner .name { font-size: 1.4rem; font-weight: 800; color: #fff; }
+  .champion-banner .seed-badge { background: var(--accent); color: #fff; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; flex-shrink: 0; }
+
+  /* LAYOUT */
+  .main { max-width: 1400px; margin: 0 auto; padding: 20px 16px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-top: 16px; }
+  @media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+  /* SECTION TITLES */
+  .section-title { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 2px; color: var(--muted); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .region-header { font-size: 1rem; font-weight: 700; color: var(--accent); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+
+  /* REGION CARD */
+  .region-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .round-block { margin-bottom: 10px; }
+  .round-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 6px; }
+
+  /* GAME ROW */
+  .game { background: var(--card); border-radius: 6px; padding: 7px 10px; margin-bottom: 5px; display: flex; align-items: center; gap: 8px; border-left: 3px solid transparent; }
+  .game.lock    { border-left-color: var(--lock); }
+  .game.likely  { border-left-color: var(--likely); }
+  .game.toss-up { border-left-color: var(--tossup); }
+  .game.upset_pick { border-left-color: var(--upset-clr); }
+  .game-teams { flex: 1; min-width: 0; }
+  .team-row { display: flex; align-items: center; gap: 5px; }
+  .team-row.winner { font-weight: 700; color: #fff; }
+  .team-row.loser  { color: var(--muted); font-size: 0.85em; text-decoration: line-through; }
+  .seed { background: var(--border); border-radius: 3px; padding: 1px 5px; font-size: 0.7rem; font-weight: 700; flex-shrink: 0; min-width: 22px; text-align: center; }
+  .team-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .game-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex-shrink: 0; }
+  .prob { font-size: 0.8rem; font-weight: 700; color: #fff; }
+  .badge { font-size: 0.55rem; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 5px; border-radius: 3px; font-weight: 700; }
+  .badge-lock     { background: var(--lock);     color: #000; }
+  .badge-likely   { background: var(--likely);   color: #000; }
+  .badge-toss-up  { background: var(--tossup);   color: #fff; }
+  .badge-upset_pick { background: var(--upset-clr); color: #fff; }
+  .upset-tag { background: #7c1d1d; color: #fca5a5; font-size: 0.55rem; padding: 1px 4px; border-radius: 2px; font-weight: 700; letter-spacing: 0.5px; }
+
+  /* FINAL FOUR */
+  .final-four-section { background: var(--surface); border: 1px solid var(--accent); border-radius: 10px; padding: 16px; margin-top: 16px; }
+  .ff-grid { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center; }
+  @media (max-width: 600px) { .ff-grid { grid-template-columns: 1fr; } }
+  .ff-vs { text-align: center; color: var(--accent); font-weight: 800; font-size: 1.2rem; }
+  .ff-game { background: var(--card); border-radius: 8px; padding: 10px 14px; }
+  .ff-game .round-label { margin-bottom: 8px; }
+  .championship-box { background: linear-gradient(135deg, #0f3460, #1a1a2e); border: 2px solid var(--accent); border-radius: 8px; padding: 12px 16px; margin-top: 12px; }
+  .championship-box .round-label { color: var(--accent); margin-bottom: 8px; }
+
+  /* SIDEBAR PANELS */
+  .sidebar { display: flex; flex-direction: column; gap: 14px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+
+  /* TRAPEZOID */
+  .trap-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid var(--border); gap: 8px; }
+  .trap-row:last-child { border-bottom: none; }
+  .trap-score { font-size: 1rem; letter-spacing: -2px; flex-shrink: 0; color: var(--accent); }
+  .trap-teams { color: var(--text); font-size: 0.78rem; flex: 1; }
+
+  /* UPSETS */
+  .upset-item { background: var(--card); border-left: 3px solid var(--upset-clr); border-radius: 5px; padding: 7px 10px; margin-bottom: 6px; }
+  .upset-matchup { font-size: 0.75rem; color: var(--muted); }
+  .upset-winner  { font-weight: 700; color: #fff; font-size: 0.85rem; }
+  .upset-prob    { color: var(--upset-clr); font-size: 0.75rem; font-weight: 700; }
+
+  /* FOOTER */
+  .footer { text-align: center; color: var(--muted); font-size: 0.7rem; padding: 20px; border-top: 1px solid var(--border); margin-top: 24px; }
+
+  /* PRINT */
+  @media print {
+    body { background: #fff; color: #000; font-size: 10px; }
+    .site-header { background: #fff; border-bottom: 2px solid #000; }
+    .site-header h1 { color: #000; }
+    .champion-banner { border-color: #000; background: #f0f0f0; }
+    .champion-banner .name, .champion-banner .label { color: #000; }
+    .champion-banner .seed-badge { background: #333; }
+    .region-card, .panel, .ff-game, .championship-box, .final-four-section { background: #fff; border-color: #ccc; }
+    .game { background: #f5f5f5; border-left-color: #999 !important; }
+    .team-row.winner { color: #000; }
+    .team-row.loser  { color: #666; }
+    .upset-item { background: #fef3f2; border-left-color: #999; }
+    .badge-lock, .badge-likely { color: #000; background: #ddd; }
+    .badge-toss-up, .badge-upset_pick { background: #eee; color: #333; }
+    .trap-score { color: #333; }
+    .region-header { color: #333; }
+    .grid-2 { grid-template-columns: 1fr 1fr; }
+    .grid-3 { grid-template-columns: 2fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <h1>March Madness {{ season }} Bracket Predictor</h1>
+  <div class="subtitle">Generated {{ generated_at }} | KenPom Metrics + Trapezoid of Excellence | 40% AdjEM, 20% AdjDE, 15% Pyth, 15% SOS, 10% Anti-Luck</div>
+  {% if champion %}
+  <div style="margin-top:12px;">
+    <div class="champion-banner">
+      <div>
+        <div class="label">Predicted Champion</div>
+        <div class="name">{{ champion }}</div>
+      </div>
+      <div class="seed-badge">{{ champion_seed }}</div>
+    </div>
+  </div>
+  {% endif %}
+</header>
+
+<main class="main">
+
+  <!-- REGIONAL BRACKETS -->
+  <div class="grid-2">
+    {% for region_name in ['East', 'West', 'South', 'Midwest'] %}
+    {% if region_name in regions %}
+    <div class="region-card">
+      <div class="region-header">{{ region_name }}</div>
+      {% for round_num in [1, 2, 3, 4] %}
+        {% set round_games = regions[region_name] | selectattr('round', 'equalto', round_num) | list %}
+        {% if round_games %}
+        <div class="round-block">
+          <div class="round-label">
+            {% if round_num == 1 %}First Round{% elif round_num == 2 %}Second Round{% elif round_num == 3 %}Sweet 16{% elif round_num == 4 %}Elite 8{% endif %}
+          </div>
+          {% for g in round_games %}
+          {% set tier_class = g.confidence_tier | replace('_', '-') %}
+          <div class="game {{ tier_class }}">
+            <div class="game-teams">
+              <div class="team-row winner">
+                <span class="seed">{{ g.winner_seed }}</span>
+                <span class="team-name">{{ g.predicted_winner }}</span>
+                {% if g.is_upset %}<span class="upset-tag">UPSET</span>{% endif %}
+              </div>
+              <div class="team-row loser">
+                <span class="seed">{{ g.loser_seed }}</span>
+                <span class="team-name">{{ g.predicted_loser }}</span>
+              </div>
+            </div>
+            <div class="game-meta">
+              <span class="prob">{{ "%.1f"|format(g.p_a_wins * 100 if g.predicted_winner == g.team_a else (1 - g.p_a_wins) * 100) }}%</span>
+              <span class="badge badge-{{ g.confidence_tier | replace('_', '-') }}">{{ g.confidence_tier | replace('_', ' ') }}</span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+
+  <!-- FINAL FOUR + SIDEBAR -->
+  <div class="grid-3">
+
+    <div>
+      <!-- FINAL FOUR -->
+      <div class="final-four-section">
+        <div class="section-title">Final Four &amp; Championship</div>
+        {% if final_four %}
+        <div class="ff-grid">
+          {% for g in final_four %}
+          <div class="ff-game">
+            <div class="round-label">Semifinal {{ loop.index }}</div>
+            {% set tier_class = g.confidence_tier | replace('_', '-') %}
+            <div class="game {{ tier_class }}" style="margin-bottom:0;">
+              <div class="game-teams">
+                <div class="team-row winner">
+                  <span class="seed">{{ g.winner_seed }}</span>
+                  <span class="team-name">{{ g.predicted_winner }}</span>
+                  {% if g.is_upset %}<span class="upset-tag">UPSET</span>{% endif %}
+                </div>
+                <div class="team-row loser">
+                  <span class="seed">{{ g.loser_seed }}</span>
+                  <span class="team-name">{{ g.predicted_loser }}</span>
+                </div>
+              </div>
+              <div class="game-meta">
+                <span class="prob">{{ "%.1f"|format(g.p_a_wins * 100 if g.predicted_winner == g.team_a else (1 - g.p_a_wins) * 100) }}%</span>
+                <span class="badge badge-{{ g.confidence_tier | replace('_', '-') }}">{{ g.confidence_tier | replace('_', ' ') }}</span>
+              </div>
+            </div>
+          </div>
+          {% if loop.first %}<div class="ff-vs">VS</div>{% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if championship %}
+        <div class="championship-box" style="margin-top:14px;">
+          <div class="round-label">CHAMPIONSHIP</div>
+          {% set g = championship %}
+          {% set tier_class = g.confidence_tier | replace('_', '-') %}
+          <div class="game {{ tier_class }}" style="margin-bottom:0;">
+            <div class="game-teams">
+              <div class="team-row winner">
+                <span class="seed">{{ g.winner_seed }}</span>
+                <span class="team-name">{{ g.predicted_winner }}</span>
+                {% if g.is_upset %}<span class="upset-tag">UPSET</span>{% endif %}
+              </div>
+              <div class="team-row loser">
+                <span class="seed">{{ g.loser_seed }}</span>
+                <span class="team-name">{{ g.predicted_loser }}</span>
+              </div>
+            </div>
+            <div class="game-meta">
+              <span class="prob">{{ "%.1f"|format(g.p_a_wins * 100 if g.predicted_winner == g.team_a else (1 - g.p_a_wins) * 100) }}%</span>
+              <span class="badge badge-{{ g.confidence_tier | replace('_', '-') }}">{{ g.confidence_tier | replace('_', ' ') }}</span>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- UPSETS -->
+      {% if upsets %}
+      <div class="panel" style="margin-top:14px;">
+        <div class="section-title">Upset Picks ({{ upsets | length }})</div>
+        {% for g in upsets %}
+        <div class="upset-item">
+          <div class="upset-matchup">
+            R{{ g.round }} &bull; {{ g.region }} &bull;
+            #{{ g.seed_a }} vs #{{ g.seed_b }}
+          </div>
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:3px;">
+            <div class="upset-winner">{{ g.predicted_winner }} <span style="font-size:0.7rem; color:var(--muted);">(#{{ g.winner_seed }})</span></div>
+            <div class="upset-prob">{{ "%.1f"|format(g.p_a_wins * 100 if g.predicted_winner == g.team_a else (1 - g.p_a_wins) * 100) }}%</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+      <!-- TRAPEZOID OF EXCELLENCE -->
+      {% if trapezoid_leaders %}
+      <div class="panel">
+        <div class="section-title">Trapezoid of Excellence</div>
+        {% for score in [4, 3, 2, 1, 0] %}
+        {% if score in trapezoid_leaders and trapezoid_leaders[score] %}
+        <div class="trap-row">
+          <span class="trap-score">
+            {% for i in range(score) %}&#9608;{% endfor %}{% for i in range(4 - score) %}&#9617;{% endfor %}
+          </span>
+          <span class="trap-teams">{{ trapezoid_leaders[score] | join(', ') }}</span>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- CONFIDENCE LEGEND -->
+      <div class="panel">
+        <div class="section-title">Confidence Key</div>
+        <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="badge badge-lock">lock</span>
+            <span style="color:var(--muted); font-size:0.75rem;">80 %+ probability</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="badge badge-likely">likely</span>
+            <span style="color:var(--muted); font-size:0.75rem;">65–80 % probability</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="badge badge-toss-up">toss-up</span>
+            <span style="color:var(--muted); font-size:0.75rem;">50–65 % probability</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="badge badge-upset_pick">upset pick</span>
+            <span style="color:var(--muted); font-size:0.75rem;">Lower seed favored</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- QUICK STATS -->
+      <div class="panel">
+        <div class="section-title">Bracket Summary</div>
+        <div style="display:flex; flex-direction:column; gap:5px; margin-top:4px;">
+          <div style="display:flex; justify-content:space-between;">
+            <span style="color:var(--muted);">Total games</span>
+            <span style="font-weight:700;">{{ predictions | length }}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between;">
+            <span style="color:var(--muted);">Upsets picked</span>
+            <span style="font-weight:700; color:var(--upset-clr);">{{ upsets | length }}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between;">
+            <span style="color:var(--muted);">Locks</span>
+            <span style="font-weight:700; color:var(--lock);">{{ predictions | selectattr('confidence_tier', 'equalto', 'lock') | list | length }}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between;">
+            <span style="color:var(--muted);">Toss-ups</span>
+            <span style="font-weight:700; color:var(--tossup);">{{ predictions | selectattr('confidence_tier', 'equalto', 'toss-up') | list | length }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /grid-3 -->
+</main>
+
+<footer class="footer">
+  March Madness {{ season }} &nbsp;&bull;&nbsp; Model predictions only &mdash; not financial advice &nbsp;&bull;&nbsp; {{ generated_at }}
+</footer>
+
+</body>
+</html>

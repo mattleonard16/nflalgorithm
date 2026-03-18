@@ -705,6 +705,78 @@ class MigrationManager:
                 created_at TEXT NOT NULL
             )
             """,
+            # ============================================
+            # NCAAB (March Madness) Tables
+            # ============================================
+            """
+            CREATE TABLE IF NOT EXISTS ncaab_team_ratings (
+                team_name       TEXT NOT NULL,
+                season          INTEGER NOT NULL,
+                seed            INTEGER,
+                region          TEXT,
+                conf            TEXT,
+                wins            INTEGER DEFAULT 0,
+                losses          INTEGER DEFAULT 0,
+                adj_em          REAL NOT NULL,
+                adj_oe          REAL NOT NULL,
+                adj_oe_rank     INTEGER,
+                adj_de          REAL NOT NULL,
+                adj_de_rank     INTEGER,
+                adj_t           REAL,
+                luck            REAL,
+                sos_adj_em      REAL,
+                sos_oe          REAL,
+                sos_de          REAL,
+                ncsos_adj_em    REAL,
+                pyth_win        REAL,
+                trapezoid_score INTEGER DEFAULT 0,
+                composite_rating REAL,
+                kenpom_rank     INTEGER,
+                scraped_at      TEXT NOT NULL,
+                PRIMARY KEY (team_name, season)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS ncaab_bracket (
+                game_id         TEXT NOT NULL,
+                region          TEXT NOT NULL,
+                round           INTEGER NOT NULL,
+                slot            INTEGER NOT NULL,
+                team_a          TEXT,
+                seed_a          INTEGER,
+                team_b          TEXT,
+                seed_b          INTEGER,
+                prev_game_a     TEXT,
+                prev_game_b     TEXT,
+                feeds_game_id   TEXT,
+                season          INTEGER NOT NULL,
+                PRIMARY KEY (game_id, season)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS ncaab_bracket_predictions (
+                game_id             TEXT NOT NULL,
+                season              INTEGER NOT NULL,
+                round               INTEGER NOT NULL,
+                region              TEXT NOT NULL,
+                team_a              TEXT NOT NULL,
+                seed_a              INTEGER NOT NULL,
+                team_b              TEXT NOT NULL,
+                seed_b              INTEGER NOT NULL,
+                rating_a            REAL NOT NULL,
+                rating_b            REAL NOT NULL,
+                p_a_wins            REAL NOT NULL,
+                predicted_winner    TEXT NOT NULL,
+                predicted_loser     TEXT NOT NULL,
+                winner_seed         INTEGER NOT NULL,
+                loser_seed          INTEGER NOT NULL,
+                is_upset            INTEGER NOT NULL DEFAULT 0,
+                confidence_tier     TEXT NOT NULL,
+                margin              REAL,
+                generated_at        TEXT NOT NULL,
+                PRIMARY KEY (game_id, season)
+            )
+            """,
         )
 
     def _ensure_columns(self, cursor) -> None:
@@ -983,6 +1055,16 @@ class MigrationManager:
         # Phase 6: Historical backtest index
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_nba_backtest_runs_dates ON nba_backtest_runs(start_date, end_date)"
+        )
+        # NCAAB indexes
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ncaab_ratings_season ON ncaab_team_ratings(season, kenpom_rank)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ncaab_bracket_round ON ncaab_bracket(season, round)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ncaab_predictions_round ON ncaab_bracket_predictions(season, round)"
         )
 
 

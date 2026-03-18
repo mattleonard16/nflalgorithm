@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest
+.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest ingest-ncaab ncaab-bracket ncaab-predict ncaab-full
 
 # Environment detection - defaults to UV if available
 ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && echo "uv" || echo "venv")
@@ -438,6 +438,25 @@ nba-drift:
 nba-backtest:
 	@echo "Running NBA walk-forward backtest..."
 	$(DB_ENV) $(PYTHON) scripts/run_nba_backtest.py --start-date $(NBA_DATE) --end-date $(GAME_DATE)
+
+# ============================================================
+# NCAAB (March Madness) Targets
+# ============================================================
+
+ingest-ncaab:
+	@echo "Ingesting KenPom ratings from CSV..."
+	$(DB_ENV) $(PYTHON) scripts/ingest_ncaab_data.py --file data/kenpom_2026.csv --season 2026
+
+ncaab-bracket:
+	@echo "Loading 2026 NCAA tournament bracket..."
+	$(DB_ENV) $(PYTHON) scripts/define_ncaab_bracket.py --season 2026
+
+ncaab-predict:
+	@echo "Simulating 2026 NCAA tournament bracket..."
+	$(DB_ENV) $(PYTHON) models/ncaab/bracket_predictor.py --season 2026 --cli --html
+	@if command -v open >/dev/null 2>&1; then open reports/ncaab_bracket_2026.html || true; fi
+
+ncaab-full: ingest-ncaab ncaab-bracket ncaab-predict
 
 # Demo mode: install, migrate schema, seed synthetic data
 demo:
