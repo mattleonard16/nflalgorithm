@@ -19,7 +19,7 @@ from utils.ncaab_ratings import (
 )
 
 from schema_migrations import MigrationManager
-from utils.db import executemany, read_dataframe
+from utils.db import execute, executemany, read_dataframe
 
 
 class TestLog5:
@@ -233,3 +233,92 @@ class TestSimulation:
         for p1, p2 in zip(preds1, preds2):
             assert p1["predicted_winner"] == p2["predicted_winner"]
             assert abs(p1["p_a_wins"] - p2["p_a_wins"]) < 1e-10
+
+
+class TestModifierIntegration:
+    """Integration tests: modifiers change bracket outcomes."""
+
+    def test_enhanced_rating_used_when_present(self, db):
+        """When enhanced_rating is populated, predictor uses it over composite_rating."""
+        _seed_test_ratings()
+        # Set an enhanced_rating that differs from composite — Siena artificially boosted
+        execute(
+            "UPDATE ncaab_team_ratings SET enhanced_rating = 0.35 WHERE team_name = 'Duke' AND season = 2026"
+        )
+        execute(
+            "UPDATE ncaab_team_ratings SET enhanced_rating = 0.80 WHERE team_name = 'Siena' AND season = 2026"
+        )
+        _seed_mini_bracket()
+
+        from models.ncaab.bracket_predictor import load_bracket, load_ratings, simulate_bracket
+        ratings = load_ratings(2026)
+        bracket = load_bracket(2026)
+        preds = simulate_bracket(ratings, bracket)
+
+        # Siena should now win with the artificially boosted enhanced_rating
+        duke_game = [p for p in preds if p["game_id"] == "E_R1_1"][0]
+        assert duke_game["predicted_winner"] == "Siena"
+        assert duke_game["is_upset"] == 1
+
+    def test_fallback_to_composite_when_no_enhanced(self, db):
+        """When enhanced_rating is NULL, falls back to composite_rating."""
+        _seed_test_ratings()
+        _seed_mini_bracket()
+
+        from models.ncaab.bracket_predictor import load_bracket, load_ratings, simulate_bracket
+        ratings = load_ratings(2026)
+        bracket = load_bracket(2026)
+        preds = simulate_bracket(ratings, bracket)
+
+        # Should work same as before — Duke beats Siena
+        duke_game = [p for p in preds if p["game_id"] == "E_R1_1"][0]
+        assert duke_game["predicted_winner"] == "Duke"
+
+    def test_predictions_still_deterministic(self, db):
+        """Enhanced predictions are still deterministic."""
+        _seed_test_ratings()
+        execute(
+            "UPDATE ncaab_team_ratings SET enhanced_rating = composite_rating * 1.02, "
+            "bt_factor = 1.02, coaching_factor = 1.0, experience_factor = 1.0, momentum_factor = 1.0 "
+            "WHERE season = 2026"
+        )
+        _seed_mini_bracket()
+
+        from models.ncaab.bracket_predictor import load_bracket, load_ratings, simulate_bracket
+        ratings = load_ratings(2026)
+        bracket = load_bracket(2026)
+        p1 = simulate_bracket(ratings, bracket)
+        p2 = simulate_bracket(ratings, bracket)
+
+        for a, b in zip(p1, p2):
+            assert a["predicted_winner"] == b["predicted_winner"]
+
+    def test_transparency_fields_present(self, db):
+        """Predictions include modifier transparency fields."""
+        _seed_test_ratings()
+        _seed_mini_bracket()
+
+        from models.ncaab.bracket_predictor import load_bracket, load_ratings, simulate_bracket
+        ratings = load_ratings(2026)
+        bracket = load_bracket(2026)
+        preds = simulate_bracket(ratings, bracket)
+
+        for p in preds:
+            assert "p_raw_log5" in p
+            assert "seed_historical_p" in p
+            assert "tempo_factor" in p
+            assert "final_p_a" in p
+            assert "enhanced_rating_a" in p
+            assert "enhanced_rating_b" in p
+            assert "modifier_json_a" in p
+            assert "modifier_json_b" in p
+
+
+class TestLuckRegressionWeight:
+    """Signal 7: verify increased anti-luck weight impact."""
+
+    def test_lucky_team_penalized(self):
+        """Teams with high luck scores get lower composite ratings."""
+        lucky = composite_rating(20.0, 118.0, 95.0, 0.85, 8.0, 0.15, 4, 2)
+        unlucky = composite_rating(20.0, 118.0, 95.0, 0.85, 8.0, -0.05, 4, 2)
+        assert unlucky > lucky
