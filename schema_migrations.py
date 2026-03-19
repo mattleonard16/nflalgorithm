@@ -884,6 +884,47 @@ class MigrationManager:
             if not column_exists("player_stats_enhanced", "passing_attempts", conn=cursor.connection):
                 cursor.execute("ALTER TABLE player_stats_enhanced ADD COLUMN passing_attempts REAL NOT NULL DEFAULT 0")
 
+        # NCAAB modifier columns (Smart Modifiers system)
+        if table_exists("ncaab_team_ratings", conn=cursor.connection):
+            ncaab_modifier_cols = [
+                ("barttorvik_rank", "INTEGER"),
+                ("bt_adj_em", "REAL"),
+                ("coaching_win_rate", "REAL"),
+                ("coaching_tourney_wins", "INTEGER"),
+                ("returning_minutes_pct", "REAL"),
+                ("avg_years_experience", "REAL"),
+                ("seniors_count", "INTEGER"),
+                ("last_10_wins", "INTEGER"),
+                ("last_10_losses", "INTEGER"),
+                ("conf_tourney_result", "TEXT"),
+                ("winning_streak", "INTEGER"),
+                ("bt_factor", "REAL"),
+                ("coaching_factor", "REAL"),
+                ("experience_factor", "REAL"),
+                ("momentum_factor", "REAL"),
+                ("enhanced_rating", "REAL"),
+            ]
+            for col_name, col_type in ncaab_modifier_cols:
+                if not column_exists("ncaab_team_ratings", col_name, conn=cursor.connection):
+                    cursor.execute(f"ALTER TABLE ncaab_team_ratings ADD COLUMN {col_name} {col_type}")
+
+        # NCAAB bracket prediction transparency columns
+        if table_exists("ncaab_bracket_predictions", conn=cursor.connection):
+            ncaab_pred_cols = [
+                ("enhanced_rating_a", "REAL"),
+                ("enhanced_rating_b", "REAL"),
+                ("p_raw_log5", "REAL"),
+                ("seed_historical_p", "REAL"),
+                ("vegas_implied_p", "REAL"),
+                ("tempo_factor", "REAL"),
+                ("final_p_a", "REAL"),
+                ("modifier_json_a", "TEXT"),
+                ("modifier_json_b", "TEXT"),
+            ]
+            for col_name, col_type in ncaab_pred_cols:
+                if not column_exists("ncaab_bracket_predictions", col_name, conn=cursor.connection):
+                    cursor.execute(f"ALTER TABLE ncaab_bracket_predictions ADD COLUMN {col_name} {col_type}")
+
     def _migrate_nba_odds_pk(self, cursor: Any) -> None:
         """Recreate nba_odds with as_of in PK if it has the old 4-column PK."""
         if not table_exists("nba_odds", conn=cursor.connection):
