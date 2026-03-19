@@ -19,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from utils.db import executemany, read_dataframe
 from utils.ncaab_ratings import confidence_tier, log5
+import json
+from utils.ncaab_modifiers import blend_with_seed_prior, blend_with_vegas, tempo_factor as compute_tempo_factor, seed_matchup_prior
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,10 +60,50 @@ def load_bracket(season: int) -> list[dict]:
     return [row.to_dict() for _, row in df.iterrows()]
 
 
+def _load_vegas_lines(filepath: str) -> dict[str, dict]:
+    """Load Vegas lines CSV. Returns empty dict if file missing/empty."""
+    import csv
+    path = Path(filepath)
+    if not path.exists():
+        return {}
+    lines = {}
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            game_id = row.get("game_id", "").strip()
+            if not game_id:
+                continue
+            ml_a = row.get("moneyline_a")
+            ml_b = row.get("moneyline_b")
+            implied_p_a = None
+            if ml_a and ml_b:
+                from utils.ncaab_modifiers import vegas_implied_prob
+                p_a = vegas_implied_prob(int(ml_a))
+                p_b = vegas_implied_prob(int(ml_b))
+                total = p_a + p_b
+                implied_p_a = p_a / total if total > 0 else None
+            lines[game_id] = {"implied_p_a": implied_p_a}
+    return lines
+
+
+def _team_modifier_summary(team_name: str, ratings: dict[str, dict]) -> dict:
+    """Build modifier breakdown dict for a team (for transparency/audit)."""
+    r = ratings.get(team_name, {})
+    return {
+        "bt_factor": r.get("bt_factor"),
+        "coaching_factor": r.get("coaching_factor"),
+        "experience_factor": r.get("experience_factor"),
+        "momentum_factor": r.get("momentum_factor"),
+        "composite_rating": r.get("composite_rating"),
+        "enhanced_rating": r.get("enhanced_rating"),
+    }
+
+
 def _predict_game(
     game: dict,
     ratings: dict[str, dict],
     winner_by_game: dict[str, dict],
+    vegas_lines: dict[str, dict] | None = None,
 ) -> dict:
     """Predict a single game, resolving teams from prior rounds if needed."""
     team_a = game["team_a"]
@@ -83,10 +125,34 @@ def _predict_game(
     seed_a = int(seed_a) if seed_a is not None else 16
     seed_b = int(seed_b) if seed_b is not None else 16
 
-    r_a = ratings.get(team_a, {}).get("composite_rating", 0.30)
-    r_b = ratings.get(team_b, {}).get("composite_rating", 0.30)
+    # Use enhanced_rating if available, fall back to composite_rating
+    r_a = ratings.get(team_a, {}).get("enhanced_rating") or ratings.get(team_a, {}).get("composite_rating", 0.30)
+    r_b = ratings.get(team_b, {}).get("enhanced_rating") or ratings.get(team_b, {}).get("composite_rating", 0.30)
 
-    p_a = log5(r_a, r_b)
+    p_raw = log5(r_a, r_b)
+
+    # Game-level modifier: Signal 2 — Historical seed matchup prior
+    p_after_seed = blend_with_seed_prior(p_raw, seed_a, seed_b)
+
+    # Game-level modifier: Signal 3 — Vegas calibration
+    vegas_p = None
+    if vegas_lines:
+        vl = vegas_lines.get(game["game_id"])
+        if vl:
+            vegas_p = vl.get("implied_p_a")
+    p_after_vegas = blend_with_vegas(p_after_seed, vegas_p)
+
+    # Game-level modifier: Signal 8 — Tempo matchup
+    adj_t_a = ratings.get(team_a, {}).get("adj_t") or 67.0
+    adj_t_b = ratings.get(team_b, {}).get("adj_t") or 67.0
+    is_a_underdog = p_after_vegas < 0.50
+    tf = compute_tempo_factor(adj_t_a, adj_t_b, is_a_underdog)
+    if is_a_underdog:
+        p_final = min(0.99, p_after_vegas * tf)
+    else:
+        p_final = max(0.01, p_after_vegas / tf) if tf > 1.0 else p_after_vegas
+
+    p_a = p_final
 
     if p_a >= 0.50:
         winner, loser = team_a, team_b
@@ -120,11 +186,23 @@ def _predict_game(
         "is_upset": is_upset,
         "confidence_tier": tier,
         "margin": margin,
+        # Transparency fields
+        "enhanced_rating_a": r_a,
+        "enhanced_rating_b": r_b,
+        "p_raw_log5": round(p_raw, 6),
+        "seed_historical_p": round(seed_matchup_prior(seed_a, seed_b), 6),
+        "vegas_implied_p": vegas_p,
+        "tempo_factor": round(tf, 6),
+        "final_p_a": round(p_final, 6),
+        "modifier_json_a": json.dumps(_team_modifier_summary(team_a, ratings)),
+        "modifier_json_b": json.dumps(_team_modifier_summary(team_b, ratings)),
     }
 
 
 def simulate_bracket(
-    ratings: dict[str, dict], bracket: list[dict]
+    ratings: dict[str, dict],
+    bracket: list[dict],
+    vegas_lines: dict[str, dict] | None = None,
 ) -> list[dict]:
     """Simulate all bracket games round-by-round. Pure, deterministic."""
     games_by_round: dict[int, list[dict]] = {}
@@ -137,7 +215,7 @@ def simulate_bracket(
 
     for rd in sorted(games_by_round.keys()):
         for game in games_by_round[rd]:
-            pred = _predict_game(game, ratings, winner_by_game)
+            pred = _predict_game(game, ratings, winner_by_game, vegas_lines)
             predictions.append(pred)
             winner_by_game[game["game_id"]] = {
                 "team": pred["predicted_winner"],
@@ -158,6 +236,11 @@ def persist_predictions(predictions: list[dict]) -> None:
             p["predicted_winner"], p["predicted_loser"],
             p["winner_seed"], p["loser_seed"],
             p["is_upset"], p["confidence_tier"], p["margin"], now,
+            p.get("enhanced_rating_a"), p.get("enhanced_rating_b"),
+            p.get("p_raw_log5"), p.get("seed_historical_p"),
+            p.get("vegas_implied_p"), p.get("tempo_factor"),
+            p.get("final_p_a"),
+            p.get("modifier_json_a"), p.get("modifier_json_b"),
         )
         for p in predictions
     ]
@@ -168,8 +251,13 @@ def persist_predictions(predictions: list[dict]) -> None:
          rating_a, rating_b, p_a_wins,
          predicted_winner, predicted_loser,
          winner_seed, loser_seed,
-         is_upset, confidence_tier, margin, generated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         is_upset, confidence_tier, margin, generated_at,
+         enhanced_rating_a, enhanced_rating_b,
+         p_raw_log5, seed_historical_p,
+         vegas_implied_p, tempo_factor,
+         final_p_a,
+         modifier_json_a, modifier_json_b)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         rows,
     )
     log.info("Persisted %d predictions", len(rows))
@@ -210,13 +298,17 @@ def render_cli(predictions: list[dict], ratings: dict[str, dict]) -> None:
     console.print()
     console.print(
         Panel(
-            "[bold cyan]Composite Rating Formula[/]\n"
-            "  40% KenPom AdjEM  |  20% KenPom AdjDE  |  15% Pyth Win%\n"
-            "  15% KenPom SOS    |  10% Anti-Luck (regression adj)\n\n"
-            "[bold cyan]Trapezoid of Excellence Bonus[/]\n"
-            "  +1.25% per dimension in top-40 (AdjOE, AdjDE, SOS) or top-15 (AdjEM)\n"
-            "  Teams at 4/4 get +5% composite boost — historically dominate March",
-            title="[bold]MODEL: KenPom + Trapezoid of Excellence[/]",
+            "[bold cyan]Base Rating: KenPom Composite[/]\n"
+            "  40% AdjEM  |  20% AdjDE  |  15% Pyth Win%\n"
+            "  10% SOS    |  15% Anti-Luck (regression adj)\n\n"
+            "[bold cyan]Pre-Game Modifiers (on composite rating)[/]\n"
+            "  BartTorvik agreement  |  Coaching experience\n"
+            "  Roster continuity     |  Momentum / hot streak\n\n"
+            "[bold cyan]Game-Level Adjustments (on win probability)[/]\n"
+            "  Historical seed matchup prior (30% blend)\n"
+            "  Vegas line calibration (when available)\n"
+            "  Tempo matchup factor (slow underdogs)",
+            title="[bold]MODEL: 8-Signal Smart Modifiers[/]",
             border_style="cyan",
         )
     )
@@ -443,7 +535,11 @@ def main() -> None:
 
     log.info("Loaded %d team ratings and %d bracket games", len(ratings), len(bracket))
 
-    predictions = simulate_bracket(ratings, bracket)
+    vegas_lines = _load_vegas_lines("data/vegas_lines_2026.csv")
+    if vegas_lines:
+        log.info("Loaded %d Vegas lines", len(vegas_lines))
+
+    predictions = simulate_bracket(ratings, bracket, vegas_lines=vegas_lines)
     persist_predictions(predictions)
     log.info("Simulation complete: %d predictions", len(predictions))
 
