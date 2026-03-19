@@ -81,8 +81,8 @@ def composite_rating(
     - 40% AdjEM (efficiency margin -- best single predictor)
     - 20% AdjDE (defense travels to neutral sites)
     - 15% Pyth win% (overall quality)
-    - 15% SOS (battle-tested schedule)
-    - 10% Anti-luck (positive luck = regression risk)
+    - 10% SOS (battle-tested schedule)
+    - 15% Anti-luck (positive luck = regression risk)
     """
     em_score = sigmoid(adj_em / 15.0)
     de_score = sigmoid((105.0 - adj_de) / 8.0)
@@ -94,8 +94,8 @@ def composite_rating(
         0.40 * em_score
         + 0.20 * de_score
         + 0.15 * pyth_score
-        + 0.15 * sos_score
-        + 0.10 * luck_score
+        + 0.10 * sos_score     # was 0.15 — reduced to fund anti-luck increase
+        + 0.15 * luck_score    # was 0.10 — increased to regress lucky teams harder
     )
 
     trapezoid_bonus = trapezoid_score * 0.0125
