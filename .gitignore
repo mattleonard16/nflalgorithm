@@ -115,6 +115,7 @@ api/server.py
 # Agent artifacts
 .agent/
 .gemini/
+.claude/
 
 # Archive and exports
 archive/
