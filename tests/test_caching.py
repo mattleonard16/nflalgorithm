@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
-from cache_manager import cached_client, DatabaseCache
+from scripts.cache_manager import cached_client, DatabaseCache
 from config import config
 
 console = Console()
