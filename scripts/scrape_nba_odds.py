@@ -11,7 +11,7 @@ import random
 import sys
 import time
 import unicodedata
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -305,7 +305,7 @@ def _parse_events(events: List[Dict], season: int) -> List[Dict]:
         return []
 
     lookup = _build_player_lookup()
-    as_of = datetime.utcnow().isoformat()
+    as_of = datetime.now(timezone.utc).isoformat()
     rows: List[Dict] = []
 
     for event in events:
@@ -317,7 +317,7 @@ def _parse_events(events: List[Dict], season: int) -> List[Dict]:
                 commence_time.replace("Z", "+00:00")
             ).strftime("%Y-%m-%d")
         except (ValueError, AttributeError):
-            game_date = datetime.utcnow().strftime("%Y-%m-%d")
+            game_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         # Extract game teams from event for Tier 3 validation
         home_team_full = event.get("home_team", "")
@@ -414,7 +414,7 @@ def generate_synthetic_odds(game_date: str, season: int) -> List[Dict]:
     Reads player names from nba_player_game_logs when available.
     All rows have sportsbook="synthetic". Returns [] when no game logs exist.
     """
-    as_of = datetime.utcnow().isoformat()
+    as_of = datetime.now(timezone.utc).isoformat()
     markets = list(_MARKET_BASES.keys())
 
     # Try real players from DB

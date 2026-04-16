@@ -14,7 +14,7 @@ import hashlib
 import json
 import sqlite3
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple, Union, List
 import threading
 import requests
@@ -486,7 +486,7 @@ class CachedAPIClient:
             - Use longer TTL for dome stadium forecasts when identifiable from the URL.
         """
         if api_type == 'odds':
-            if self._is_in_season(datetime.utcnow()):
+            if self._is_in_season(datetime.now(timezone.utc)):
                 return self.api_settings['odds']['ttl_season']
             return self.api_settings['odds']['ttl_offseason']
         elif api_type == 'weather':

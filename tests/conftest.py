@@ -24,3 +24,10 @@ TEST_DB_PATH.touch()
 
 os.environ.setdefault("DB_BACKEND", "sqlite")
 os.environ.setdefault("SQLITE_DB_PATH", str(TEST_DB_PATH))
+
+
+# Shared fixture for clearing NBA cache before tests that use TestClient
+def clear_nba_cache():
+    """Clear NBA endpoint cache to avoid cross-test pollution."""
+    from api.cache import nba_cache
+    nba_cache.invalidate_all()

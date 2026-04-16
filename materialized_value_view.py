@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -46,7 +46,7 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
             conn.commit()
             return ranked
         
-        payload['generated_at'] = datetime.utcnow().isoformat()
+        payload['generated_at'] = datetime.now(timezone.utc).isoformat()
 
         # Sanity filters: drop obviously broken probabilities/edges before persisting
         payload['sigma'] = payload['sigma'].astype(float).clip(lower=7.5)

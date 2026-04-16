@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import random
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -204,7 +204,7 @@ def seed_weekly_projections(conn) -> None:
                     round(random.uniform(6.5, 8.5), 2) if pos == "QB" else 0.0,
                     "demo_v1",
                     "demo_hash",
-                    datetime.utcnow().isoformat(),
+                    datetime.now(timezone.utc).isoformat(),
                 )
             )
     conn.executemany(
@@ -238,7 +238,7 @@ def seed_weekly_odds(conn) -> None:
     )
     rows = []
     season, week = 2025, 13
-    as_of = datetime.utcnow().isoformat()
+    as_of = datetime.now(timezone.utc).isoformat()
     for pid, _name, pos, _team in NFL_PLAYERS:
         for market in NFL_MARKETS:
             base_mu, base_sigma = _market_defaults(pos, market)
@@ -320,7 +320,7 @@ def seed_materialized_value_view(conn) -> None:
                     kelly,
                     confidence,
                     direction,
-                    datetime.utcnow().isoformat(),
+                    datetime.now(timezone.utc).isoformat(),
                 )
             )
     conn.executemany(
@@ -411,14 +411,14 @@ def seed_nba_projections(conn) -> None:
         """
     )
     rows = []
-    game_date = datetime.utcnow().strftime("%Y-%m-%d")
+    game_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     for pid, name, _pos, team in NBA_PLAYERS:
         for market in NBA_MARKETS:
             base_mu, base_sigma = _nba_market_defaults(market)
             mu = round(max(0, random.gauss(base_mu, base_sigma * 0.1)), 2)
             sigma = round(base_sigma * random.uniform(0.85, 1.15), 2)
             rows.append(
-                (game_date, pid, name, team, market, mu, sigma, "demo_v1", datetime.utcnow().isoformat())
+                (game_date, pid, name, team, market, mu, sigma, "demo_v1", datetime.now(timezone.utc).isoformat())
             )
     conn.executemany(
         """
@@ -448,8 +448,8 @@ def seed_nba_odds(conn) -> None:
         """
     )
     rows = []
-    game_date = datetime.utcnow().strftime("%Y-%m-%d")
-    as_of = datetime.utcnow().isoformat()
+    game_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    as_of = datetime.now(timezone.utc).isoformat()
     for pid, name, _pos, _team in NBA_PLAYERS:
         for market in NBA_MARKETS:
             base_mu, base_sigma = _nba_market_defaults(market)
@@ -493,7 +493,7 @@ def seed_nba_materialized_value_view(conn) -> None:
         """
     )
     rows = []
-    game_date = datetime.utcnow().strftime("%Y-%m-%d")
+    game_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     for pid, name, _pos, team in NBA_PLAYERS:
         for market in NBA_MARKETS:
             base_mu, base_sigma = _nba_market_defaults(market)
@@ -524,7 +524,7 @@ def seed_nba_materialized_value_view(conn) -> None:
                     kelly,
                     confidence,
                     direction,
-                    datetime.utcnow().isoformat(),
+                    datetime.now(timezone.utc).isoformat(),
                 )
             )
     conn.executemany(

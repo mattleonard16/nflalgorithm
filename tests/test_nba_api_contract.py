@@ -38,7 +38,9 @@ def db(tmp_path, monkeypatch):
 def client(db):
     from fastapi.testclient import TestClient
     from api.server import app
+    from conftest import clear_nba_cache
 
+    clear_nba_cache()
     return TestClient(app)
 
 

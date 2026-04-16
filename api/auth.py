@@ -6,7 +6,7 @@ Simple JWT-based authentication with bcrypt password hashing.
 
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from pydantic import BaseModel, EmailStr
@@ -91,7 +91,7 @@ def create_user(user: UserCreate) -> Optional[UserResponse]:
 
     user_id = generate_user_id()
     password_hash = hash_password(user.password)
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     execute(
         """
@@ -137,8 +137,8 @@ def authenticate_user(login: UserLogin) -> Optional[dict]:
 
     # Create session
     session_id = generate_session_id()
-    expires_at = (datetime.utcnow() + timedelta(days=SESSION_EXPIRY_DAYS)).isoformat()
-    now = datetime.utcnow().isoformat()
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=SESSION_EXPIRY_DAYS)).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     execute(
         """
@@ -179,7 +179,7 @@ def validate_session(session_id: str) -> Optional[UserResponse]:
 
     user_id, email, name, tier, bankroll, created_at, expires_at = row
 
-    if datetime.fromisoformat(expires_at) < datetime.utcnow():
+    if datetime.fromisoformat(expires_at) < datetime.now(timezone.utc):
         # Session expired, delete it
         execute("DELETE FROM user_sessions WHERE session_id = ?", (session_id,))
         return None
@@ -231,7 +231,7 @@ def get_user_preferences(user_id: str) -> Optional[UserPreferences]:
 
 def update_user_preferences(user_id: str, prefs: UserPreferences) -> bool:
     """Update user preferences."""
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     execute(
         """
         UPDATE user_preferences SET
@@ -268,7 +268,7 @@ def update_user_preferences(user_id: str, prefs: UserPreferences) -> bool:
 
 def update_bankroll(user_id: str, bankroll: float) -> bool:
     """Update user bankroll."""
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     execute(
         "UPDATE users SET bankroll = ?, updated_at = ? WHERE id = ?",
         (bankroll, now, user_id),

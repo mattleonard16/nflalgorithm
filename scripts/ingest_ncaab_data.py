@@ -13,7 +13,7 @@ import argparse
 import csv
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -91,7 +91,7 @@ def ingest(filepath: str, season: int) -> int:
     log.info("Parsed %d teams from %s", len(teams), filepath)
 
     enriched = [_compute_derived_metrics(t) for t in teams]
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     rows = [
         (

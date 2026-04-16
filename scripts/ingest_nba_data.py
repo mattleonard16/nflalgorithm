@@ -208,6 +208,12 @@ def _upsert_rows(rows: list[dict[str, Any]]) -> int:
     return len(rows)
 
 
+def _team_name_to_abbr(team_name: str) -> str:
+    """Map NBA team name to 3-letter abbreviation."""
+    from scripts.scrape_nba_odds import NBA_TEAM_ABBR
+    return NBA_TEAM_ABBR.get(team_name, team_name[:3].upper())
+
+
 def _fetch_team_defensive_stats(season_year: int) -> pd.DataFrame:
     """Fetch team defensive ratings and pace for a season from nba_api."""
     from nba_api.stats.endpoints import LeagueDashTeamStats
@@ -251,9 +257,12 @@ def _fetch_team_defensive_stats(season_year: int) -> pd.DataFrame:
     if df_per100.empty:
         return pd.DataFrame()
 
+    # Map team names to abbreviations since API no longer returns TEAM_ABBREVIATION
+    team_abbrs = df_per100["TEAM_NAME"].apply(_team_name_to_abbr)
+
     today = date.today().isoformat()
     result = pd.DataFrame({
-        "team_abbreviation": df_per100["TEAM_ABBREVIATION"],
+        "team_abbreviation": team_abbrs,
         "season": season_year,
         "as_of_date": today,
         "def_rating": df_per100.get("DEF_RATING", pd.Series([None] * len(df_per100))),
@@ -266,7 +275,8 @@ def _fetch_team_defensive_stats(season_year: int) -> pd.DataFrame:
 
     # Merge PACE from advanced stats if available
     if not df_pace.empty and "PACE" in df_pace.columns:
-        pace_map = dict(zip(df_pace["TEAM_ABBREVIATION"], df_pace["PACE"]))
+        pace_team_abbrs = df_pace["TEAM_NAME"].apply(_team_name_to_abbr)
+        pace_map = dict(zip(pace_team_abbrs, df_pace["PACE"]))
         result["opp_pace"] = result["team_abbreviation"].map(pace_map)
     else:
         result["opp_pace"] = None

@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -227,7 +227,7 @@ def simulate_bracket(
 
 def persist_predictions(predictions: list[dict]) -> None:
     """Write predictions to ncaab_bracket_predictions."""
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     rows = [
         (
             p["game_id"], p["season"], p["round"], p["region"],
@@ -504,7 +504,7 @@ def render_html(
         champion_seed=champion_seed,
         trapezoid_leaders=trap_leaders,
         upsets=upsets,
-        generated_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+        generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         season=season,
         round_names=ROUND_NAMES,
     )

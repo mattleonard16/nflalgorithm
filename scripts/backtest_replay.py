@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List
 
@@ -100,7 +100,7 @@ def save_metrics(season: int, weeks: List[int], metrics: dict) -> None:
     payload = {
         'season': season,
         'weeks': weeks,
-        'generated_at': datetime.utcnow().isoformat(),
+        'generated_at': datetime.now(timezone.utc).isoformat(),
         **metrics
     }
     path.write_text(json.dumps(payload, indent=2))

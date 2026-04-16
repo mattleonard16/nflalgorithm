@@ -5,7 +5,7 @@ Weekly projections, value bets, and performance tracking.
 """
 
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -137,7 +137,7 @@ def get_available_seasons_weeks() -> tuple[list[int], dict[int, list[int]]]:
         rows = []
 
     if not rows:
-        current_year = datetime.utcnow().year
+        current_year = datetime.now(timezone.utc).year
         return [current_year], {current_year: [1]}
 
     seasons: dict[int, list[int]] = {}
@@ -227,7 +227,7 @@ def load_feed_freshness(season: int, week: int) -> pd.DataFrame:
     if df.empty:
         return df
     df['as_of'] = pd.to_datetime(df['as_of'])
-    df['age_minutes'] = (datetime.utcnow() - df['as_of']).dt.total_seconds() / 60.0
+    df['age_minutes'] = (datetime.now(timezone.utc) - df['as_of']).dt.total_seconds() / 60.0
     df['threshold'] = df['feed'].map(FRESHNESS_THRESHOLDS).fillna(60)
     df['status'] = np.where(df['age_minutes'] <= df['threshold'], 'FRESH', 'STALE')
     return df

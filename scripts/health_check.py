@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict
 import json
 
@@ -43,7 +43,7 @@ def load_feed_freshness(season: int, week: int) -> Dict[str, datetime]:
 
 
 def check_freshness(freshness: Dict[str, datetime]) -> Dict[str, float]:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     ages = {}
     for feed, timestamp in freshness.items():
         ages[feed] = (now - timestamp).total_seconds() / 60.0
