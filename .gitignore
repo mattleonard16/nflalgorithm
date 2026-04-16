@@ -25,9 +25,8 @@ validate_migration.py
 
 # Database files
 *.db
-nfl_data.db
-nfl_prop_lines.db
-optuna.db
+*.sqlite
+*.sqlite3
 
 # Large debug files
 debug_page.html
@@ -63,8 +62,6 @@ temp_validation_test.py
 
 # HTTP cache artifacts
 cache/
-cache/cache/http/http_cache/
-cache/cache/http/redirects.sqlite
 
 # Logs
 *.log
@@ -122,5 +119,9 @@ archive/
 reports/
 exports/
 
-# Node modules (already typically ignored)
-node_modules/ 
+# Node modules
+node_modules/
+
+# Test artifacts
+tests/_tmp/
+test_*.db
