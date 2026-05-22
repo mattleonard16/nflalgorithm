@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: nflalgorithm-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile.api
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: DB_BACKEND
+        value: sqlite
+      - key: SQLITE_DB_PATH
+        value: /data/nfl_data.db
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: ODDS_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+    disk:
+      name: nfl-sqlite
+      mountPath: /data
+      sizeGB: 1
+
+  - type: web
+    name: nflalgorithm-frontend
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: .
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        sync: false

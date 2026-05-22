@@ -11,6 +11,9 @@ env/
 ENV/
 .venv/          # UV virtual environment
 .env
+.env.*
+!.env.example
+!.env.render.example
 
 # UV (Python Package Manager) artifacts
 uv.lock
@@ -113,6 +116,10 @@ api/server.py
 .agent/
 .gemini/
 .claude/
+
+# AI-DLC rule details (vendor rules, regeneratable from release zip)
+.aidlc-rule-details/
+aidlc-docs/
 
 # Archive and exports
 archive/
