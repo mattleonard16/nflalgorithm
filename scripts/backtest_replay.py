@@ -39,7 +39,7 @@ def replay_weeks(
     bankroll = 1000.0
 
     for week in weeks:
-        ranked = rank_weekly_value(season, week, threshold, place=not dry_run, bankroll=bankroll)
+        ranked = rank_weekly_value(season, week, threshold, place=not dry_run)
         if ranked.empty:
             continue
 
@@ -80,8 +80,11 @@ def compute_metrics(df: pd.DataFrame) -> dict:
     hit_rate = float(df['p_win'].mean())
     max_drawdown = float(-df['stake'].max())
 
+    # All rows in `df` cleared the min_edge filter inside rank_weekly_value,
+    # so every row is a placed bet — the prior 'recommendation' column never
+    # existed on the engine output.
     return {
-        'bets_placed': int((df['recommendation'] == 'BET').sum()),
+        'bets_placed': int(len(df)),
         'total_stake': total_stake,
         'expected_return': expected_return,
         'expected_roi': expected_roi,
