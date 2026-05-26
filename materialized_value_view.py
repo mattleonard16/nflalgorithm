@@ -64,14 +64,27 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
         # Compute confidence scores and tiers
         payload = score_plays(payload)
 
+        # T0 #4: persist side column so under bets are addressable
+        if 'side' not in payload.columns:
+            payload['side'] = 'over'
+        payload['side'] = payload['side'].fillna('over')
+
+        # T1 C3: persist per-side fair probabilities. Engine always produces
+        # both; if upstream lacks the column (legacy callsite), fall back to None.
+        if 'implied_prob' not in payload.columns:
+            payload['implied_prob'] = None
+        if 'implied_prob_under' not in payload.columns:
+            payload['implied_prob_under'] = None
+
         sql = (
             """
             INSERT INTO materialized_value_view (
                 season, week, player_id, event_id, team, team_odds, market, sportsbook, line, price,
-                mu, sigma, p_win, edge_percentage, expected_roi, kelly_fraction, stake,
+                side, mu, sigma, p_win, implied_prob, implied_prob_under,
+                edge_percentage, expected_roi, kelly_fraction, stake,
                 confidence_score, confidence_tier, generated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(season, week, player_id, market, sportsbook, event_id)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(season, week, player_id, market, sportsbook, event_id, side)
             DO UPDATE SET
                 team=excluded.team,
                 team_odds=excluded.team_odds,
@@ -80,6 +93,8 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
                 mu=excluded.mu,
                 sigma=excluded.sigma,
                 p_win=excluded.p_win,
+                implied_prob=excluded.implied_prob,
+                implied_prob_under=excluded.implied_prob_under,
                 edge_percentage=excluded.edge_percentage,
                 expected_roi=excluded.expected_roi,
                 kelly_fraction=excluded.kelly_fraction,
@@ -95,8 +110,9 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
             payload[
                 [
                     'season', 'week', 'player_id', 'event_id', 'team', 'team_odds', 'market',
-                    'sportsbook', 'line', 'price', 'mu', 'sigma', 'p_win', 'edge_percentage',
-                    'expected_roi', 'kelly_fraction', 'stake',
+                    'sportsbook', 'line', 'price', 'side', 'mu', 'sigma', 'p_win',
+                    'implied_prob', 'implied_prob_under',
+                    'edge_percentage', 'expected_roi', 'kelly_fraction', 'stake',
                     'confidence_score', 'confidence_tier', 'generated_at',
                 ]
             ].itertuples(index=False, name=None),

@@ -108,15 +108,18 @@ class MigrationManager:
                 sportsbook TEXT NOT NULL,
                 line REAL NOT NULL,
                 price INTEGER NOT NULL,
+                side TEXT NOT NULL DEFAULT 'over',
                 mu REAL NOT NULL,
                 sigma REAL NOT NULL,
                 p_win REAL NOT NULL,
+                implied_prob REAL,
+                implied_prob_under REAL,
                 edge_percentage REAL NOT NULL,
                 expected_roi REAL NOT NULL,
                 kelly_fraction REAL NOT NULL,
                 stake REAL NOT NULL,
                 generated_at TEXT NOT NULL,
-                PRIMARY KEY (season, week, player_id, market, sportsbook, event_id)
+                PRIMARY KEY (season, week, player_id, market, sportsbook, event_id, side)
             )
             """,
             """
@@ -797,6 +800,24 @@ class MigrationManager:
                 cursor.execute("ALTER TABLE materialized_value_view ADD COLUMN confidence_score REAL")
             if not column_exists("materialized_value_view", "confidence_tier", conn=cursor.connection):
                 cursor.execute("ALTER TABLE materialized_value_view ADD COLUMN confidence_tier TEXT")
+            # T0 #4: side column for over/under support (existing rows default to 'over')
+            if not column_exists("materialized_value_view", "side", conn=cursor.connection):
+                cursor.execute("ALTER TABLE materialized_value_view ADD COLUMN side TEXT NOT NULL DEFAULT 'over'")
+            # T1 C3: persist per-side fair probabilities so /api/value-bets can
+            # show vig-removed prob alongside model prob without recomputing.
+            if not column_exists("materialized_value_view", "implied_prob", conn=cursor.connection):
+                cursor.execute("ALTER TABLE materialized_value_view ADD COLUMN implied_prob REAL")
+            if not column_exists("materialized_value_view", "implied_prob_under", conn=cursor.connection):
+                cursor.execute("ALTER TABLE materialized_value_view ADD COLUMN implied_prob_under REAL")
+            # T0 #4 (cont.): widen PRIMARY KEY to include `side`. SQLite ALTER cannot
+            # modify PK, so detect old-shape via sqlite_master DDL and rebuild.
+            self._rebuild_mvv_pk_if_needed(cursor)
+
+        # T1 #8: weekly_odds gains under_price for no-vig probability calc.
+        # Nullable — engine falls back to single-sided vig-included implied prob when missing.
+        if table_exists("weekly_odds", conn=cursor.connection):
+            if not column_exists("weekly_odds", "under_price", conn=cursor.connection):
+                cursor.execute("ALTER TABLE weekly_odds ADD COLUMN under_price INTEGER")
 
         # Add volatility_score and target_share to weekly_projections
         if table_exists("weekly_projections", conn=cursor.connection):
@@ -966,6 +987,64 @@ class MigrationManager:
         """)
         cursor.execute("DROP TABLE nba_odds")
         cursor.execute("ALTER TABLE nba_odds_new RENAME TO nba_odds")
+
+    def _rebuild_mvv_pk_if_needed(self, cursor) -> None:
+        """T0 #4: ensure materialized_value_view PK includes `side`.
+
+        SQLite-only ALTER cannot widen a PK, so existing tables that were
+        only column-added need a rebuild. MySQL DDL handles PK changes via
+        ALTER TABLE elsewhere; skip silently when not SQLite.
+        """
+        if not table_exists("materialized_value_view", conn=cursor.connection):
+            return
+        try:
+            row = cursor.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='materialized_value_view'"
+            ).fetchone()
+        except Exception:
+            return
+        if not row or not row[0]:
+            return
+        ddl = row[0]
+        if "PRIMARY KEY" not in ddl or "side" in ddl.split("PRIMARY KEY", 1)[1]:
+            return
+        cursor.execute("ALTER TABLE materialized_value_view RENAME TO _mvv_old")
+        cursor.execute(
+            """
+            CREATE TABLE materialized_value_view (
+                season INTEGER NOT NULL,
+                week INTEGER NOT NULL,
+                player_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                team TEXT,
+                team_odds TEXT,
+                market TEXT NOT NULL,
+                sportsbook TEXT NOT NULL,
+                line REAL NOT NULL,
+                price INTEGER NOT NULL,
+                side TEXT NOT NULL DEFAULT 'over',
+                mu REAL NOT NULL,
+                sigma REAL NOT NULL,
+                p_win REAL NOT NULL,
+                edge_percentage REAL NOT NULL,
+                expected_roi REAL NOT NULL,
+                kelly_fraction REAL NOT NULL,
+                stake REAL NOT NULL,
+                generated_at TEXT NOT NULL,
+                confidence_score REAL,
+                confidence_tier TEXT,
+                PRIMARY KEY (season, week, player_id, market, sportsbook, event_id, side)
+            )
+            """
+        )
+        old_cols = [r[1] for r in cursor.execute("PRAGMA table_info(_mvv_old)").fetchall()]
+        new_cols = [r[1] for r in cursor.execute("PRAGMA table_info(materialized_value_view)").fetchall()]
+        shared = [c for c in new_cols if c in old_cols]
+        col_list = ", ".join(shared)
+        cursor.execute(
+            f"INSERT INTO materialized_value_view ({col_list}) SELECT {col_list} FROM _mvv_old"
+        )
+        cursor.execute("DROP TABLE _mvv_old")
 
     def _ensure_indexes(self, cursor: Any) -> None:
         cursor.execute(
