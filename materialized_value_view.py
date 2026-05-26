@@ -12,7 +12,7 @@ import numpy as np
 
 from config import config
 from confidence_engine import score_plays
-from utils.db import get_connection, execute, executemany
+from utils.db import get_connection, execute, executemany, _get_backend
 from value_betting_engine import rank_weekly_value
 
 
@@ -76,34 +76,66 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
         if 'implied_prob_under' not in payload.columns:
             payload['implied_prob_under'] = None
 
-        sql = (
-            """
-            INSERT INTO materialized_value_view (
-                season, week, player_id, event_id, team, team_odds, market, sportsbook, line, price,
-                side, mu, sigma, p_win, implied_prob, implied_prob_under,
-                edge_percentage, expected_roi, kelly_fraction, stake,
-                confidence_score, confidence_tier, generated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(season, week, player_id, market, sportsbook, event_id, side)
-            DO UPDATE SET
-                team=excluded.team,
-                team_odds=excluded.team_odds,
-                line=excluded.line,
-                price=excluded.price,
-                mu=excluded.mu,
-                sigma=excluded.sigma,
-                p_win=excluded.p_win,
-                implied_prob=excluded.implied_prob,
-                implied_prob_under=excluded.implied_prob_under,
-                edge_percentage=excluded.edge_percentage,
-                expected_roi=excluded.expected_roi,
-                kelly_fraction=excluded.kelly_fraction,
-                stake=excluded.stake,
-                confidence_score=excluded.confidence_score,
-                confidence_tier=excluded.confidence_tier,
-                generated_at=excluded.generated_at
-            """
-        )
+        # SQLite uses `ON CONFLICT(...) DO UPDATE SET col=excluded.col`,
+        # MySQL uses `ON DUPLICATE KEY UPDATE col=VALUES(col)`. Same primary
+        # key, same upsert semantics, incompatible syntax.
+        if _get_backend() == "mysql":
+            sql = (
+                """
+                INSERT INTO materialized_value_view (
+                    season, week, player_id, event_id, team, team_odds, market, sportsbook, line, price,
+                    side, mu, sigma, p_win, implied_prob, implied_prob_under,
+                    edge_percentage, expected_roi, kelly_fraction, stake,
+                    confidence_score, confidence_tier, generated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    team=VALUES(team),
+                    team_odds=VALUES(team_odds),
+                    line=VALUES(line),
+                    price=VALUES(price),
+                    mu=VALUES(mu),
+                    sigma=VALUES(sigma),
+                    p_win=VALUES(p_win),
+                    implied_prob=VALUES(implied_prob),
+                    implied_prob_under=VALUES(implied_prob_under),
+                    edge_percentage=VALUES(edge_percentage),
+                    expected_roi=VALUES(expected_roi),
+                    kelly_fraction=VALUES(kelly_fraction),
+                    stake=VALUES(stake),
+                    confidence_score=VALUES(confidence_score),
+                    confidence_tier=VALUES(confidence_tier),
+                    generated_at=VALUES(generated_at)
+                """
+            )
+        else:
+            sql = (
+                """
+                INSERT INTO materialized_value_view (
+                    season, week, player_id, event_id, team, team_odds, market, sportsbook, line, price,
+                    side, mu, sigma, p_win, implied_prob, implied_prob_under,
+                    edge_percentage, expected_roi, kelly_fraction, stake,
+                    confidence_score, confidence_tier, generated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(season, week, player_id, market, sportsbook, event_id, side)
+                DO UPDATE SET
+                    team=excluded.team,
+                    team_odds=excluded.team_odds,
+                    line=excluded.line,
+                    price=excluded.price,
+                    mu=excluded.mu,
+                    sigma=excluded.sigma,
+                    p_win=excluded.p_win,
+                    implied_prob=excluded.implied_prob,
+                    implied_prob_under=excluded.implied_prob_under,
+                    edge_percentage=excluded.edge_percentage,
+                    expected_roi=excluded.expected_roi,
+                    kelly_fraction=excluded.kelly_fraction,
+                    stake=excluded.stake,
+                    confidence_score=excluded.confidence_score,
+                    confidence_tier=excluded.confidence_tier,
+                    generated_at=excluded.generated_at
+                """
+            )
 
         executemany(
             sql,

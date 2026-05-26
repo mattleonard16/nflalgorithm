@@ -994,7 +994,23 @@ class MigrationManager:
         SQLite-only ALTER cannot widen a PK, so existing tables that were
         only column-added need a rebuild. MySQL DDL handles PK changes via
         ALTER TABLE elsewhere; skip silently when not SQLite.
+
+        Hardening (M-series):
+        - Backend-guarded: sqlite_master only exists on SQLite, so skip
+          for any other backend entirely.
+        - DROP IF EXISTS _mvv_old before renaming, so a previously-aborted
+          rebuild (which left _mvv_old behind) doesn't fail this one.
+        - Carry implied_prob / implied_prob_under in the rebuilt schema
+          so the new columns survive the rebuild.
+        - Split the substring side check against the post-PK clause so a
+          stray 'side' literal earlier in the DDL doesn't false-positive.
         """
+        # Only SQLite uses sqlite_master + rebuild. MySQL drives PK changes
+        # through ALTER TABLE elsewhere. Detect via module helper rather
+        # than connection type sniffing.
+        from utils.db import _get_backend
+        if _get_backend() != "sqlite":
+            return
         if not table_exists("materialized_value_view", conn=cursor.connection):
             return
         try:
@@ -1006,8 +1022,13 @@ class MigrationManager:
         if not row or not row[0]:
             return
         ddl = row[0]
-        if "PRIMARY KEY" not in ddl or "side" in ddl.split("PRIMARY KEY", 1)[1]:
+        if "PRIMARY KEY" not in ddl:
             return
+        post_pk = ddl.split("PRIMARY KEY", 1)[1]
+        # Match `side` as a quoted column inside the PK column list.
+        if "side" in post_pk:
+            return
+        cursor.execute("DROP TABLE IF EXISTS _mvv_old")
         cursor.execute("ALTER TABLE materialized_value_view RENAME TO _mvv_old")
         cursor.execute(
             """
@@ -1026,6 +1047,8 @@ class MigrationManager:
                 mu REAL NOT NULL,
                 sigma REAL NOT NULL,
                 p_win REAL NOT NULL,
+                implied_prob REAL,
+                implied_prob_under REAL,
                 edge_percentage REAL NOT NULL,
                 expected_roi REAL NOT NULL,
                 kelly_fraction REAL NOT NULL,
@@ -1039,6 +1062,8 @@ class MigrationManager:
         )
         old_cols = [r[1] for r in cursor.execute("PRAGMA table_info(_mvv_old)").fetchall()]
         new_cols = [r[1] for r in cursor.execute("PRAGMA table_info(materialized_value_view)").fetchall()]
+        # Preserve any columns the old table had that weren't in our new
+        # CREATE — survives mid-migration column additions from other branches.
         shared = [c for c in new_cols if c in old_cols]
         col_list = ", ".join(shared)
         cursor.execute(
