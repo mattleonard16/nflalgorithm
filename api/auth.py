@@ -1,22 +1,32 @@
 """
 Authentication utilities for NFL Algorithm API.
 
-Simple JWT-based authentication with bcrypt password hashing.
+bcrypt password hashing with dual-path legacy SHA256 verification so existing
+accounts created before T0 #2 can still log in (their hash is rewritten to
+bcrypt on next successful login).
 """
 
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr
+import bcrypt
+from pydantic import BaseModel, EmailStr, computed_field
 
-from utils.db import execute, fetchone, fetchall
+from utils.db import execute, fetchone
+
+logger = logging.getLogger(__name__)
 
 
 # Configuration
 SESSION_EXPIRY_DAYS = 7
 MIN_PASSWORD_LENGTH = 8
+# bcrypt silently truncates beyond 72 bytes — reject earlier so users don't
+# log in with a prefix of the password they registered with.
+MAX_PASSWORD_LENGTH = 72
+_BCRYPT_ROUNDS = 12
 
 
 class UserCreate(BaseModel):
@@ -38,6 +48,17 @@ class UserResponse(BaseModel):
     bankroll: float
     created_at: str
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def user_id(self) -> str:
+        """Alias retained so server.py callsites (current_user.user_id) keep working.
+
+        Marked @computed_field so Pydantic v2 includes it in model_dump()
+        and /api/auth/me JSON responses — a plain @property would be hidden
+        from serialization.
+        """
+        return self.id
+
 
 class UserPreferences(BaseModel):
     default_min_edge: float = 0.05
@@ -53,20 +74,42 @@ class UserPreferences(BaseModel):
 
 
 def hash_password(password: str) -> str:
-    """Hash password using SHA256 with salt. Use bcrypt in production."""
-    salt = secrets.token_hex(16)
-    hash_obj = hashlib.sha256((password + salt).encode())
-    return f"{salt}${hash_obj.hexdigest()}"
+    """Hash password using bcrypt. Caller responsible for length validation."""
+    encoded = password.encode("utf-8")
+    if len(encoded) > MAX_PASSWORD_LENGTH:
+        raise ValueError(f"Password exceeds {MAX_PASSWORD_LENGTH} bytes after UTF-8 encoding")
+    return bcrypt.hashpw(encoded, bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode("utf-8")
+
+
+def _is_bcrypt_hash(password_hash: str) -> bool:
+    return password_hash.startswith(("$2a$", "$2b$", "$2y$"))
+
+
+def _verify_legacy_sha256(password: str, password_hash: str) -> bool:
+    """Verify the SHA256+salt format used before T0 #2.
+
+    Legacy format: ``"{salt}${sha256_hex}"``. Returns False for malformed
+    strings rather than raising so callers can treat a bad row as auth-failure.
+    """
+    try:
+        salt, stored_hash = password_hash.split("$", 1)
+    except ValueError:
+        return False
+    digest = hashlib.sha256((password + salt).encode("utf-8")).hexdigest()
+    return secrets.compare_digest(digest, stored_hash)
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    """Verify password against hash."""
-    try:
-        salt, stored_hash = password_hash.split("$")
-        hash_obj = hashlib.sha256((password + salt).encode())
-        return hash_obj.hexdigest() == stored_hash
-    except ValueError:
+    """Verify password against a bcrypt hash, falling back to legacy SHA256."""
+    if not password_hash:
         return False
+    if _is_bcrypt_hash(password_hash):
+        try:
+            return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+        except ValueError:
+            logger.warning("Malformed bcrypt hash encountered during verify")
+            return False
+    return _verify_legacy_sha256(password, password_hash)
 
 
 def generate_session_id() -> str:
@@ -83,6 +126,8 @@ def create_user(user: UserCreate) -> Optional[UserResponse]:
     """Create a new user account."""
     if len(user.password) < MIN_PASSWORD_LENGTH:
         raise ValueError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
+    if len(user.password.encode("utf-8")) > MAX_PASSWORD_LENGTH:
+        raise ValueError(f"Password exceeds {MAX_PASSWORD_LENGTH} bytes after UTF-8 encoding")
 
     # Check if email already exists
     existing = fetchone("SELECT id FROM users WHERE email = ?", (user.email,))
@@ -134,6 +179,19 @@ def authenticate_user(login: UserLogin) -> Optional[dict]:
 
     if not verify_password(login.password, password_hash):
         return None
+
+    # Transparent rehash: upgrade legacy SHA256 hashes to bcrypt on success.
+    # Race-safe: predicate on the old hash so concurrent logins don't double-write.
+    # Wrapped: a failed rehash must not 500 an otherwise-valid login.
+    if not _is_bcrypt_hash(password_hash):
+        try:
+            new_hash = hash_password(login.password)
+            execute(
+                "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ? AND password_hash = ?",
+                (new_hash, datetime.now(timezone.utc).isoformat(), user_id, password_hash),
+            )
+        except Exception as e:
+            logger.warning("Legacy hash rehash failed for user %s: %s", user_id, type(e).__name__)
 
     # Create session
     session_id = generate_session_id()
