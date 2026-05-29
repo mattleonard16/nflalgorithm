@@ -26,10 +26,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def main():
-    """Run complete prop line update process (season-long or weekly via --week)."""
+    """Run complete prop line update process. Season and week are required."""
     parser = argparse.ArgumentParser()
-    parser.add_argument('--week', type=int, default=None)
-    parser.add_argument('--season', type=int, default=datetime.now().year)
+    parser.add_argument('--week', type=int, required=True, help='NFL week number (1-22)')
+    parser.add_argument('--season', type=int, required=True, help='NFL season year (e.g., 2025)')
     args = parser.parse_args()
     
     print("NFL PROP LINE WEEKLY UPDATE")
@@ -39,37 +39,33 @@ def main():
     try:
         # Step 1: Scrape current prop lines
         scraper = NFLPropScraper()
-        if args.week:
-            print(f"\n1. Scraping weekly prop lines for week {args.week}...")
-            rows = scraper.get_upcoming_week_props(args.week, args.season)
-            prop_df = pd.DataFrame(rows)
-            scraper.save_weekly_prop_lines(rows, args.week, args.season)
-            # also write CSV for convenience
-            from pathlib import Path
-            out = Path('reports') / f"week_{args.week}_prop_lines.csv"
-            out.parent.mkdir(exist_ok=True)
-            prop_df.to_csv(out, index=False)
-        else:
-            print("\n1. Scraping current prop lines...")
-            # Fallback: if no week specified, run a demo weekly scrape for week 1
-            prop_df = scraper.run_weekly_update(1, args.season)
-        
+        print(f"\n1. Scraping weekly prop lines for season={args.season} week={args.week}...")
+        rows = scraper.get_upcoming_week_props(args.week, args.season)
+        prop_df = pd.DataFrame(rows)
+        scraper.save_weekly_prop_lines(rows, args.week, args.season)
+        # also write CSV for convenience
+        from pathlib import Path
+        out = Path('reports') / f"week_{args.week}_prop_lines.csv"
+        out.parent.mkdir(exist_ok=True)
+        prop_df.to_csv(out, index=False)
+
         print(f"   ✅ Retrieved {len(prop_df)} prop lines")
-        
+
         # Step 2: Integrate with existing predictions
         print("\n2. Integrating with player projections...")
         integrator = PropIntegration()
-        if args.week:
-            opportunities = integrator.export_weekly_value_bets(args.week)
-        else:
-            opportunities = integrator.update_real_time_value_finder()
-        
+        opportunities = integrator.get_best_value_opportunities(
+            season=args.season, week=args.week,
+        )
+        # Also refresh dashboard table.
+        integrator.update_real_time_value_finder(season=args.season, week=args.week)
+
         num_opps = len(opportunities) if isinstance(opportunities, pd.DataFrame) else 0
         print(f"   ✅ Found {num_opps} value opportunities")
-        
+
         # Step 3: Generate summary report
         print("\n3. Generating value report...")
-        md_report = integrator.generate_value_report() if not args.week else integrator.generate_markdown_report(opportunities)
+        md_report = integrator.generate_value_report(season=args.season, week=args.week)
         # Ensure directories
         config.reports_dir.mkdir(exist_ok=True)
         config.reports_img_dir.mkdir(parents=True, exist_ok=True)

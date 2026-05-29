@@ -15,6 +15,7 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import sys
 import os
 import uuid
@@ -307,7 +308,12 @@ def persist_value_bets(df: pd.DataFrame) -> int:
 
 
 def main() -> int:
-    print("🚀 Activating value betting pipeline...")
+    parser = argparse.ArgumentParser(description="Activate value betting pipeline")
+    parser.add_argument('--season', type=int, required=True, help='NFL season year')
+    parser.add_argument('--week', type=int, required=True, help='NFL week (1-22)')
+    args = parser.parse_args()
+
+    print(f"🚀 Activating value betting pipeline (season={args.season}, week={args.week})...")
 
     # 1) Ensure current prop lines
     scraper = NFLPropScraper()
@@ -319,10 +325,12 @@ def main() -> int:
 
     # Use config threshold (convert from fraction to percentage expected by integrator)
     min_edge_pct = max(1.0, config.betting.min_edge_threshold * 100.0)
-    opps = integrator.get_best_value_opportunities(min_edge_threshold=min_edge_pct)
+    opps = integrator.get_best_value_opportunities(
+        season=args.season, week=args.week, min_edge_threshold=min_edge_pct,
+    )
 
     # Always export artifacts (empty-safe)
-    md_text = integrator.generate_value_report()
+    md_text = integrator.generate_value_report(season=args.season, week=args.week)
     config.reports_dir.mkdir(exist_ok=True)
     config.reports_img_dir.mkdir(parents=True, exist_ok=True)
     (config.reports_dir / "weekly_value_report.md").write_text(md_text, encoding="utf-8")
@@ -340,7 +348,7 @@ def main() -> int:
     print(f"   💾 Persisted enhanced value bets: {inserted}")
 
     # 4) Update real-time finder table for compatibility
-    integrator.update_real_time_value_finder()
+    integrator.update_real_time_value_finder(season=args.season, week=args.week)
 
     # 5) Final summary
     print("\n📊 ACTIVATION SUMMARY")

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import argparse
 import json
 from pathlib import Path
 import pandas as pd
@@ -16,14 +17,12 @@ import sqlite3
 
 console = Console()
 
-def load_opportunities() -> pd.DataFrame:
+def load_opportunities(season: int, week: int) -> pd.DataFrame:
     integrator = PropIntegration()
     # Lower threshold to surface more rows for visual testing
-    try:
-        df = integrator.get_best_value_opportunities(min_edge_threshold=0.0)
-    except TypeError:
-        # Older signature fallback
-        df = integrator.get_best_value_opportunities()
+    df = integrator.get_best_value_opportunities(
+        season=season, week=week, min_edge_threshold=0.0,
+    )
     if df is None or df.empty:
         csv_path = config.reports_dir / "value_bets.csv"
         if csv_path.exists():
@@ -126,11 +125,11 @@ def write_quick_picks(df: pd.DataFrame, n: int = 5) -> Path:
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out
 
-def build_all() -> dict[str, Path]:
+def build_all(season: int, week: int) -> dict[str, Path]:
     config.reports_dir.mkdir(exist_ok=True)
     (config.reports_dir / "img").mkdir(exist_ok=True)
     template_dir = Path("templates")
-    df = load_opportunities()
+    df = load_opportunities(season=season, week=week)
     if df is None or df.empty:
         console.print("[yellow]No opportunities to render[/yellow]")
         return {}
@@ -142,5 +141,9 @@ def build_all() -> dict[str, Path]:
     return paths
 
 if __name__ == "__main__":
-    build_all()
+    parser = argparse.ArgumentParser(description="Build enhanced visualizer artifacts")
+    parser.add_argument('--season', type=int, required=True)
+    parser.add_argument('--week', type=int, required=True)
+    args = parser.parse_args()
+    build_all(season=args.season, week=args.week)
 

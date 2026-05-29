@@ -330,6 +330,22 @@ make validate      # Cross-season validation
 
 ---
 
+## AI-DLC Documentation
+
+This repo follows the AI-DLC workflow. Process artifacts live under [`aidlc-docs/`](./aidlc-docs/) and stay in sync with the code.
+
+| Phase | Entry point |
+|---|---|
+| **Inception** | [`aidlc-docs/inception/`](./aidlc-docs/inception/) — reverse engineering, requirements, workflow plan |
+| **Construction** | [`aidlc-docs/construction/build-and-test/build-and-test-summary.md`](./aidlc-docs/construction/build-and-test/build-and-test-summary.md) — Tier 0 build / unit / integration / performance runbooks |
+| **Operations** | [`aidlc-docs/operations/operations-summary.md`](./aidlc-docs/operations/operations-summary.md) — deployment, monitoring, incident response, maintenance, production readiness |
+| **State** | [`aidlc-docs/aidlc-state.md`](./aidlc-docs/aidlc-state.md) — current stage, execution sequence |
+| **Audit log** | [`aidlc-docs/audit.md`](./aidlc-docs/audit.md) — every stage decision with raw user input |
+
+For the 2026-prep punch list (Tier 0 blockers / Tier 1 high-impact / Tier 2 ops hardening / Tier 3 polish) see `CLAUDE.md` and the per-unit summaries under `aidlc-docs/construction/`.
+
+---
+
 ## Contributing
 
 1. Fork the repository

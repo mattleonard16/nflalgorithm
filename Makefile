@@ -6,8 +6,27 @@
 # Environment detection - defaults to UV if available
 ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && echo "uv" || echo "venv")
 
-SEASON ?= 2025
-WEEK ?= 13
+# SEASON/WEEK must be supplied by the caller for any target that runs the
+# weekly prop pipeline (T0 #5: no hardcoded defaults).
+# Example: make week SEASON=2025 WEEK=13
+SEASON ?=
+WEEK ?=
+
+# Guard used by weekly targets — fails loud if SEASON or WEEK is empty.
+define require_season_week
+	@if [ -z "$(SEASON)" ] || [ -z "$(WEEK)" ]; then \
+		echo "ERROR: SEASON and WEEK are required. Example: make $@ SEASON=2025 WEEK=13" >&2; \
+		exit 2; \
+	fi
+endef
+
+# Guard used by season-scoped targets — fails loud if SEASON is empty.
+define require_season
+	@if [ -z "$(SEASON)" ]; then \
+		echo "ERROR: SEASON is required. Example: make $@ SEASON=2025" >&2; \
+		exit 2; \
+	fi
+endef
 
 # Database backend - default to SQLite for local development
 DB_BACKEND ?= sqlite
@@ -195,10 +214,11 @@ fullstack:
 
 # Weekly report with timing
 report:
-	@echo "Running weekly report pipeline with $(ENV_TYPE)..."
+	$(call require_season_week)
+	@echo "Running weekly report pipeline (season=$(SEASON) week=$(WEEK)) with $(ENV_TYPE)..."
 	@start_time=$$(date +%s); \
-	$(PYTHON) -m scripts.run_prop_update; \
-	$(PYTHON) -m scripts.enhanced_visualizer; \
+	$(PYTHON) -m scripts.run_prop_update --season $(SEASON) --week $(WEEK); \
+	$(PYTHON) -m scripts.enhanced_visualizer --season $(SEASON) --week $(WEEK); \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
 	echo "Reports generated in $${duration}s! Available in reports/"
@@ -206,15 +226,17 @@ report:
 
 # Enhanced report only
 enhanced-report:
-	@echo "Building enhanced report with $(ENV_TYPE)..."
-	$(PYTHON) -m scripts.enhanced_visualizer; \
+	$(call require_season_week)
+	@echo "Building enhanced report (season=$(SEASON) week=$(WEEK)) with $(ENV_TYPE)..."
+	$(PYTHON) -m scripts.enhanced_visualizer --season $(SEASON) --week $(WEEK); \
 	if command -v open >/dev/null 2>&1; then open reports/enhanced_dashboard.html || true; fi
 
 # Weekly flow for specific week/season
 week:
+	$(call require_season_week)
 	@echo "Running weekly report for week $(WEEK) season $(SEASON) with $(ENV_TYPE)..."
 	$(PYTHON) -m scripts.run_prop_update --week $(WEEK) --season $(SEASON)
-	$(PYTHON) -m scripts.enhanced_visualizer
+	$(PYTHON) -m scripts.enhanced_visualizer --season $(SEASON) --week $(WEEK)
 	@echo "Weekly artifacts in reports/: week_$(WEEK)_*.{csv,json,md,html} and enhanced files"
 
 week-open:
@@ -222,18 +244,22 @@ week-open:
 	@open reports/week_$(WEEK)_enhanced_dashboard.html 2>/dev/null || true
 
 week-update:
+	$(call require_season_week)
 	@echo "Updating data for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -c "from data_pipeline import update_week; update_week(int('$(SEASON)'), int('$(WEEK)'))"
 
 week-predict:
+	$(call require_season_week)
 	@echo "Generating projections for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -c "from models.position_specific import predict_week; predict_week(int('$(SEASON)'), int('$(WEEK)'))"
 
 week-materialize:
+	$(call require_season_week)
 	@echo "Materializing value view for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.materialize_value_view --season $(SEASON) --week $(WEEK)
 
 week-grade:
+	$(call require_season_week)
 	@echo "📊 Grading bets for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.record_outcomes --season $(SEASON) --week $(WEEK)
 
@@ -242,34 +268,42 @@ backfill-accuracy:
 	$(DB_ENV) $(PYTHON) -m scripts.backfill_line_accuracy --seasons 2024,2025 --persist
 
 run-agents:
+	$(call require_season_week)
 	@echo "Running agent coordinator for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m agents.coordinator --season $(SEASON) --week $(WEEK)
 
 risk-check:
+	$(call require_season_week)
 	@echo "Running risk check for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m risk_manager --season $(SEASON) --week $(WEEK)
 
 dry-run:
+	$(call require_season)
 	@echo "Running dry-run validation for season $(SEASON)..."
 	$(DB_ENV) $(PYTHON) -m scripts.dry_run_validation --season $(SEASON)
 
 production-run:
+	$(call require_season_week)
 	@echo "Running production pipeline for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.production_runner --season $(SEASON) --week $(WEEK)
 
 learn:
+	$(call require_season_week)
 	@echo "Running learning loop for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m learning_loop learn --season $(SEASON) --week $(WEEK)
 
 learning-report:
+	$(call require_season)
 	@echo "Generating learning report for season $(SEASON)..."
 	$(DB_ENV) $(PYTHON) -m learning_loop report --season $(SEASON)
 
 mini-backtest:
+	$(call require_season_week)
 	@echo "Running mini backtest for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.backtest_replay --season $(SEASON) --weeks $(WEEK) --dry-run
 
 health:
+	$(call require_season_week)
 	@echo "Checking feed freshness for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.health_check --season $(SEASON) --week $(WEEK)
 

@@ -47,7 +47,7 @@ def grade_bets(season: int, week: int) -> List[Dict]:
     predictions_query = """
         SELECT
             season, week, player_id, event_id, team, team_odds,
-            market, sportsbook, line, price, mu, sigma, p_win,
+            market, sportsbook, line, price, side, mu, sigma, p_win,
             edge_percentage, expected_roi, kelly_fraction, stake,
             generated_at
         FROM materialized_value_view
@@ -88,9 +88,10 @@ def grade_bets(season: int, week: int) -> List[Dict]:
         price = pred['price']
         edge_pct = pred['edge_percentage']
 
-        # Default to "over" if side not in materialized view
-        # (this script assumes all bets are "over" unless schema includes side column)
-        side = 'over'
+        # T0 #4: read side from view (over or under). Default to 'over' for
+        # legacy rows materialized before the side column existed.
+        side_val = pred.get('side') if 'side' in pred.index else None
+        side = side_val if isinstance(side_val, str) and side_val else 'over'
 
         # Get stat column for this market
         stat_column = MARKET_TO_STAT.get(market)
