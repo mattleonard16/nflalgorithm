@@ -20,7 +20,6 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
 from scripts.cache_manager import cached_client, DatabaseCache
 from config import config
-import prop_line_scraper
 
 console = Console()
 logger = logging.getLogger(__name__)

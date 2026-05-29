@@ -15,9 +15,6 @@ import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 from config import config
 

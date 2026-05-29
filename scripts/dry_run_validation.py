@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from agents.coordinator import run_all_agents
-from confidence_engine import compute_confidence_score, assign_tier, score_plays
+from confidence_engine import compute_confidence_score, score_plays
 from config import config
 from risk_manager import assess_risk
 from utils.db import read_dataframe

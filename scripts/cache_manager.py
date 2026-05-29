@@ -15,11 +15,10 @@ import json
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Tuple, Union, List
+from typing import Any, Dict, Optional, Tuple, List
 import threading
 import requests
 import requests_cache
-from dataclasses import asdict
 import logging
 
 from config import config
