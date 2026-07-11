@@ -117,7 +117,7 @@ export function Sidebar() {
               </span>
             </div>
             <div className="flex flex-col">
-              <span className="text-sm font-semibold text-slate-100 tracking-tight">
+              <span className="text-base font-bold text-slate-100 tracking-wide font-display uppercase">
                 {activeSport === "nba" ? "NBA Algorithm" : "NFL Algorithm"}
               </span>
               <span
@@ -201,7 +201,7 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-all duration-150",
+                "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-all duration-150 hover:translate-x-0.5",
                 active
                   ? accentStyles.active
                   : "text-slate-500 hover:bg-slate-800/40 hover:text-slate-300"
