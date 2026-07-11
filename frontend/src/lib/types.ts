@@ -135,6 +135,7 @@ export interface ValueBet {
   sportsbook: string;
   line: number;
   price: number;
+  side?: "over" | "under" | null;
   mu: number;
   sigma: number;
   p_win: number;
@@ -201,9 +202,9 @@ export interface FeedFreshness {
 }
 
 export interface HealthResponse {
-  status: "ACTIVE" | "MAINTENANCE";
+  status: "ACTIVE" | "MAINTENANCE" | "UNKNOWN";
   database: string;
-  last_update: string;
+  last_update: string | null;
   feeds: FeedFreshness[];
 }
 
@@ -219,7 +220,8 @@ export interface MetaResponse {
 }
 
 export interface EdgeDistribution {
-  bins: number[];
+  /** Percent range labels, e.g. "10–20%" */
+  bins: string[];
   counts: number[];
 }
 

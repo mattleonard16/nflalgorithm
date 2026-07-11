@@ -137,9 +137,9 @@ export function RiskPanel({
                 </span>
               </div>
               <div className="flex flex-wrap gap-1">
-                {group.players.map((p) => (
+                {group.players.map((p, i) => (
                   <span
-                    key={`${p.player_id}-${p.market}`}
+                    key={`${p.player_id}-${p.market}-${i}`}
                     className="text-[11px] text-slate-300 bg-slate-700/30 px-1.5 py-0.5 rounded"
                   >
                     {p.player_name ?? p.player_id}{" "}

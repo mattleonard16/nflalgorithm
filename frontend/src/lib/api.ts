@@ -103,7 +103,47 @@ export async function getHealth(season?: number, week?: number): Promise<HealthR
   if (week) params.append("week", week.toString());
 
   const queryString = params.toString();
-  return fetchAPI<HealthResponse>(`/api/health${queryString ? `?${queryString}` : ""}`);
+  // Backend returns { feeds: [{feed, season, week, as_of}], overall_status };
+  // normalize to the shape the System page renders.
+  const raw = await fetchAPI<{
+    feeds: { feed: string; as_of: string | null }[];
+    overall_status: string;
+  }>(`/api/health${queryString ? `?${queryString}` : ""}`);
+
+  const now = Date.now();
+  const feeds = (raw.feeds ?? []).map((f) => {
+    const asOfMs = f.as_of ? new Date(f.as_of).getTime() : NaN;
+    const ageMinutes = Number.isFinite(asOfMs) ? (now - asOfMs) / 60000 : null;
+    return {
+      feed: f.feed,
+      as_of: f.as_of,
+      age_minutes: ageMinutes,
+      status: (ageMinutes !== null && ageMinutes < 24 * 60 ? "FRESH" : "STALE") as
+        | "FRESH"
+        | "STALE",
+    };
+  });
+
+  const lastUpdate = feeds
+    .map((f) => f.as_of)
+    .filter((v): v is string => Boolean(v))
+    .sort()
+    .pop() ?? null;
+
+  const status: HealthResponse["status"] =
+    raw.overall_status === "healthy"
+      ? "ACTIVE"
+      : raw.overall_status === "unknown"
+        ? "UNKNOWN"
+        : "MAINTENANCE";
+
+  return {
+    status,
+    // The health endpoint reads feed_freshness from the DB, so a 200 means the DB answered.
+    database: "Connected",
+    last_update: lastUpdate,
+    feeds,
+  };
 }
 
 /**
@@ -112,35 +152,69 @@ export async function getHealth(season?: number, week?: number): Promise<HealthR
 export async function getEdgeDistribution(
   season: number,
   week: number,
-  bins: number = 20
+  bins: number = 8
 ): Promise<EdgeDistribution> {
-  return fetchAPI<EdgeDistribution>(
+  // Backend returns fractional range labels like "0.1-0.2"; convert to percent labels.
+  const raw = await fetchAPI<{ bins: string[]; counts: number[] }>(
     `/api/analytics/edge-distribution?season=${season}&week=${week}&bins=${bins}`
   );
+  const toPct = (label: string) => {
+    const [lo, hi] = label.split("-").map(Number);
+    if (Number.isNaN(lo) || Number.isNaN(hi)) return label;
+    // Use one decimal when the bin is too narrow for whole percents.
+    const digits = (hi - lo) * 100 < 1 ? 1 : 0;
+    return `${(lo * 100).toFixed(digits)}–${(hi * 100).toFixed(digits)}%`;
+  };
+  return {
+    bins: (raw.bins ?? []).map(toPct),
+    counts: raw.counts ?? [],
+  };
+}
+
+/** Raw analytics row shape returned by the FastAPI backend */
+interface RawGroupStats {
+  bet_count: number;
+  avg_edge: number;
+  avg_roi: number;
+  avg_p_win: number;
 }
 
 /**
- * Get analytics by position
+ * Get analytics by position (normalized: count + avg_edge as percent)
  */
 export async function getAnalyticsByPosition(
   season: number,
   week: number
 ): Promise<{ positions: PositionStats[] }> {
-  return fetchAPI<{ positions: PositionStats[] }>(
+  const raw = await fetchAPI<{ by_position: (RawGroupStats & { position: string })[] }>(
     `/api/analytics/by-position?season=${season}&week=${week}`
   );
+  return {
+    positions: (raw.by_position ?? []).map((r) => ({
+      position: r.position,
+      count: r.bet_count,
+      avg_edge: r.avg_edge * 100,
+    })),
+  };
 }
 
 /**
- * Get analytics by market
+ * Get analytics by market (normalized: count + avg_edge as percent)
  */
 export async function getAnalyticsByMarket(
   season: number,
   week: number
 ): Promise<{ markets: MarketStats[] }> {
-  return fetchAPI<{ markets: MarketStats[] }>(
+  const raw = await fetchAPI<{ by_market: (RawGroupStats & { market: string })[] }>(
     `/api/analytics/by-market?season=${season}&week=${week}`
   );
+  return {
+    markets: (raw.by_market ?? []).map((r) => ({
+      market: r.market,
+      count: r.bet_count,
+      avg_edge: r.avg_edge * 100,
+    })),
+  };
 }
 
 /**
