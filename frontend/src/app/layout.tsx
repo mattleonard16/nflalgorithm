@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { JetBrains_Mono, DM_Sans } from "next/font/google";
+import { JetBrains_Mono, DM_Sans, Barlow_Condensed } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { AppShell } from "@/components/app-shell";
@@ -16,6 +16,12 @@ const jetbrains = JetBrains_Mono({
   weight: ["400", "500", "600", "700"],
 });
 
+const barlow = Barlow_Condensed({
+  variable: "--font-display",
+  subsets: ["latin"],
+  weight: ["500", "600", "700", "800"],
+});
+
 export const metadata: Metadata = {
   title: "NFL Algorithm | Pro Betting Dashboard",
   description:
@@ -30,7 +36,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${dmSans.variable} ${jetbrains.variable} antialiased bg-[#0a0e17] text-slate-100 font-[family-name:var(--font-dm-sans)]`}
+        className={`${dmSans.variable} ${jetbrains.variable} ${barlow.variable} antialiased bg-[#0a0e17] text-slate-100 font-[family-name:var(--font-dm-sans)]`}
       >
         <AuthProvider>
           <AppShell>{children}</AppShell>
