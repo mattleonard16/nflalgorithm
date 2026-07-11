@@ -116,7 +116,7 @@ export default function SystemPage() {
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-100">System Health</h1>
+          <h1 className="text-4xl font-bold text-zinc-100 font-display uppercase tracking-tight">System Health</h1>
           <p className="text-zinc-400 mt-1">Monitor system status and data freshness</p>
         </div>
         <Button
@@ -146,22 +146,24 @@ export default function SystemPage() {
         />
         <StatusCard
           title="System Status"
-          value={health?.status || "Unknown"}
+          value={
+            health?.status === "UNKNOWN" ? "No Feed Data" : health?.status || "Unknown"
+          }
           status={health?.status === "ACTIVE" ? "good" : "warn"}
         />
         <StatusCard
           title="Database"
           value={health?.database || "Unknown"}
-          status={health?.database === "Connected" ? "good" : "error"}
+          status={health?.database === "Connected" ? "good" : "warn"}
         />
         <StatusCard
           title="Last Update"
           value={
             health?.last_update
-              ? new Date(health.last_update).toLocaleTimeString()
-              : "Unknown"
+              ? new Date(health.last_update).toLocaleString()
+              : "No Data"
           }
-          status="good"
+          status={health?.last_update ? "good" : "warn"}
         />
       </div>
 

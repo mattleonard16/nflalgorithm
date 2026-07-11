@@ -38,7 +38,14 @@ import {
   Cell,
 } from "recharts";
 
-const COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
+// Position colors match the dashboard's position badges
+const POSITION_COLORS: Record<string, string> = {
+  QB: "#a78bfa",
+  RB: "#34d399",
+  WR: "#22d3ee",
+  TE: "#fb7185",
+};
+const FALLBACK_COLORS = ["#d4a84b", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#ec4899"];
 
 export default function AnalyticsPage() {
   const [meta, setMeta] = useState<MetaResponse | null>(null);
@@ -90,12 +97,12 @@ export default function AnalyticsPage() {
   // Prepare chart data
   const edgeChartData = edgeDist
     ? edgeDist.bins.map((bin, i) => ({
-        edge: bin.toFixed(1),
-        count: edgeDist.counts[i],
+        edge: bin,
+        count: edgeDist.counts[i] ?? 0,
       }))
     : [];
 
-  const positionChartData = positions.map((p) => ({
+  const positionChartData = (positions ?? []).map((p) => ({
     name: p.position,
     value: p.count,
     avgEdge: p.avg_edge,
@@ -105,7 +112,7 @@ export default function AnalyticsPage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-zinc-100">Analytics</h1>
+        <h1 className="text-4xl font-bold text-zinc-100 font-display uppercase tracking-tight">Analytics</h1>
         <p className="text-zinc-400 mt-1">Deep dive into betting patterns and edge distribution</p>
       </div>
 
@@ -176,7 +183,7 @@ export default function AnalyticsPage() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={edgeChartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
-                    <XAxis dataKey="edge" stroke="#a1a1aa" fontSize={12} />
+                    <XAxis dataKey="edge" stroke="#a1a1aa" fontSize={11} interval={0} />
                     <YAxis stroke="#a1a1aa" fontSize={12} />
                     <Tooltip
                       contentStyle={{
@@ -186,7 +193,7 @@ export default function AnalyticsPage() {
                       }}
                       labelStyle={{ color: "#fafafa" }}
                     />
-                    <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="count" fill="#d4a84b" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -215,8 +222,14 @@ export default function AnalyticsPage() {
                           dataKey="value"
                           label={({ name, value }) => `${name}: ${value}`}
                         >
-                          {positionChartData.map((_, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          {positionChartData.map((entry, index) => (
+                            <Cell
+                              key={`cell-${index}`}
+                              fill={
+                                POSITION_COLORS[entry.name] ??
+                                FALLBACK_COLORS[index % FALLBACK_COLORS.length]
+                              }
+                            />
                           ))}
                         </Pie>
                         <Tooltip
