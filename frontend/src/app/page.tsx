@@ -68,6 +68,8 @@ import {
   ShieldCheck,
   Info,
   PlusCircle,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 
 /* ─── Tier color system ─── */
@@ -134,46 +136,97 @@ function getEdgeBarWidth(edge: number): string {
   return `${pct}%`;
 }
 
+/* ─── Animated count-up for KPI numbers ─── */
+function useCountUp(target: number, durationMs = 700): number {
+  const [display, setDisplay] = useState(0);
+  const prevRef = useRef(0);
+
+  useEffect(() => {
+    const from = prevRef.current;
+    prevRef.current = target;
+    if (from === target) {
+      setDisplay(target);
+      return;
+    }
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      setDisplay(target);
+      return;
+    }
+    let raf: number;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min((now - start) / durationMs, 1);
+      // ease-out cubic
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(from + (target - from) * eased);
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, durationMs]);
+
+  return display;
+}
+
 /* ─── KPI Card ─── */
 function KPICard({
   title,
   value,
+  numericValue,
+  format,
   subtitle,
   icon: Icon,
   accent = false,
 }: {
   title: string;
-  value: string | number;
+  value?: string | number;
+  numericValue?: number;
+  format?: (n: number) => string;
   subtitle?: string;
   icon: React.ComponentType<{ className?: string }>;
   accent?: boolean;
 }) {
+  const animated = useCountUp(numericValue ?? 0);
+  const shown =
+    numericValue !== undefined
+      ? (format ?? ((n: number) => Math.round(n).toString()))(animated)
+      : value;
+
   return (
     <div className="relative group">
       <div
-        className={`rounded-lg border p-4 transition-all duration-200 ${
+        className={`kpi-card rounded-lg border p-4 relative overflow-hidden ${
           accent
-            ? "bg-gradient-to-br from-amber-500/10 to-amber-900/5 border-amber-500/20 hover:border-amber-500/40"
+            ? "kpi-card-accent bg-gradient-to-br from-amber-500/10 to-amber-900/5 border-amber-500/20 hover:border-amber-500/40 shimmer-host"
             : "bg-[#111827]/80 border-slate-800/60 hover:border-slate-700/80"
         }`}
       >
+        {/* corner stripe accent */}
+        <div
+          className={`absolute top-0 right-0 w-10 h-[3px] slant-accent ${
+            accent ? "bg-amber-500/50" : "bg-slate-700/50"
+          }`}
+        />
         <div className="flex items-center justify-between mb-2">
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
             {title}
           </span>
           <Icon
-            className={`h-3.5 w-3.5 ${accent ? "text-amber-500/50" : "text-slate-600"}`}
+            className={`h-3.5 w-3.5 transition-transform duration-200 group-hover:scale-110 ${accent ? "text-amber-500/50" : "text-slate-600"}`}
           />
         </div>
         <div
-          className={`text-2xl font-bold font-[family-name:var(--font-jetbrains)] tabular-nums ${
+          className={`text-3xl font-bold font-display tabular-nums leading-none ${
             accent ? "text-amber-200" : "text-slate-100"
           }`}
         >
-          {value}
+          {shown}
         </div>
         {subtitle && (
-          <p className="text-[11px] text-slate-500 mt-1 font-[family-name:var(--font-jetbrains)]">
+          <p className="text-[11px] text-slate-500 mt-1.5 font-[family-name:var(--font-jetbrains)]">
             {subtitle}
           </p>
         )}
@@ -226,6 +279,28 @@ function PositionBadge({ position }: { position: string | null }) {
   );
 }
 
+/* ─── Over/Under side badge ─── */
+function SideBadge({ side }: { side?: string | null }) {
+  const isUnder = side === "under";
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 px-1 h-5 rounded text-[9px] font-bold border uppercase tracking-wide ${
+        isUnder
+          ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
+          : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+      }`}
+      title={isUnder ? "Under" : "Over"}
+    >
+      {isUnder ? (
+        <ArrowDown className="w-2.5 h-2.5" />
+      ) : (
+        <ArrowUp className="w-2.5 h-2.5" />
+      )}
+      {isUnder ? "Und" : "Ovr"}
+    </span>
+  );
+}
+
 /* ─── Reason Chips ─── */
 function ReasonChips({ bet }: { bet: ValueBet }) {
   const chips: { label: string; color: string }[] = [];
@@ -246,7 +321,7 @@ function ReasonChips({ bet }: { bet: ValueBet }) {
   const delta = bet.mu - bet.line;
   if (Math.abs(delta) > 5) {
     chips.push({
-      label: `+${delta.toFixed(0)} vs line`,
+      label: `${delta > 0 ? "+" : ""}${delta.toFixed(0)} vs line`,
       color: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
     });
   }
@@ -299,7 +374,7 @@ function WhyButton({
         <div className="flex items-center justify-end gap-2 cursor-pointer">
           <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all ${
+              className={`h-full rounded-full transition-all animate-bar-sweep ${
                 bet.edge_percentage >= 0.2
                   ? "bg-gradient-to-r from-amber-500 to-amber-400"
                   : bet.edge_percentage >= 0.1
@@ -326,7 +401,7 @@ function WhyButton({
     >
       <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
         <div
-          className={`h-full rounded-full transition-all ${
+          className={`h-full rounded-full transition-all animate-bar-sweep ${
             bet.edge_percentage >= 0.2
               ? "bg-gradient-to-r from-amber-500 to-amber-400"
               : bet.edge_percentage >= 0.1
@@ -390,13 +465,14 @@ function BetsTable({ bets, tier, season, week }: { bets: ValueBet[]; tier: strin
       style={{ animationDelay: `${tier === "Premium" ? 0 : tier === "Strong" ? 80 : tier === "Marginal" ? 160 : 240}ms` }}
     >
       <div className="flex items-center gap-2 mb-3">
-        <div className={`w-1 h-4 rounded-full ${config.bg} ${config.border} border`} />
-        <h3 className={`text-sm font-semibold ${config.text}`}>
+        <div className={`w-1.5 h-5 slant-accent ${config.bg} ${config.border} border`} />
+        <h3 className={`text-lg font-bold font-display uppercase tracking-wide ${config.text}`}>
           {tier}
         </h3>
         <span className="text-[11px] text-slate-600 font-[family-name:var(--font-jetbrains)]">
           {bets.length} {bets.length === 1 ? "pick" : "picks"}
         </span>
+        <div className="h-px flex-1 bg-gradient-to-r from-slate-700/40 to-transparent" />
       </div>
 
       <div className="rounded-lg border border-slate-800/60 bg-[#111827]/50 overflow-hidden">
@@ -443,7 +519,8 @@ function BetsTable({ bets, tier, season, week }: { bets: ValueBet[]; tier: strin
             {bets.map((bet, idx) => (
               <TableRow
                 key={`${bet.player_id}-${bet.market}-${bet.sportsbook}-${idx}`}
-                className={`border-slate-800/30 ${config.row} transition-colors duration-100`}
+                className={`border-slate-800/30 ${config.row} transition-colors duration-100 animate-row-in`}
+                style={{ animationDelay: `${Math.min(idx * 45, 450)}ms` }}
               >
                 <TableCell className="font-medium text-slate-100 text-[13px]">
                   <div>
@@ -464,7 +541,10 @@ function BetsTable({ bets, tier, season, week }: { bets: ValueBet[]; tier: strin
                   {bet.sportsbook}
                 </TableCell>
                 <TableCell className="text-right text-slate-300 text-[13px] font-[family-name:var(--font-jetbrains)] tabular-nums">
-                  {bet.line?.toFixed(1)}
+                  <span className="inline-flex items-center gap-1.5 justify-end">
+                    <SideBadge side={bet.side} />
+                    {bet.line?.toFixed(1)}
+                  </span>
                 </TableCell>
                 <TableCell className="text-right text-slate-400 text-[13px] font-[family-name:var(--font-jetbrains)] tabular-nums">
                   {bet.price > 0 ? `+${bet.price}` : bet.price}
@@ -660,12 +740,12 @@ export default function DashboardPage() {
       <div className="flex items-end justify-between">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 live-dot" />
             <span className="text-[11px] text-emerald-400/80 font-[family-name:var(--font-jetbrains)] uppercase tracking-widest">
               Live
             </span>
           </div>
-          <h1 className="text-2xl font-bold text-slate-100 tracking-tight">
+          <h1 className="text-4xl font-bold text-slate-100 tracking-tight font-display uppercase">
             Value Dashboard
           </h1>
           <p className="text-sm text-slate-500 mt-0.5">
@@ -942,18 +1022,19 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <KPICard
           title="Active Bets"
-          value={bets.length}
+          numericValue={bets.length}
           icon={BarChart3}
         />
         <KPICard
           title="Premium"
-          value={premiumBets.length}
+          numericValue={premiumBets.length}
           icon={Trophy}
           accent={premiumBets.length > 0}
         />
         <KPICard
           title="Avg Edge"
-          value={`${avgEdge.toFixed(1)}%`}
+          numericValue={avgEdge}
+          format={(n) => `${n.toFixed(1)}%`}
           icon={Target}
         />
         <KPICard
@@ -963,7 +1044,8 @@ export default function DashboardPage() {
         />
         <KPICard
           title="P/L"
-          value={`${seasonPL >= 0 ? "+" : ""}${seasonPL.toFixed(1)}u`}
+          numericValue={seasonPL}
+          format={(n) => `${n >= 0 ? "+" : ""}${n.toFixed(1)}u`}
           subtitle={
             performance
               ? `${performance.overall_roi.toFixed(1)}% ROI`
