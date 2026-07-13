@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from utils.db import execute, read_dataframe
+from utils.db import executemany, get_backend, read_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -21,22 +21,29 @@ def populate_player_dim() -> int:
     """
     query = """
         SELECT
-            player_id,
-            name AS player_name,
-            position,
-            team,
-            season AS last_season,
-            week AS last_week
+            latest.player_id,
+            latest.gsis_id,
+            latest.name AS player_name,
+            latest.position,
+            latest.team,
+            latest.season AS last_season,
+            latest.week AS last_week
         FROM (
             SELECT
-                player_id, name, position, team, season, week,
+                player_id, gsis_id, name, position, team, season, week,
                 ROW_NUMBER() OVER (
                     PARTITION BY player_id
                     ORDER BY season DESC, week DESC
                 ) AS rn
             FROM player_stats_enhanced
-        )
+        ) latest
+        LEFT JOIN player_dim existing ON existing.player_id = latest.player_id
         WHERE rn = 1
+          AND (
+              existing.player_id IS NULL
+              OR latest.season > existing.last_season
+              OR (latest.season = existing.last_season AND latest.week >= existing.last_week)
+          )
     """
     df = read_dataframe(query)
 
@@ -45,24 +52,48 @@ def populate_player_dim() -> int:
         return 0
 
     now = datetime.now(timezone.utc).isoformat()
+    columns = "player_id, gsis_id, player_name, position, team, last_season, last_week, updated_at"
+    if get_backend() == "sqlite":
+        upsert_sql = f"""
+            INSERT INTO player_dim ({columns})
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(player_id) DO UPDATE SET
+                gsis_id = excluded.gsis_id,
+                player_name = excluded.player_name,
+                position = excluded.position,
+                team = excluded.team,
+                last_season = excluded.last_season,
+                last_week = excluded.last_week,
+                updated_at = excluded.updated_at
+        """
+    else:
+        upsert_sql = f"""
+            INSERT INTO player_dim ({columns})
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                gsis_id = VALUES(gsis_id),
+                player_name = VALUES(player_name),
+                position = VALUES(position),
+                team = VALUES(team),
+                last_season = VALUES(last_season),
+                last_week = VALUES(last_week),
+                updated_at = VALUES(updated_at)
+        """
 
-    for _, row in df.iterrows():
-        execute(
-            """
-            INSERT OR REPLACE INTO player_dim
-                (player_id, player_name, position, team, last_season, last_week, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            params=(
-                row["player_id"],
-                row["player_name"],
-                row["position"],
-                row["team"],
-                int(row["last_season"]),
-                int(row["last_week"]),
-                now,
-            ),
+    rows = [
+        (
+            row["player_id"],
+            row["gsis_id"],
+            row["player_name"],
+            row["position"],
+            row["team"],
+            int(row["last_season"]),
+            int(row["last_week"]),
+            now,
         )
+        for _, row in df.iterrows()
+    ]
+    executemany(upsert_sql, rows)
 
     logger.info("player_dim populated with %d players", len(df))
     return len(df)

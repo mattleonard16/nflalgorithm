@@ -22,6 +22,7 @@ from confidence_engine import compute_confidence_score, score_plays
 from config import config
 from risk_manager import assess_risk
 from utils.db import read_dataframe
+from utils.nfl_markets import MARKET_TO_STAT
 from value_betting_engine import rank_weekly_value
 
 logger = logging.getLogger(__name__)
@@ -126,10 +127,16 @@ def measure_edge_decay(
     raw = rank_weekly_value(season, week, min_edge=0.0)
 
     if raw.empty:
-        return pd.DataFrame(columns=[
-            "player_id", "market", "original_edge",
-            "offset", "shifted_edge", "edge_change",
-        ])
+        return pd.DataFrame(
+            columns=[
+                "player_id",
+                "market",
+                "original_edge",
+                "offset",
+                "shifted_edge",
+                "edge_change",
+            ]
+        )
 
     rows: List[Dict[str, Any]] = []
     for _, pick in raw.iterrows():
@@ -139,7 +146,7 @@ def measure_edge_decay(
         line = float(pick["line"])
         price = int(pick["price"])
 
-        from value_betting_engine import prob_over, _implied_probability
+        from value_betting_engine import _implied_probability, prob_over
 
         implied = _implied_probability(price)
 
@@ -147,14 +154,16 @@ def measure_edge_decay(
             shifted_line = line + offset
             shifted_p = prob_over(mu, sigma, shifted_line)
             shifted_edge = shifted_p - implied
-            rows.append({
-                "player_id": pick["player_id"],
-                "market": pick["market"],
-                "original_edge": original_edge,
-                "offset": offset,
-                "shifted_edge": shifted_edge,
-                "edge_change": shifted_edge - original_edge,
-            })
+            rows.append(
+                {
+                    "player_id": pick["player_id"],
+                    "market": pick["market"],
+                    "original_edge": original_edge,
+                    "offset": offset,
+                    "shifted_edge": shifted_edge,
+                    "edge_change": shifted_edge - original_edge,
+                }
+            )
 
     return pd.DataFrame(rows)
 
@@ -165,8 +174,7 @@ def edge_decay_summary(decay_df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     return (
-        decay_df
-        .groupby(["market", "offset"])
+        decay_df.groupby(["market", "offset"])
         .agg(
             mean_edge_change=("edge_change", "mean"),
             median_edge_change=("edge_change", "median"),
@@ -197,7 +205,9 @@ def compare_agent_vs_raw(
             filtered_all.append(r["agent_filtered"])
 
     raw_combined = pd.concat(raw_all, ignore_index=True) if raw_all else pd.DataFrame()
-    filtered_combined = pd.concat(filtered_all, ignore_index=True) if filtered_all else pd.DataFrame()
+    filtered_combined = (
+        pd.concat(filtered_all, ignore_index=True) if filtered_all else pd.DataFrame()
+    )
 
     raw_metrics = _summarize_picks(raw_combined, "raw")
     filtered_metrics = _summarize_picks(filtered_combined, "agent_filtered")
@@ -207,7 +217,8 @@ def compare_agent_vs_raw(
         "agent_filtered": filtered_metrics,
         "improvement": {
             "edge_delta": filtered_metrics.get("avg_edge", 0) - raw_metrics.get("avg_edge", 0),
-            "pick_reduction": raw_metrics.get("total_picks", 0) - filtered_metrics.get("total_picks", 0),
+            "pick_reduction": raw_metrics.get("total_picks", 0)
+            - filtered_metrics.get("total_picks", 0),
         },
         "weeks_analyzed": len(results),
     }
@@ -226,19 +237,21 @@ def generate_validation_report(
 
     week_summaries = []
     for r in results:
-        week_summaries.append({
-            "week": r["week"],
-            "raw_pick_count": len(r["raw_picks"]),
-            "filtered_pick_count": len(r["agent_filtered"]),
-            "agent_decision_count": len(r["agent_decisions"]),
-            "approved_count": sum(
-                1 for d in r["agent_decisions"] if d.get("decision") == "APPROVED"
-            ),
-            "rejected_count": sum(
-                1 for d in r["agent_decisions"] if d.get("decision") == "REJECTED"
-            ),
-            "metrics": r["metrics"],
-        })
+        week_summaries.append(
+            {
+                "week": r["week"],
+                "raw_pick_count": len(r["raw_picks"]),
+                "filtered_pick_count": len(r["agent_filtered"]),
+                "agent_decision_count": len(r["agent_decisions"]),
+                "approved_count": sum(
+                    1 for d in r["agent_decisions"] if d.get("decision") == "APPROVED"
+                ),
+                "rejected_count": sum(
+                    1 for d in r["agent_decisions"] if d.get("decision") == "REJECTED"
+                ),
+                "metrics": r["metrics"],
+            }
+        )
 
     decay_summary = {}
     if decay_df is not None and not decay_df.empty:
@@ -266,9 +279,7 @@ def _apply_agent_filter(
         return picks.copy()
 
     approved_keys = {
-        (d.get("player_id"), d.get("market"))
-        for d in decisions
-        if d.get("decision") == "APPROVED"
+        (d.get("player_id"), d.get("market")) for d in decisions if d.get("decision") == "APPROVED"
     }
 
     if not approved_keys:
@@ -293,15 +304,6 @@ def _load_actuals(season: int, week: int) -> pd.DataFrame:
         return read_dataframe(query, params=(season, week))
     except Exception:
         return pd.DataFrame()
-
-
-MARKET_TO_STAT = {
-    "rushing_yards": "rushing_yards",
-    "receiving_yards": "receiving_yards",
-    "passing_yards": "passing_yards",
-    "receptions": "receptions",
-    "targets": "targets",
-}
 
 
 def _grade_picks(picks: pd.DataFrame, actuals: pd.DataFrame) -> pd.DataFrame:
@@ -381,8 +383,14 @@ def _summarize_picks(df: pd.DataFrame, label: str) -> Dict[str, Any]:
     return {
         "label": label,
         "total_picks": len(df),
-        "avg_edge": round(float(df["edge_percentage"].mean()), 4) if "edge_percentage" in df.columns else 0.0,
-        "avg_kelly": round(float(df["kelly_fraction"].mean()), 4) if "kelly_fraction" in df.columns else 0.0,
+        "avg_edge": (
+            round(float(df["edge_percentage"].mean()), 4)
+            if "edge_percentage" in df.columns
+            else 0.0
+        ),
+        "avg_kelly": (
+            round(float(df["kelly_fraction"].mean()), 4) if "kelly_fraction" in df.columns else 0.0
+        ),
         "total_stake": round(float(df["stake"].sum()), 2) if "stake" in df.columns else 0.0,
     }
 
@@ -393,10 +401,10 @@ def _summarize_picks(df: pd.DataFrame, label: str) -> Dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Dry-run validation pipeline")
     parser.add_argument("--season", type=int, required=True)
-    parser.add_argument("--weeks", nargs="*", type=int, default=None,
-                        help="Weeks to replay (default: 19 20 21)")
-    parser.add_argument("--output", type=str, default=None,
-                        help="Output directory for report JSON")
+    parser.add_argument(
+        "--weeks", nargs="*", type=int, default=None, help="Weeks to replay (default: 19 20 21)"
+    )
+    parser.add_argument("--output", type=str, default=None, help="Output directory for report JSON")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -436,15 +444,19 @@ def _print_summary(report: Dict[str, Any]) -> None:
         filt_n = ws["filtered_pick_count"]
         approved = ws["approved_count"]
         rejected = ws["rejected_count"]
-        print(f"  Week {w}: {raw_n} raw -> {filt_n} filtered "
-              f"({approved} approved, {rejected} rejected)")
+        print(
+            f"  Week {w}: {raw_n} raw -> {filt_n} filtered "
+            f"({approved} approved, {rejected} rejected)"
+        )
 
     ab = report.get("ab_comparison", {})
     raw_m = ab.get("raw", {})
     filt_m = ab.get("agent_filtered", {})
     print(f"\nA/B Comparison:")
     print(f"  Raw:    {raw_m.get('total_picks', 0)} picks, avg edge={raw_m.get('avg_edge', 0):.4f}")
-    print(f"  Agents: {filt_m.get('total_picks', 0)} picks, avg edge={filt_m.get('avg_edge', 0):.4f}")
+    print(
+        f"  Agents: {filt_m.get('total_picks', 0)} picks, avg edge={filt_m.get('avg_edge', 0):.4f}"
+    )
 
     improvement = ab.get("improvement", {})
     print(f"  Edge delta: {improvement.get('edge_delta', 0):+.4f}")

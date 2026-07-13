@@ -1,21 +1,26 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest ingest-ncaab ncaab-bracket ncaab-predict ncaab-full ingest-ncaab-modifiers
+.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api-preflight api-serve api api-prod-serve api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest ingest-ncaab ncaab-bracket ncaab-predict ncaab-full ingest-ncaab-modifiers week-refresh
 
 # Environment detection - defaults to UV if available
 ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && echo "uv" || echo "venv")
 
 # SEASON/WEEK must be supplied by the caller for any target that runs the
 # weekly prop pipeline (T0 #5: no hardcoded defaults).
-# Example: make week SEASON=2025 WEEK=13
+# Example: make week SEASON=2026 WEEK=1
 SEASON ?=
 WEEK ?=
+NFL_SEASONS ?=
+HISTORY_SEASONS ?=
+REFRESH_HISTORY ?= 0
+THROUGH_WEEK ?= 18
+MIGRATION_BACKUP_DIR ?= migration_backup
 
 # Guard used by weekly targets — fails loud if SEASON or WEEK is empty.
 define require_season_week
 	@if [ -z "$(SEASON)" ] || [ -z "$(WEEK)" ]; then \
-		echo "ERROR: SEASON and WEEK are required. Example: make $@ SEASON=2025 WEEK=13" >&2; \
+		echo "ERROR: SEASON and WEEK are required. Example: make $@ SEASON=2026 WEEK=1" >&2; \
 		exit 2; \
 	fi
 endef
@@ -23,7 +28,7 @@ endef
 # Guard used by season-scoped targets — fails loud if SEASON is empty.
 define require_season
 	@if [ -z "$(SEASON)" ]; then \
-		echo "ERROR: SEASON is required. Example: make $@ SEASON=2025" >&2; \
+		echo "ERROR: SEASON is required. Example: make $@ SEASON=2026" >&2; \
 		exit 2; \
 	fi
 endef
@@ -78,7 +83,8 @@ help:
 	@echo "  health-check  - Comprehensive environment health check"
 	@echo ""
 	@echo "Data Ingestion:"
-	@echo "  ingest-nfl    - Ingest real NFL data (2024+2025) via nflreadpy"
+	@echo "  ingest-nfl    - Ingest configured historical seasons plus the current NFL season"
+	@echo "  week-refresh  - Refresh roster/schedule/history and generate predictions (SEASON/WEEK)"
 
 # Smart installation - auto-detects best environment
 install:
@@ -183,14 +189,36 @@ dashboard:
 	@echo "Launching Streamlit dashboard with $(ENV_TYPE) ($(DB_BACKEND))..."
 	$(DB_ENV) $(PYTHON) -m streamlit run dashboard/main_dashboard.py --server.port 8501
 
-# Launch FastAPI backend
-api:
+# Upgrade the local SQLite schema before the API starts. Production MySQL
+# migrations remain an explicit deployment concern.
+api-preflight:
+	@if [ "$(DB_BACKEND)" = "sqlite" ]; then \
+		if [ -f "$(SQLITE_DB_PATH)" ]; then \
+			mkdir -p "$(MIGRATION_BACKUP_DIR)"; \
+			backup_path="$(MIGRATION_BACKUP_DIR)/$$(basename "$(SQLITE_DB_PATH)").$$(date -u +%Y%m%dT%H%M%SZ).$$$$.bak"; \
+			echo "Backing up $(SQLITE_DB_PATH) to $$backup_path..."; \
+			cp "$(SQLITE_DB_PATH)" "$$backup_path"; \
+		fi; \
+		echo "Applying SQLite schema migrations to $(SQLITE_DB_PATH)..."; \
+		$(DB_ENV) $(PYTHON) -m scripts.run_migrations --database "$(SQLITE_DB_PATH)"; \
+	else \
+		echo "Skipping SQLite API preflight for DB_BACKEND=$(DB_BACKEND)"; \
+	fi
+
+# Launch FastAPI backend after callers complete any required preflight.
+api-serve:
 	@echo "Starting FastAPI backend on port 8000..."
 	$(DB_ENV) $(PYTHON) -m uvicorn api.server:app --host 0.0.0.0 --port 8000 --reload
 
-api-prod:
+api: api-preflight
+	@$(MAKE) api-serve
+
+api-prod-serve:
 	@echo "Starting FastAPI backend (production) on port 8000..."
 	$(DB_ENV) $(PYTHON) -m uvicorn api.server:app --host 0.0.0.0 --port 8000
+
+api-prod: api-preflight
+	@$(MAKE) api-prod-serve
 
 # Frontend commands
 frontend-install:
@@ -208,9 +236,10 @@ frontend-build:
 # Full stack - run both API and frontend
 fullstack:
 	@echo "Starting API and frontend..."
-	@make api &
+	@$(MAKE) api-preflight
+	@$(MAKE) api-serve &
 	@sleep 2
-	@make frontend-dev
+	@$(MAKE) frontend-dev
 
 # Weekly report with timing
 report:
@@ -245,13 +274,18 @@ week-open:
 
 week-update:
 	$(call require_season_week)
-	@echo "Updating data for season $(SEASON), week $(WEEK)..."
-	$(DB_ENV) $(PYTHON) -c "from data_pipeline import update_week; update_week(int('$(SEASON)'), int('$(WEEK)'))"
+	@echo "Running canonical pregame refresh for season $(SEASON), week $(WEEK)..."
+	$(DB_ENV) $(PYTHON) -m scripts.prepare_nfl_week --season $(SEASON) --week $(WEEK)
 
 week-predict:
 	$(call require_season_week)
-	@echo "Generating projections for season $(SEASON), week $(WEEK)..."
-	$(DB_ENV) $(PYTHON) -c "from models.position_specific import predict_week; predict_week(int('$(SEASON)'), int('$(WEEK)'))"
+	@echo "Running canonical roster-backed prediction refresh for season $(SEASON), week $(WEEK)..."
+	$(DB_ENV) $(PYTHON) -m scripts.prepare_nfl_week --season $(SEASON) --week $(WEEK)
+
+week-refresh:
+	$(call require_season_week)
+	@echo "Refreshing roster, schedule, history, and predictions for $(SEASON) week $(WEEK)..."
+	$(DB_ENV) $(PYTHON) -m scripts.prepare_nfl_week --season $(SEASON) --week $(WEEK) $(if $(strip $(HISTORY_SEASONS)),--history-seasons $(HISTORY_SEASONS),) $(if $(filter 1,$(REFRESH_HISTORY)),--refresh-history,)
 
 week-materialize:
 	$(call require_season_week)
@@ -330,10 +364,10 @@ te-bias-analysis:
 	$(DB_ENV) $(PYTHON) -m scripts.te_market_bias --output reports
 	@echo "TE bias report written to reports/te_market_bias_report.json"
 
-# Ingest real NFL data from nflverse (2024+2025 by default)
+# Ingest real NFL data from nflverse (configured history plus the current season)
 ingest-nfl:
 	@echo "Ingesting real NFL data via nflreadpy..."
-	$(DB_ENV) $(PYTHON) scripts/ingest_real_nfl_data.py --seasons 2024,2025 --through-week 18
+	$(DB_ENV) $(PYTHON) scripts/ingest_real_nfl_data.py $(if $(strip $(NFL_SEASONS)),--seasons $(NFL_SEASONS),) --through-week $(THROUGH_WEEK)
 
 # ============================================================
 # NBA Targets
@@ -683,4 +717,3 @@ add-dep:
 		$(PYTHON) -m pip freeze > requirements.txt; \
 		echo "Added $(PKG) and updated requirements.txt"; \
 	fi
-

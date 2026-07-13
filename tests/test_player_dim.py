@@ -19,6 +19,7 @@ def db(tmp_path, monkeypatch):
 
     # Patch config.database.path so get_connection uses our temp db
     import config as cfg
+
     monkeypatch.setattr(cfg.config.database, "path", db_path)
     monkeypatch.setattr(cfg.config.database, "backend", "sqlite")
 
@@ -47,11 +48,12 @@ class TestPopulatePlayerDim:
         count = populate_player_dim()
         assert count == 1
 
-        row = fetchone("SELECT * FROM player_dim WHERE player_id = ?", params=("P001",))
+        row = fetchone(
+            "SELECT player_name, position, team FROM player_dim WHERE player_id = ?",
+            params=("P001",),
+        )
         assert row is not None
-        assert row[1] == "Josh Allen"  # player_name
-        assert row[2] == "QB"  # position
-        assert row[3] == "BUF"  # team
+        assert row == ("Josh Allen", "QB", "BUF")
 
     def test_latest_season_week_wins(self, db):
         _seed_player(db, "P002", "Tyreek Hill", "WR", "MIA", 2024, 18)
@@ -60,7 +62,9 @@ class TestPopulatePlayerDim:
 
         populate_player_dim()
 
-        row = fetchone("SELECT last_season, last_week FROM player_dim WHERE player_id = ?", params=("P002",))
+        row = fetchone(
+            "SELECT last_season, last_week FROM player_dim WHERE player_id = ?", params=("P002",)
+        )
         assert row == (2025, 10)
 
     def test_idempotent(self, db):
@@ -70,7 +74,9 @@ class TestPopulatePlayerDim:
         count2 = populate_player_dim()
         assert count1 == count2 == 1
 
-        df = read_dataframe("SELECT COUNT(*) as n FROM player_dim WHERE player_id = ?", params=("P003",))
+        df = read_dataframe(
+            "SELECT COUNT(*) as n FROM player_dim WHERE player_id = ?", params=("P003",)
+        )
         assert int(df.iloc[0]["n"]) == 1
 
     def test_empty_table(self, db):
@@ -86,6 +92,23 @@ class TestPopulatePlayerDim:
 
         row = fetchone("SELECT team FROM player_dim WHERE player_id = ?", params=("P004",))
         assert row[0] == "NYJ"
+
+    def test_does_not_replace_newer_roster_context_with_older_stats(self, db):
+        execute(
+            """
+            INSERT INTO player_dim
+                (player_id, player_name, position, team, last_season, last_week, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            params=("P005", "Season Ready", "WR", "BUF", 2026, 0, "roster-refresh"),
+        )
+        _seed_player(db, "P005", "Season Ready", "WR", "BUF", 2025, 18)
+
+        assert populate_player_dim() == 0
+        row = fetchone(
+            "SELECT last_season, last_week FROM player_dim WHERE player_id = ?", params=("P005",)
+        )
+        assert row == (2026, 0)
 
     def test_multiple_players(self, db):
         _seed_player(db, "P010", "Patrick Mahomes", "QB", "KC", 2025, 12)
