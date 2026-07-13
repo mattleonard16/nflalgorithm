@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from utils.db import column_exists, get_connection, table_exists
+from utils.db import column_exists, get_backend, get_connection, table_exists
 
 
 @dataclass
@@ -16,13 +17,24 @@ class MigrationManager:
     db_path: Path | str
 
     def run(self) -> None:
+        if get_backend() == "sqlite":
+            conn = sqlite3.connect(str(self.db_path))
+            try:
+                self._run_on_connection(conn)
+            finally:
+                conn.close()
+            return
+
         with get_connection() as conn:
-            cursor = conn.cursor()
-            for ddl in self._ddl_statements():
-                cursor.execute(ddl)
-            self._ensure_columns(cursor)
-            self._ensure_indexes(cursor)
-            conn.commit()
+            self._run_on_connection(conn)
+
+    def _run_on_connection(self, conn: Any) -> None:
+        cursor = conn.cursor()
+        for ddl in self._ddl_statements():
+            cursor.execute(ddl)
+        self._ensure_columns(cursor)
+        self._ensure_indexes(cursor)
+        conn.commit()
 
     def _ddl_statements(self) -> Iterable[str]:
         return (
@@ -150,8 +162,57 @@ class MigrationManager:
             )
             """,
             """
+            CREATE TABLE IF NOT EXISTS nfl_roster_players (
+                season INTEGER NOT NULL,
+                gsis_id VARCHAR(32) NOT NULL,
+                player_id VARCHAR(255) NOT NULL,
+                player_name TEXT NOT NULL,
+                team VARCHAR(8) NOT NULL,
+                position VARCHAR(8) NOT NULL,
+                roster_status VARCHAR(32),
+                roster_week INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (season, gsis_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS nfl_player_context_snapshots (
+                season INTEGER NOT NULL,
+                week INTEGER NOT NULL,
+                gsis_id VARCHAR(32) NOT NULL,
+                player_id VARCHAR(255) NOT NULL,
+                team VARCHAR(8) NOT NULL,
+                position VARCHAR(8) NOT NULL,
+                roster_status VARCHAR(32),
+                depth_position VARCHAR(32),
+                depth_rank INTEGER,
+                is_starter INTEGER NOT NULL DEFAULT 0,
+                injury_status VARCHAR(64),
+                practice_status VARCHAR(128),
+                primary_injury VARCHAR(128),
+                expected_snap_count REAL NOT NULL DEFAULT 0,
+                expected_snap_percentage REAL NOT NULL DEFAULT 0,
+                expected_rushing_attempts REAL NOT NULL DEFAULT 0,
+                expected_targets REAL NOT NULL DEFAULT 0,
+                expected_passing_attempts REAL NOT NULL DEFAULT 0,
+                expected_target_share REAL NOT NULL DEFAULT 0,
+                expected_air_yards REAL NOT NULL DEFAULT 0,
+                expected_yac_yards REAL NOT NULL DEFAULT 0,
+                expected_red_zone_touches REAL NOT NULL DEFAULT 0,
+                expected_game_script REAL NOT NULL DEFAULT 0,
+                is_rookie INTEGER NOT NULL DEFAULT 0,
+                is_new_team INTEGER NOT NULL DEFAULT 0,
+                uncertainty_multiplier REAL NOT NULL DEFAULT 1,
+                prior_source VARCHAR(32) NOT NULL,
+                source_updated_at TEXT,
+                captured_at TEXT NOT NULL,
+                PRIMARY KEY (season, week, gsis_id)
+            )
+            """,
+            """
             CREATE TABLE IF NOT EXISTS player_stats_enhanced (
                 player_id TEXT NOT NULL,
+                gsis_id VARCHAR(32),
                 season INTEGER NOT NULL,
                 week INTEGER NOT NULL,
                 name TEXT NOT NULL,
@@ -370,6 +431,7 @@ class MigrationManager:
             """
             CREATE TABLE IF NOT EXISTS player_dim (
                 player_id TEXT PRIMARY KEY,
+                gsis_id VARCHAR(32),
                 player_name TEXT NOT NULL,
                 position TEXT NOT NULL,
                 team TEXT NOT NULL,
@@ -784,7 +846,9 @@ class MigrationManager:
 
     def _ensure_columns(self, cursor) -> None:
         # Check if games table exists before altering it
-        if table_exists("games", conn=cursor.connection) and not column_exists("games", "kickoff_utc", conn=cursor.connection):
+        if table_exists("games", conn=cursor.connection) and not column_exists(
+            "games", "kickoff_utc", conn=cursor.connection
+        ):
             cursor.execute("ALTER TABLE games ADD COLUMN kickoff_utc TEXT")
 
         # Backfill new columns on existing materialized_value_view tables
@@ -796,19 +860,33 @@ class MigrationManager:
 
         # Add confidence_score and confidence_tier to materialized_value_view
         if table_exists("materialized_value_view", conn=cursor.connection):
-            if not column_exists("materialized_value_view", "confidence_score", conn=cursor.connection):
-                cursor.execute("ALTER TABLE materialized_value_view ADD COLUMN confidence_score REAL")
-            if not column_exists("materialized_value_view", "confidence_tier", conn=cursor.connection):
-                cursor.execute("ALTER TABLE materialized_value_view ADD COLUMN confidence_tier TEXT")
+            if not column_exists(
+                "materialized_value_view", "confidence_score", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE materialized_value_view ADD COLUMN confidence_score REAL"
+                )
+            if not column_exists(
+                "materialized_value_view", "confidence_tier", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE materialized_value_view ADD COLUMN confidence_tier TEXT"
+                )
             # T0 #4: side column for over/under support (existing rows default to 'over')
             if not column_exists("materialized_value_view", "side", conn=cursor.connection):
-                cursor.execute("ALTER TABLE materialized_value_view ADD COLUMN side TEXT NOT NULL DEFAULT 'over'")
+                cursor.execute(
+                    "ALTER TABLE materialized_value_view ADD COLUMN side TEXT NOT NULL DEFAULT 'over'"
+                )
             # T1 C3: persist per-side fair probabilities so /api/value-bets can
             # show vig-removed prob alongside model prob without recomputing.
             if not column_exists("materialized_value_view", "implied_prob", conn=cursor.connection):
                 cursor.execute("ALTER TABLE materialized_value_view ADD COLUMN implied_prob REAL")
-            if not column_exists("materialized_value_view", "implied_prob_under", conn=cursor.connection):
-                cursor.execute("ALTER TABLE materialized_value_view ADD COLUMN implied_prob_under REAL")
+            if not column_exists(
+                "materialized_value_view", "implied_prob_under", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE materialized_value_view ADD COLUMN implied_prob_under REAL"
+                )
             # T0 #4 (cont.): widen PRIMARY KEY to include `side`. SQLite ALTER cannot
             # modify PK, so detect old-shape via sqlite_master DDL and rebuild.
             self._rebuild_mvv_pk_if_needed(cursor)
@@ -825,12 +903,24 @@ class MigrationManager:
                 cursor.execute("ALTER TABLE weekly_projections ADD COLUMN volatility_score REAL")
             if not column_exists("weekly_projections", "target_share", conn=cursor.connection):
                 cursor.execute("ALTER TABLE weekly_projections ADD COLUMN target_share REAL")
-            if not column_exists("weekly_projections", "context_sensitivity", conn=cursor.connection):
-                cursor.execute("ALTER TABLE weekly_projections ADD COLUMN context_sensitivity REAL DEFAULT 0")
-            if not column_exists("weekly_projections", "pass_attempts_predicted", conn=cursor.connection):
-                cursor.execute("ALTER TABLE weekly_projections ADD COLUMN pass_attempts_predicted REAL DEFAULT 0")
-            if not column_exists("weekly_projections", "yards_per_attempt_predicted", conn=cursor.connection):
-                cursor.execute("ALTER TABLE weekly_projections ADD COLUMN yards_per_attempt_predicted REAL DEFAULT 0")
+            if not column_exists(
+                "weekly_projections", "context_sensitivity", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE weekly_projections ADD COLUMN context_sensitivity REAL DEFAULT 0"
+                )
+            if not column_exists(
+                "weekly_projections", "pass_attempts_predicted", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE weekly_projections ADD COLUMN pass_attempts_predicted REAL DEFAULT 0"
+                )
+            if not column_exists(
+                "weekly_projections", "yards_per_attempt_predicted", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE weekly_projections ADD COLUMN yards_per_attempt_predicted REAL DEFAULT 0"
+                )
 
         # Add data_health_json to pipeline_runs
         if table_exists("pipeline_runs", conn=cursor.connection):
@@ -860,20 +950,42 @@ class MigrationManager:
 
         # Phase 4+6: Add confidence and injury columns to nba_materialized_value_view
         if table_exists("nba_materialized_value_view", conn=cursor.connection):
-            if not column_exists("nba_materialized_value_view", "confidence_score", conn=cursor.connection):
-                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN confidence_score REAL")
-            if not column_exists("nba_materialized_value_view", "confidence_tier", conn=cursor.connection):
-                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN confidence_tier TEXT")
-            if not column_exists("nba_materialized_value_view", "injury_boost_multiplier", conn=cursor.connection):
-                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN injury_boost_multiplier REAL")
-            if not column_exists("nba_materialized_value_view", "injury_boost_players", conn=cursor.connection):
-                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN injury_boost_players TEXT")
+            if not column_exists(
+                "nba_materialized_value_view", "confidence_score", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE nba_materialized_value_view ADD COLUMN confidence_score REAL"
+                )
+            if not column_exists(
+                "nba_materialized_value_view", "confidence_tier", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE nba_materialized_value_view ADD COLUMN confidence_tier TEXT"
+                )
+            if not column_exists(
+                "nba_materialized_value_view", "injury_boost_multiplier", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE nba_materialized_value_view ADD COLUMN injury_boost_multiplier REAL"
+                )
+            if not column_exists(
+                "nba_materialized_value_view", "injury_boost_players", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE nba_materialized_value_view ADD COLUMN injury_boost_players TEXT"
+                )
             if not column_exists("nba_materialized_value_view", "base_mu", conn=cursor.connection):
                 cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN base_mu REAL")
-            if not column_exists("nba_materialized_value_view", "injury_adjusted_mu", conn=cursor.connection):
-                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN injury_adjusted_mu REAL")
+            if not column_exists(
+                "nba_materialized_value_view", "injury_adjusted_mu", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE nba_materialized_value_view ADD COLUMN injury_adjusted_mu REAL"
+                )
             if not column_exists("nba_materialized_value_view", "side", conn=cursor.connection):
-                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN side TEXT DEFAULT 'over'")
+                cursor.execute(
+                    "ALTER TABLE nba_materialized_value_view ADD COLUMN side TEXT DEFAULT 'over'"
+                )
             # Phase 4 (Monte Carlo): mc_p_win for simulation-based probability
             if not column_exists("nba_materialized_value_view", "mc_p_win", conn=cursor.connection):
                 cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN mc_p_win REAL")
@@ -885,10 +997,16 @@ class MigrationManager:
 
         # Phase 5 calibration: Add p_win_raw and calibrated columns
         if table_exists("nba_materialized_value_view", conn=cursor.connection):
-            if not column_exists("nba_materialized_value_view", "p_win_raw", conn=cursor.connection):
+            if not column_exists(
+                "nba_materialized_value_view", "p_win_raw", conn=cursor.connection
+            ):
                 cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN p_win_raw REAL")
-            if not column_exists("nba_materialized_value_view", "calibrated", conn=cursor.connection):
-                cursor.execute("ALTER TABLE nba_materialized_value_view ADD COLUMN calibrated INTEGER DEFAULT 0")
+            if not column_exists(
+                "nba_materialized_value_view", "calibrated", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE nba_materialized_value_view ADD COLUMN calibrated INTEGER DEFAULT 0"
+                )
 
         # Phase 5: Migrate nba_odds PK to include as_of
         self._migrate_nba_odds_pk(cursor)
@@ -900,10 +1018,28 @@ class MigrationManager:
 
         # Add passing columns to player_stats_enhanced
         if table_exists("player_stats_enhanced", conn=cursor.connection):
+            if not column_exists("player_stats_enhanced", "gsis_id", conn=cursor.connection):
+                cursor.execute("ALTER TABLE player_stats_enhanced ADD COLUMN gsis_id VARCHAR(32)")
             if not column_exists("player_stats_enhanced", "passing_yards", conn=cursor.connection):
-                cursor.execute("ALTER TABLE player_stats_enhanced ADD COLUMN passing_yards REAL NOT NULL DEFAULT 0")
-            if not column_exists("player_stats_enhanced", "passing_attempts", conn=cursor.connection):
-                cursor.execute("ALTER TABLE player_stats_enhanced ADD COLUMN passing_attempts REAL NOT NULL DEFAULT 0")
+                cursor.execute(
+                    "ALTER TABLE player_stats_enhanced ADD COLUMN passing_yards REAL NOT NULL DEFAULT 0"
+                )
+            if not column_exists(
+                "player_stats_enhanced", "passing_attempts", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE player_stats_enhanced ADD COLUMN passing_attempts REAL NOT NULL DEFAULT 0"
+                )
+
+        if table_exists("player_dim", conn=cursor.connection):
+            if not column_exists("player_dim", "gsis_id", conn=cursor.connection):
+                cursor.execute("ALTER TABLE player_dim ADD COLUMN gsis_id VARCHAR(32)")
+
+        if table_exists("nfl_roster_players", conn=cursor.connection):
+            if not column_exists("nfl_roster_players", "roster_week", conn=cursor.connection):
+                cursor.execute(
+                    "ALTER TABLE nfl_roster_players ADD COLUMN roster_week INTEGER NOT NULL DEFAULT 0"
+                )
 
         # NCAAB modifier columns (Smart Modifiers system)
         if table_exists("ncaab_team_ratings", conn=cursor.connection):
@@ -927,7 +1063,9 @@ class MigrationManager:
             ]
             for col_name, col_type in ncaab_modifier_cols:
                 if not column_exists("ncaab_team_ratings", col_name, conn=cursor.connection):
-                    cursor.execute(f"ALTER TABLE ncaab_team_ratings ADD COLUMN {col_name} {col_type}")
+                    cursor.execute(
+                        f"ALTER TABLE ncaab_team_ratings ADD COLUMN {col_name} {col_type}"
+                    )
 
         # NCAAB bracket prediction transparency columns
         if table_exists("ncaab_bracket_predictions", conn=cursor.connection):
@@ -944,16 +1082,16 @@ class MigrationManager:
             ]
             for col_name, col_type in ncaab_pred_cols:
                 if not column_exists("ncaab_bracket_predictions", col_name, conn=cursor.connection):
-                    cursor.execute(f"ALTER TABLE ncaab_bracket_predictions ADD COLUMN {col_name} {col_type}")
+                    cursor.execute(
+                        f"ALTER TABLE ncaab_bracket_predictions ADD COLUMN {col_name} {col_type}"
+                    )
 
     def _migrate_nba_odds_pk(self, cursor: Any) -> None:
         """Recreate nba_odds with as_of in PK if it has the old 4-column PK."""
         if not table_exists("nba_odds", conn=cursor.connection):
             return
         # Check current CREATE TABLE sql for the old PK pattern
-        cursor.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='nba_odds'"
-        )
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='nba_odds'")
         row = cursor.fetchone()
         if row is None:
             return
@@ -1008,8 +1146,7 @@ class MigrationManager:
         # Only SQLite uses sqlite_master + rebuild. MySQL drives PK changes
         # through ALTER TABLE elsewhere. Detect via module helper rather
         # than connection type sniffing.
-        from utils.db import _get_backend
-        if _get_backend() != "sqlite":
+        if get_backend() != "sqlite":
             return
         if not table_exists("materialized_value_view", conn=cursor.connection):
             return
@@ -1030,8 +1167,7 @@ class MigrationManager:
             return
         cursor.execute("DROP TABLE IF EXISTS _mvv_old")
         cursor.execute("ALTER TABLE materialized_value_view RENAME TO _mvv_old")
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE materialized_value_view (
                 season INTEGER NOT NULL,
                 week INTEGER NOT NULL,
@@ -1058,10 +1194,11 @@ class MigrationManager:
                 confidence_tier TEXT,
                 PRIMARY KEY (season, week, player_id, market, sportsbook, event_id, side)
             )
-            """
-        )
+            """)
         old_cols = [r[1] for r in cursor.execute("PRAGMA table_info(_mvv_old)").fetchall()]
-        new_cols = [r[1] for r in cursor.execute("PRAGMA table_info(materialized_value_view)").fetchall()]
+        new_cols = [
+            r[1] for r in cursor.execute("PRAGMA table_info(materialized_value_view)").fetchall()
+        ]
         # Preserve any columns the old table had that weren't in our new
         # CREATE — survives mid-migration column additions from other branches.
         shared = [c for c in new_cols if c in old_cols]
@@ -1072,6 +1209,11 @@ class MigrationManager:
         cursor.execute("DROP TABLE _mvv_old")
 
     def _ensure_indexes(self, cursor: Any) -> None:
+        # MySQL does not support CREATE INDEX IF NOT EXISTS. Index creation for
+        # that backend must be handled by an explicit, deployment-safe schema
+        # migration rather than making every weekly refresh fail here.
+        if get_backend() == "mysql":
+            return
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_weekly_odds_lookup ON weekly_odds(season, week, player_id, market)"
         )
@@ -1094,11 +1236,26 @@ class MigrationManager:
             "CREATE INDEX IF NOT EXISTS idx_player_stats_enhanced_lookup ON player_stats_enhanced(season, week, player_id)"
         )
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_injury_data_lookup ON injury_data(season, week, player_id)"
+            "CREATE INDEX IF NOT EXISTS idx_player_stats_gsis ON player_stats_enhanced(gsis_id, season, week)"
         )
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_games_lookup ON games(season, week)"
+            "CREATE INDEX IF NOT EXISTS idx_player_stats_latest ON player_stats_enhanced(player_id, season DESC, week DESC)"
         )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_roster_players_team ON nfl_roster_players(season, team, position)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nfl_context_team "
+            "ON nfl_player_context_snapshots(season, week, team, position)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nfl_context_freshness "
+            "ON nfl_player_context_snapshots(season, week, captured_at)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_injury_data_lookup ON injury_data(season, week, player_id)"
+        )
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_lookup ON games(season, week)")
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_bet_outcomes_week ON bet_outcomes(season, week)"
         )
@@ -1117,9 +1274,7 @@ class MigrationManager:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_agent_performance_lookup ON agent_performance(season, week, agent_name)"
         )
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_player_dim_team ON player_dim(team)"
-        )
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_player_dim_team ON player_dim(team)")
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_pipeline_runs_lookup ON pipeline_runs(season, week, status)"
         )
@@ -1165,9 +1320,7 @@ class MigrationManager:
             "CREATE INDEX IF NOT EXISTS idx_nba_injuries_player ON nba_injuries(player_id, game_date)"
         )
         # Phase 7: nba_clv indexes
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_nba_clv_date ON nba_clv(game_date)"
-        )
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_nba_clv_date ON nba_clv(game_date)")
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_nba_clv_player ON nba_clv(player_id, game_date)"
         )
@@ -1211,5 +1364,3 @@ class MigrationManager:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_ncaab_predictions_round ON ncaab_bracket_predictions(season, round)"
         )
-
-

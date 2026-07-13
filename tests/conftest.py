@@ -22,12 +22,19 @@ if TEST_DB_PATH.exists():
     TEST_DB_PATH.unlink()
 TEST_DB_PATH.touch()
 
-os.environ.setdefault("DB_BACKEND", "sqlite")
-os.environ.setdefault("SQLITE_DB_PATH", str(TEST_DB_PATH))
+os.environ["DB_BACKEND"] = "sqlite"
+os.environ["SQLITE_DB_PATH"] = str(TEST_DB_PATH)
+
+# Apply the schema deliberately instead of relying on a test-specific
+# MigrationManager call to mutate this shared database as a side effect.
+from schema_migrations import MigrationManager
+
+MigrationManager(TEST_DB_PATH).run()
 
 
 # Shared fixture for clearing NBA cache before tests that use TestClient
 def clear_nba_cache():
     """Clear NBA endpoint cache to avoid cross-test pollution."""
     from api.cache import nba_cache
+
     nba_cache.invalidate_all()
