@@ -16,8 +16,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 import os
+import sys
 import uuid
 from datetime import datetime
 from typing import List
@@ -27,10 +27,10 @@ import pandas as pd
 # Local imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import config
-from scripts.prop_line_scraper import NFLPropScraper
 from prop_integration import PropIntegration
+from scripts.run_prop_update import refresh_pregame_inputs
+from utils.db import column_exists, execute, executemany, get_connection
 from value_betting_engine import ValueBettingEngine
-from utils.db import get_connection, column_exists, execute, executemany
 
 
 def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
@@ -87,7 +87,7 @@ def ensure_tables(conn) -> None:
         ("bet_size_units", "REAL"),
         ("correlation_risk", "TEXT"),
         ("market_efficiency", "REAL"),
-        ("date_identified", "TIMESTAMP")
+        ("date_identified", "TIMESTAMP"),
     ]:
         try:
             _ensure_column(conn, "enhanced_value_bets", col, ddl)
@@ -171,7 +171,11 @@ def opportunities_to_value_bets(opps: pd.DataFrame) -> pd.DataFrame:
     for _, r in opps.iterrows():
         try:
             direction = "OVER" if float(r.get("edge_yards", 0) or 0) > 0 else "UNDER"
-            odds = int(r["over_odds"]) if direction == "OVER" else int(r["under_odds"]) if pd.notna(r.get("under_odds")) else -110
+            odds = (
+                int(r["over_odds"])
+                if direction == "OVER"
+                else int(r["under_odds"]) if pd.notna(r.get("under_odds")) else -110
+            )
 
             # Confidence heuristic from value rating / edge
             value_rating = str(r.get("value_rating", "NO_VALUE"))
@@ -190,7 +194,11 @@ def opportunities_to_value_bets(opps: pd.DataFrame) -> pd.DataFrame:
             expected_roi = engine._calculate_expected_roi(model_confidence, odds)  # noqa: SLF001
 
             # Risk bucket mirrors value rating
-            risk_level = value_rating if value_rating in {"HIGH_VALUE", "MEDIUM_VALUE", "LOW_VALUE"} else "NO_VALUE"
+            risk_level = (
+                value_rating
+                if value_rating in {"HIGH_VALUE", "MEDIUM_VALUE", "LOW_VALUE"}
+                else "NO_VALUE"
+            )
 
             rows.append(
                 {
@@ -234,10 +242,11 @@ def persist_value_bets(df: pd.DataFrame) -> int:
         # Convert datetime columns to ISO strings for SQLite
         if "date_identified" in df.columns:
             df = df.copy()
-            df["date_identified"] = df["date_identified"].apply(lambda x: x.isoformat() if hasattr(x, "isoformat") else x)
+            df["date_identified"] = df["date_identified"].apply(
+                lambda x: x.isoformat() if hasattr(x, "isoformat") else x
+            )
 
-        insert_sql = (
-            """
+        insert_sql = """
             INSERT INTO enhanced_value_bets (
                 bet_id, player_name, position, team, prop_type, sportsbook, line,
                 model_prediction, model_confidence, edge_yards, edge_percentage, kelly_fraction,
@@ -269,7 +278,6 @@ def persist_value_bets(df: pd.DataFrame) -> int:
                 market_efficiency = excluded.market_efficiency,
                 date_identified = excluded.date_identified
             """
-        )
         executemany(insert_sql, df.to_dict(orient="records"), conn=conn)
 
         # Initialize CLV tracking rows
@@ -309,15 +317,15 @@ def persist_value_bets(df: pd.DataFrame) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Activate value betting pipeline")
-    parser.add_argument('--season', type=int, required=True, help='NFL season year')
-    parser.add_argument('--week', type=int, required=True, help='NFL week (1-22)')
+    parser.add_argument("--season", type=int, required=True, help="NFL season year")
+    parser.add_argument("--week", type=int, required=True, help="NFL week (1-22)")
     args = parser.parse_args()
 
     print(f"🚀 Activating value betting pipeline (season={args.season}, week={args.week})...")
 
-    # 1) Ensure current prop lines
-    scraper = NFLPropScraper()
-    prop_df = scraper.run_weekly_update()
+    # 1) Refresh roster-backed projections and live-only prop lines through the
+    # sole validated pregame workflow.
+    _, prop_df = refresh_pregame_inputs(args.season, args.week)
     print(f"   ✅ Prop lines ready: {len(prop_df)} rows")
 
     # 2) Merge with projections and compute opportunities
@@ -326,7 +334,9 @@ def main() -> int:
     # Use config threshold (convert from fraction to percentage expected by integrator)
     min_edge_pct = max(1.0, config.betting.min_edge_threshold * 100.0)
     opps = integrator.get_best_value_opportunities(
-        season=args.season, week=args.week, min_edge_threshold=min_edge_pct,
+        season=args.season,
+        week=args.week,
+        min_edge_threshold=min_edge_pct,
     )
 
     # Always export artifacts (empty-safe)

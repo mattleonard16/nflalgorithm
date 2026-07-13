@@ -19,21 +19,14 @@ import pandas as pd
 
 from config import config
 from utils.db import get_connection, read_dataframe, write_dataframe
+from utils.nfl_markets import MARKET_TO_STAT, melt_actuals
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MARKET_TO_STAT = {
-    "passing_yards": "passing_yards",
-    "rushing_yards": "rushing_yards",
-    "receiving_yards": "receiving_yards",
-}
-
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Backfill historical line accuracy analysis"
-    )
+    parser = argparse.ArgumentParser(description="Backfill historical line accuracy analysis")
     parser.add_argument(
         "--seasons",
         type=str,
@@ -151,21 +144,6 @@ def load_projections(seasons: List[int]) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def _melt_actuals(actuals: pd.DataFrame) -> pd.DataFrame:
-    """Reshape actual stats into long format with market column."""
-    rows: List[pd.DataFrame] = []
-    for market, stat_col in MARKET_TO_STAT.items():
-        if stat_col not in actuals.columns:
-            continue
-        subset = actuals[["player_id", "season", "week", stat_col]].copy()
-        subset = subset.rename(columns={stat_col: "actual"})
-        subset["market"] = market
-        rows.append(subset)
-    if not rows:
-        return pd.DataFrame()
-    return pd.concat(rows, ignore_index=True)
-
-
 def build_accuracy_dataset(
     closing: pd.DataFrame,
     opening: pd.DataFrame,
@@ -176,7 +154,7 @@ def build_accuracy_dataset(
     if closing.empty or actuals.empty:
         return pd.DataFrame()
 
-    melted = _melt_actuals(actuals)
+    melted = melt_actuals(actuals)
     if melted.empty:
         return pd.DataFrame()
 

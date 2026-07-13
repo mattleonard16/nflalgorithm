@@ -11,25 +11,17 @@ Usage:
 import argparse
 import uuid
 from datetime import datetime, timezone
-from typing import List, Dict
+from typing import Dict, List
 
 import pandas as pd
 
 from config import config
-from utils.db import read_dataframe, execute, executemany, get_connection
-from utils.grading import grade_bet, calculate_profit_units, get_confidence_tier
+from utils.db import execute, executemany, get_connection, read_dataframe
+from utils.grading import calculate_profit_units, get_confidence_tier, grade_bet
+from utils.nfl_markets import MARKET_TO_STAT
 
 
 # Market to stat column mapping
-MARKET_TO_STAT = {
-    'rushing_yards': 'rushing_yards',
-    'receiving_yards': 'receiving_yards',
-    'passing_yards': 'passing_yards',
-    'receptions': 'receptions',
-    'targets': 'targets',
-}
-
-
 def grade_bets(season: int, week: int) -> List[Dict]:
     """
     Compare predictions to actuals for a given week.
@@ -82,16 +74,16 @@ def grade_bets(season: int, week: int) -> List[Dict]:
     outcomes = []
 
     for _, pred in predictions.iterrows():
-        player_id = pred['player_id']
-        market = pred['market']
-        line = pred['line']
-        price = pred['price']
-        edge_pct = pred['edge_percentage']
+        player_id = pred["player_id"]
+        market = pred["market"]
+        line = pred["line"]
+        price = pred["price"]
+        edge_pct = pred["edge_percentage"]
 
         # T0 #4: read side from view (over or under). Default to 'over' for
         # legacy rows materialized before the side column existed.
-        side_val = pred.get('side') if 'side' in pred.index else None
-        side = side_val if isinstance(side_val, str) and side_val else 'over'
+        side_val = pred.get("side") if "side" in pred.index else None
+        side = side_val if isinstance(side_val, str) and side_val else "over"
 
         # Get stat column for this market
         stat_column = MARKET_TO_STAT.get(market)
@@ -101,18 +93,18 @@ def grade_bets(season: int, week: int) -> List[Dict]:
             continue
 
         # Find actual result
-        player_actuals = actuals[actuals['player_id'] == player_id]
+        player_actuals = actuals[actuals["player_id"] == player_id]
 
         if player_actuals.empty:
             # No actual data - treat as push
             actual_result = None
-            result = 'push'
+            result = "push"
         else:
             player_row = player_actuals.iloc[0]
             actual_result = player_row.get(stat_column)
 
             if pd.isna(actual_result):
-                result = 'push'
+                result = "push"
             else:
                 result = grade_bet(actual_result, line, side)
 
@@ -124,24 +116,26 @@ def grade_bets(season: int, week: int) -> List[Dict]:
 
         # Create outcome record
         outcome = {
-            'bet_id': str(uuid.uuid4()),
-            'season': season,
-            'week': week,
-            'player_id': player_id,
-            'player_name': actuals[actuals['player_id'] == player_id]['name'].iloc[0]
-                          if not actuals[actuals['player_id'] == player_id].empty
-                          else 'Unknown',
-            'market': market,
-            'sportsbook': pred['sportsbook'],
-            'side': side,
-            'line': line,
-            'price': price,
-            'actual_result': actual_result if not pd.isna(actual_result) else None,
-            'result': result,
-            'profit_units': profit_units,
-            'confidence_tier': confidence_tier,
-            'edge_at_placement': edge_pct,
-            'recorded_at': datetime.now(timezone.utc).isoformat(),
+            "bet_id": str(uuid.uuid4()),
+            "season": season,
+            "week": week,
+            "player_id": player_id,
+            "player_name": (
+                actuals[actuals["player_id"] == player_id]["name"].iloc[0]
+                if not actuals[actuals["player_id"] == player_id].empty
+                else "Unknown"
+            ),
+            "market": market,
+            "sportsbook": pred["sportsbook"],
+            "side": side,
+            "line": line,
+            "price": price,
+            "actual_result": actual_result if not pd.isna(actual_result) else None,
+            "result": result,
+            "profit_units": profit_units,
+            "confidence_tier": confidence_tier,
+            "edge_at_placement": edge_pct,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
         }
 
         outcomes.append(outcome)
@@ -150,10 +144,10 @@ def grade_bets(season: int, week: int) -> List[Dict]:
 
     # Print summary
     if outcomes:
-        wins = sum(1 for o in outcomes if o['result'] == 'win')
-        losses = sum(1 for o in outcomes if o['result'] == 'loss')
-        pushes = sum(1 for o in outcomes if o['result'] == 'push')
-        total_profit = sum(o['profit_units'] for o in outcomes)
+        wins = sum(1 for o in outcomes if o["result"] == "win")
+        losses = sum(1 for o in outcomes if o["result"] == "loss")
+        pushes = sum(1 for o in outcomes if o["result"] == "push")
+        total_profit = sum(o["profit_units"] for o in outcomes)
 
         print(f"Results: {wins} wins, {losses} losses, {pushes} pushes")
         print(f"Total profit: {total_profit:.2f} units")
@@ -187,11 +181,22 @@ def save_outcomes(outcomes: List[Dict]) -> None:
 
     outcome_tuples = [
         (
-            o['bet_id'], o['season'], o['week'], o['player_id'],
-            o['player_name'], o['market'], o['sportsbook'], o['side'],
-            o['line'], o['price'], o['actual_result'], o['result'],
-            o['profit_units'], o['confidence_tier'], o['edge_at_placement'],
-            o['recorded_at']
+            o["bet_id"],
+            o["season"],
+            o["week"],
+            o["player_id"],
+            o["player_name"],
+            o["market"],
+            o["sportsbook"],
+            o["side"],
+            o["line"],
+            o["price"],
+            o["actual_result"],
+            o["result"],
+            o["profit_units"],
+            o["confidence_tier"],
+            o["edge_at_placement"],
+            o["recorded_at"],
         )
         for o in outcomes
     ]
@@ -201,27 +206,35 @@ def save_outcomes(outcomes: List[Dict]) -> None:
 
     # Aggregate weekly performance
     df = pd.DataFrame(outcomes)
-    season = df['season'].iloc[0]
-    week = df['week'].iloc[0]
+    season = df["season"].iloc[0]
+    week = df["week"].iloc[0]
 
     total_bets = len(outcomes)
-    wins = len(df[df['result'] == 'win'])
-    losses = len(df[df['result'] == 'loss'])
-    pushes = len(df[df['result'] == 'push'])
-    profit_units = df['profit_units'].sum()
+    wins = len(df[df["result"] == "win"])
+    losses = len(df[df["result"] == "loss"])
+    pushes = len(df[df["result"] == "push"])
+    profit_units = df["profit_units"].sum()
 
     # ROI calculation: profit / units risked (excluding pushes)
     units_risked = wins + losses  # Each bet risks 1 unit
     roi_pct = (profit_units / units_risked * 100) if units_risked > 0 else 0.0
 
-    avg_edge = df['edge_at_placement'].mean()
+    avg_edge = df["edge_at_placement"].mean()
 
     # Best/worst bets (by profit)
-    best_bet_row = df.loc[df['profit_units'].idxmax()] if not df.empty else None
-    worst_bet_row = df.loc[df['profit_units'].idxmin()] if not df.empty else None
+    best_bet_row = df.loc[df["profit_units"].idxmax()] if not df.empty else None
+    worst_bet_row = df.loc[df["profit_units"].idxmin()] if not df.empty else None
 
-    best_bet = f"{best_bet_row['player_name']} {best_bet_row['market']} {best_bet_row['side']} {best_bet_row['line']}" if best_bet_row is not None else None
-    worst_bet = f"{worst_bet_row['player_name']} {worst_bet_row['market']} {worst_bet_row['side']} {worst_bet_row['line']}" if worst_bet_row is not None else None
+    best_bet = (
+        f"{best_bet_row['player_name']} {best_bet_row['market']} {best_bet_row['side']} {best_bet_row['line']}"
+        if best_bet_row is not None
+        else None
+    )
+    worst_bet = (
+        f"{worst_bet_row['player_name']} {worst_bet_row['market']} {worst_bet_row['side']} {worst_bet_row['line']}"
+        if worst_bet_row is not None
+        else None
+    )
 
     # CLV (Closing Line Value) - placeholder for now
     clv_avg = None
@@ -240,11 +253,20 @@ def save_outcomes(outcomes: List[Dict]) -> None:
     execute(
         perf_sql,
         (
-            season, week, total_bets, wins, losses, pushes,
-            profit_units, roi_pct, avg_edge, clv_avg,
-            best_bet, worst_bet,
-            datetime.now(timezone.utc).isoformat()
-        )
+            season,
+            week,
+            total_bets,
+            wins,
+            losses,
+            pushes,
+            profit_units,
+            roi_pct,
+            avg_edge,
+            clv_avg,
+            best_bet,
+            worst_bet,
+            datetime.now(timezone.utc).isoformat(),
+        ),
     )
 
     print(f"Updated weekly_performance for {season} Week {week}")
@@ -258,20 +280,10 @@ def save_outcomes(outcomes: List[Dict]) -> None:
 def main():
     """CLI entry point for recording bet outcomes."""
     parser = argparse.ArgumentParser(
-        description='Record bet outcomes by comparing predictions to actuals'
+        description="Record bet outcomes by comparing predictions to actuals"
     )
-    parser.add_argument(
-        '--season',
-        type=int,
-        required=True,
-        help='NFL season year (e.g., 2025)'
-    )
-    parser.add_argument(
-        '--week',
-        type=int,
-        required=True,
-        help='NFL week number (e.g., 13)'
-    )
+    parser.add_argument("--season", type=int, required=True, help="NFL season year (e.g., 2025)")
+    parser.add_argument("--week", type=int, required=True, help="NFL week number (e.g., 13)")
 
     args = parser.parse_args()
 
@@ -291,6 +303,5 @@ def main():
         raise
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-

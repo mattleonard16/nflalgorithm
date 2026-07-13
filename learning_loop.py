@@ -16,20 +16,12 @@ import pandas as pd
 
 from config import config
 from utils.db import execute, executemany, get_connection, read_dataframe
+from utils.nfl_markets import MARKET_TO_STAT
 
 logger = logging.getLogger(__name__)
 
 
 # ── Market-to-stat mapping ───────────────────────────────────────────
-
-MARKET_TO_STAT = {
-    "rushing_yards": "rushing_yards",
-    "receiving_yards": "receiving_yards",
-    "passing_yards": "passing_yards",
-    "receptions": "receptions",
-    "targets": "targets",
-}
-
 
 # ── Outcome attribution ─────────────────────────────────────────────
 
@@ -127,9 +119,7 @@ def batch_attribute_outcomes(
 
     results = []
     for _, proj in projections.iterrows():
-        result = attribute_outcome(
-            season, week, proj["player_id"], proj["market"]
-        )
+        result = attribute_outcome(season, week, proj["player_id"], proj["market"])
         results.append(result)
 
     return results
@@ -169,8 +159,7 @@ def update_agent_performance(
         decision = dec["decision"]
 
         matching = bet_outcomes[
-            (bet_outcomes["player_id"] == pid) &
-            (bet_outcomes["market"] == market)
+            (bet_outcomes["player_id"] == pid) & (bet_outcomes["market"] == market)
         ]
 
         if matching.empty:
@@ -182,7 +171,11 @@ def update_agent_performance(
 
         agent_reports_raw = dec.get("agent_reports", "[]")
         try:
-            agent_reports = json.loads(agent_reports_raw) if isinstance(agent_reports_raw, str) else agent_reports_raw
+            agent_reports = (
+                json.loads(agent_reports_raw)
+                if isinstance(agent_reports_raw, str)
+                else agent_reports_raw
+            )
         except (json.JSONDecodeError, TypeError):
             agent_reports = []
 
@@ -196,11 +189,22 @@ def update_agent_performance(
 
             correct = _was_recommendation_correct(recommendation, decision, result)
 
-            records.append((
-                season, week, agent_name, pid, market,
-                recommendation, confidence, decision, result,
-                profit, int(correct), now,
-            ))
+            records.append(
+                (
+                    season,
+                    week,
+                    agent_name,
+                    pid,
+                    market,
+                    recommendation,
+                    confidence,
+                    decision,
+                    result,
+                    profit,
+                    int(correct),
+                    now,
+                )
+            )
 
     if not records:
         return 0
@@ -213,8 +217,7 @@ def update_agent_performance(
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     executemany(insert_sql, records)
-    logger.info("Inserted %d agent performance records for s=%d w=%d",
-                len(records), season, week)
+    logger.info("Inserted %d agent performance records for s=%d w=%d", len(records), season, week)
     return len(records)
 
 
@@ -277,7 +280,9 @@ def get_agent_accuracy_summary(
     try:
         return read_dataframe(query, params=tuple(params) if params else None)
     except Exception:
-        return pd.DataFrame(columns=["agent_name", "total", "correct", "accuracy", "avg_confidence"])
+        return pd.DataFrame(
+            columns=["agent_name", "total", "correct", "accuracy", "avg_confidence"]
+        )
 
 
 # ── Confidence threshold tightening ──────────────────────────────────
@@ -349,18 +354,22 @@ def recommend_threshold_updates(
         tier_stats.append(stat)
 
         if hit_rate < 0.45 and total >= 5:
-            recommendations.append({
-                "tier": tier,
-                "action": "raise_threshold",
-                "reason": f"Hit rate {hit_rate:.1%} below 45% over {total} bets",
-                "suggested_min_edge": round(avg_edge * 1.25, 4),
-            })
+            recommendations.append(
+                {
+                    "tier": tier,
+                    "action": "raise_threshold",
+                    "reason": f"Hit rate {hit_rate:.1%} below 45% over {total} bets",
+                    "suggested_min_edge": round(avg_edge * 1.25, 4),
+                }
+            )
         elif hit_rate > 0.60 and avg_profit > 0 and total >= 5:
-            recommendations.append({
-                "tier": tier,
-                "action": "maintain_or_lower",
-                "reason": f"Hit rate {hit_rate:.1%} with positive profit over {total} bets",
-            })
+            recommendations.append(
+                {
+                    "tier": tier,
+                    "action": "maintain_or_lower",
+                    "reason": f"Hit rate {hit_rate:.1%} with positive profit over {total} bets",
+                }
+            )
 
     return {
         "tier_performance": tier_stats,
@@ -418,7 +427,9 @@ def generate_learning_report(
         "week_range": [week_start, week_end],
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "tier_performance": tier_perf,
-        "agent_performance": agent_summary.to_dict(orient="records") if not agent_summary.empty else [],
+        "agent_performance": (
+            agent_summary.to_dict(orient="records") if not agent_summary.empty else []
+        ),
         "model_accuracy_trends": accuracy_trends,
         "threshold_recommendations": threshold_recs,
         "attribution_summary": attributions,
@@ -450,15 +461,17 @@ def _tier_performance(
         total = len(group)
         wins = int((group["result"] == "win").sum())
         profit = float(group["profit_units"].sum())
-        results.append({
-            "tier": tier,
-            "total": total,
-            "wins": wins,
-            "losses": total - wins,
-            "hit_rate": round(wins / total, 4) if total > 0 else 0.0,
-            "total_profit": round(profit, 2),
-            "avg_edge": round(float(group["edge_at_placement"].mean()), 4),
-        })
+        results.append(
+            {
+                "tier": tier,
+                "total": total,
+                "wins": wins,
+                "losses": total - wins,
+                "hit_rate": round(wins / total, 4) if total > 0 else 0.0,
+                "total_profit": round(profit, 2),
+                "avg_edge": round(float(group["edge_at_placement"].mean()), 4),
+            }
+        )
 
     return sorted(results, key=lambda x: x.get("hit_rate", 0), reverse=True)
 
@@ -488,12 +501,14 @@ def _model_accuracy_trends(
         try:
             df = read_dataframe(formatted_query, params=(season, week_start, week_end))
             for _, row in df.iterrows():
-                results.append({
-                    "week": int(row["week"]),
-                    "market": market,
-                    "mae": round(float(row["mae"]), 2),
-                    "sample_size": int(row["n"]),
-                })
+                results.append(
+                    {
+                        "week": int(row["week"]),
+                        "market": market,
+                        "mae": round(float(row["mae"]), 2),
+                        "sample_size": int(row["n"]),
+                    }
+                )
         except Exception:
             continue
 
@@ -539,7 +554,10 @@ def _attribution_summary(
 
 
 def _load_projection(
-    season: int, week: int, player_id: str, market: str,
+    season: int,
+    week: int,
+    player_id: str,
+    market: str,
 ) -> Optional[pd.Series]:
     query = """
     SELECT mu, sigma FROM weekly_projections
@@ -553,7 +571,10 @@ def _load_projection(
 
 
 def _load_actual_stat(
-    season: int, week: int, player_id: str, market: str,
+    season: int,
+    week: int,
+    player_id: str,
+    market: str,
 ) -> Optional[float]:
     stat_col = MARKET_TO_STAT.get(market)
     if stat_col is None:
@@ -574,7 +595,10 @@ def _load_actual_stat(
 
 
 def _load_best_line(
-    season: int, week: int, player_id: str, market: str,
+    season: int,
+    week: int,
+    player_id: str,
+    market: str,
 ) -> Optional[float]:
     query = """
     SELECT line FROM weekly_odds
@@ -665,6 +689,7 @@ def main() -> None:
             week_range=(args.week_start, args.week_end),
         )
         import json
+
         output_dir = config.reports_dir
         output_dir.mkdir(parents=True, exist_ok=True)
         path = output_dir / f"learning_report_{args.season}.json"
@@ -678,8 +703,10 @@ def main() -> None:
         print(f"\nCurrent thresholds: {recs['current_thresholds']}")
         print(f"\nTier performance ({len(recs['tier_performance'])} tiers):")
         for tp in recs["tier_performance"]:
-            print(f"  {tp['tier']}: {tp['wins']}/{tp['total']} "
-                  f"({tp['hit_rate']:.1%}), avg profit={tp['avg_profit']:.2f}")
+            print(
+                f"  {tp['tier']}: {tp['wins']}/{tp['total']} "
+                f"({tp['hit_rate']:.1%}), avg profit={tp['avg_profit']:.2f}"
+            )
         if recs["recommendations"]:
             print(f"\nRecommendations:")
             for rec in recs["recommendations"]:
@@ -691,26 +718,31 @@ def main() -> None:
 
 def _print_report_summary(report: Dict[str, Any]) -> None:
     """Print human-readable learning report summary."""
-    print(f"\nLearning Report: Season {report['season']} "
-          f"(Weeks {report['week_range'][0]}-{report['week_range'][1]})")
+    print(
+        f"\nLearning Report: Season {report['season']} "
+        f"(Weeks {report['week_range'][0]}-{report['week_range'][1]})"
+    )
     print("=" * 60)
 
     print("\nTier Performance:")
     for tp in report.get("tier_performance", []):
-        print(f"  {tp['tier']}: {tp['wins']}/{tp['total']} "
-              f"({tp['hit_rate']:.1%}), profit={tp['total_profit']:.2f}")
+        print(
+            f"  {tp['tier']}: {tp['wins']}/{tp['total']} "
+            f"({tp['hit_rate']:.1%}), profit={tp['total_profit']:.2f}"
+        )
 
     print("\nAgent Performance:")
     for ap in report.get("agent_performance", []):
-        print(f"  {ap['agent_name']}: {ap.get('correct', 0)}/{ap.get('total', 0)} "
-              f"({ap.get('accuracy', 0):.1%})")
+        print(
+            f"  {ap['agent_name']}: {ap.get('correct', 0)}/{ap.get('total', 0)} "
+            f"({ap.get('accuracy', 0):.1%})"
+        )
 
     attr = report.get("attribution_summary", {})
     if attr.get("total", 0) > 0:
         print(f"\nAttribution Summary ({attr['total']} outcomes):")
         for atype, data in attr.get("breakdown", {}).items():
-            print(f"  {atype}: {data['count']} "
-                  f"(avg z-score={data['avg_model_error']:.2f})")
+            print(f"  {atype}: {data['count']} " f"(avg z-score={data['avg_model_error']:.2f})")
 
     recs = report.get("threshold_recommendations", {})
     if recs.get("recommendations"):
