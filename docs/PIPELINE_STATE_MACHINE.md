@@ -46,8 +46,9 @@ cancelled; retry recovery leaves history intact and starts a new attempt.
 
 The odds stage must prove all of the following before value ranking begins:
 
-- requests were not served from offline or stale-on-error cache;
-- the newest response is within `NFL_ODDS_MAX_AGE_SECONDS`;
+- every successful provider response reports trusted `MISS` or `HIT` provenance;
+- no response was served from offline, fallback, or stale-on-error cache;
+- every response has age metadata and the oldest is within `NFL_ODDS_MAX_AGE_SECONDS`;
 - scheduled-event coverage meets `NFL_ODDS_MIN_EVENT_COVERAGE`;
 - required event/market coverage meets `NFL_ODDS_MIN_MARKET_COVERAGE`;
 - at least one complete two-sided row was persisted.
@@ -63,4 +64,3 @@ locks the owning job, rechecks cancellation and the lease tuple, promotes the
 staged card, registers the run artifact, and marks the job/run completed in one
 transaction. Losing the lease or requesting cancellation rolls back every part
 of publication, so a cancelled or stale attempt cannot become the active card.
-

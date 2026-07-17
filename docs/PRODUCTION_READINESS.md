@@ -16,7 +16,7 @@ addition to local tests.
 | Private-server authorization | Black-box probe exists at `scripts/validate_deployed_pipeline_auth.py` | Run with real reader and operator identities against staging |
 | Staging soak | Harness exists at `scripts/pipeline_soak.py` | Complete a bounded soak with no stuck, failed, or duplicated jobs |
 | Migration/application rollback | Migrations are idempotent on fresh SQLite and MySQL databases; legacy tokenless running jobs are fenced and requeued or terminated consistently | Rehearse database backup, deploy, application rollback, and post-rollback reads in staging |
-| Shadow weekly run | Deterministic snapshot/compare tool exists at `scripts/shadow_weekly_outputs.py` | Compare a real legacy weekly run with the queued candidate using identical point-in-time inputs |
+| Shadow weekly run | A same-database 2026 Week 1 attempt exercised both paths, but both stopped in `prepare_week`: the installed ingestion dependency supports seasons only through 2025 and no live-odds credential was available. Matching empty-set hashes are explicitly not equivalence evidence | Rerun on a supported pre-kickoff week with a frozen point-in-time database and live-odds credential; compare every behavior-bearing output |
 | Runtime monitoring | Authenticated metrics expose queue, lease, retry, failure, and stage-duration data; the supervised runtime emits structured monitoring logs | Confirm staging ingestion, alert routing, and a synthetic alert notification |
 
 ## Authoritative local database matrix
@@ -47,7 +47,8 @@ NFL_ODDS_MIN_MARKET_COVERAGE=1.0
 NFL_ODDS_REQUIRED_MARKETS=player_pass_yds,player_rush_yds,player_rec_yds
 ```
 
-`HIT-OFFLINE`, `STALE-ON-ERROR`, fallback snapshots, missing response provenance, and incomplete
+Only fresh `MISS` and `HIT` responses are trusted. `HIT-OFFLINE`, `STALE-ON-ERROR`, fallback
+snapshots, unknown or incomplete response provenance, malformed validation metrics, and incomplete
 coverage are always rejected. A successful durable run stages its final card and promotes it only
 inside the fenced completion transaction. See [Durable Pipeline State Machine](PIPELINE_STATE_MACHINE.md).
 
