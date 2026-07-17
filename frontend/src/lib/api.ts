@@ -140,8 +140,6 @@ export async function getHealth(season?: number, week?: number): Promise<HealthR
 
   return {
     status,
-    // The health endpoint reads feed_freshness from the DB, so a 200 means the DB answered.
-    database: "Connected",
     last_update: lastUpdate,
     feeds,
   };
@@ -223,18 +221,6 @@ export async function getAnalyticsByMarket(
  */
 export async function getWeeklySummary(weeks: number = 4): Promise<WeeklySummaryResponse> {
   return fetchAPI<WeeklySummaryResponse>(`/api/weekly-summary?weeks=${weeks}`);
-}
-
-/**
- * Health check - simple ping
- */
-export async function ping(): Promise<boolean> {
-  try {
-    await fetchAPI("/");
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 // ============================================================================

@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight doctor doctor-production migrate test lint format validate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest ingest-ncaab ncaab-bracket ncaab-predict ncaab-full ingest-ncaab-modifiers week week-update week-predict week-refresh week-materialize week-grade production-run health health-check
+.PHONY: help list-targets install install-uv install-venv runtime-preflight doctor doctor-production migrate test lint format validate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest ingest-ncaab ncaab-bracket ncaab-predict ncaab-full ingest-ncaab-modifiers week week-update week-predict week-refresh week-materialize week-grade production-run health health-check
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -369,23 +369,6 @@ health:
 	@echo "Checking feed freshness for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.health_check --season $(SEASON) --week $(WEEK)
 
-# Activate betting: scrape props, compute edges, persist to DB
-activate-betting:
-	@echo "Activating value betting pipeline with $(ENV_TYPE)..."
-	@start_time=$$(date +%s); \
-	$(DB_ENV) $(PYTHON) scripts/quick_activate.py; \
-	end_time=$$(date +%s); \
-	duration=$$((end_time - start_time)); \
-	echo "Activation complete in $${duration}s!"
-
-# Full system activation: populate data, train models, activate betting
-activate-all:
-	@echo "Full system activation..."
-	@$(MAKE) populate-data || true
-	@$(MAKE) train-models || true
-	@$(MAKE) activate-betting
-	@echo "System operational! Run: make dashboard"
-
 # TE market bias analysis
 te-bias-analysis:
 	@echo "Running TE market bias analysis with $(ENV_TYPE)..."
@@ -566,45 +549,12 @@ demo:
 	$(DB_ENV) $(PYTHON) scripts/seed_demo_data.py
 	@echo "Demo data loaded! Run: make fullstack"
 
-# Populate historical data (helper target)
-populate-data:
-	@echo "Populating NFL database with UV speed..."
-	$(DB_ENV) $(PYTHON) scripts/quick_populate.py
-
-# Train models (helper target)
-train-models:
-	@echo "🤖 Training models..."
-	$(DB_ENV) $(PYTHON) scripts/quick_train.py
-
 # Validation report
 validate-report:
 	@echo "Running enhanced cross-season validation and printing leaderboard..."
 	$(PYTHON) cross_season_validation.py | cat
 	@echo "---"
 	@echo "Saved markdown: logs/validation_leaderboard.md"
-
-# Start complete pipeline
-start_pipeline: install
-	@echo "Starting NFL Algorithm Professional Pipeline..."
-	@echo "Installing dependencies..."
-	@$(PIP_INSTALL) -r requirements.txt
-	@echo "Setting up database..."
-	@$(PYTHON) data_pipeline.py
-	@echo "Running validation..."
-	@$(PYTHON) cross_season_validation.py
-	@echo "Starting pipeline scheduler..."
-	@$(PYTHON) -m scripts.pipeline_scheduler &
-	@echo "Launching dashboard..."
-	@$(PYTHON) -m streamlit run dashboard/main_dashboard.py &
-	@echo "Pipeline started successfully!"
-	@echo "   Dashboard: http://localhost:8501"
-
-# Stop pipeline
-stop_pipeline:
-	@echo "Stopping NFL Algorithm Pipeline..."
-	pkill -f "pipeline_scheduler.py" || true
-	pkill -f "streamlit run dashboard/main_dashboard.py" || true
-	@echo "Pipeline stopped!"
 
 # Clean temporary files
 clean:
@@ -681,11 +631,6 @@ db-maintenance:
 # ============================================================================
 # UV ENHANCED TARGETS - 10-100x faster dependency management
 # ============================================================================
-
-# Migration to UV (10-100x faster dependency management)
-migrate-to-uv:
-	@echo "migrate-to-uv is deprecated."
-	@echo "See UV_MIGRATION_NOTES.md for historical details if needed."
 
 # Environment information
 env-info:

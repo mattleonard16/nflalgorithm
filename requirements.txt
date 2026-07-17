@@ -15,7 +15,6 @@ APScheduler>=3.10.0
 # sqlite3 is built-in, removing from requirements
 
 # API & External Data
-nfl-data-py>=0.3.0
 # sportsreference>=0.6.0  # Temporarily disabled - version conflict
 
 # Visualization & Dashboard

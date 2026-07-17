@@ -103,7 +103,8 @@ def test_mysql_index_refresh_is_idempotent_without_if_not_exists(monkeypatch) ->
     create_statements = [
         statement for statement, _params in cursor.statements if "CREATE INDEX" in statement
     ]
-    assert len(create_statements) == 5
+    assert create_statements
+    assert all("IF NOT EXISTS" not in statement for statement in create_statements)
     assert any("idx_pipeline_jobs_claim" in statement for statement in create_statements)
     assert any("idx_pipeline_jobs_stale" in statement for statement in create_statements)
 

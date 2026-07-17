@@ -25,6 +25,22 @@ def test_help_surfaces_primary_startup_and_diagnostic_commands() -> None:
         assert command in output
 
 
+def test_obsolete_startup_and_synthetic_activation_targets_are_removed() -> None:
+    targets = set(run_make("list-targets").stdout.splitlines())
+
+    assert targets.isdisjoint(
+        {
+            "start_pipeline",
+            "stop_pipeline",
+            "activate-betting",
+            "activate-all",
+            "populate-data",
+            "train-models",
+            "migrate-to-uv",
+        }
+    )
+
+
 def test_make_compatible_env_file_configures_api_port(tmp_path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("API_HOST=127.0.0.1\nAPI_PORT=8123\n", encoding="utf-8")

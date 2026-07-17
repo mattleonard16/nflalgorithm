@@ -241,7 +241,6 @@ export interface FeedFreshness {
 
 export interface HealthResponse {
   status: "ACTIVE" | "MAINTENANCE" | "UNKNOWN";
-  database: string;
   last_update: string | null;
   feeds: FeedFreshness[];
 }

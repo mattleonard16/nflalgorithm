@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Ingest Real NFL Data from nfl_data_py
-=====================================
+Ingest Real NFL Data with nflreadpy
+===================================
 
 Fetches actual NFL weekly stats and populates the database for accurate predictions.
 This replaces synthetic data with real player performance data.
