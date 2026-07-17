@@ -7,6 +7,7 @@ whether the backend is a local SQLite file or a remote MySQL DB.
 from __future__ import annotations
 
 import contextlib
+import re
 import sqlite3
 import warnings
 from typing import Any, Dict, Iterable, Iterator, Optional, Union
@@ -31,6 +32,25 @@ warnings.filterwarnings("ignore", message=".*pandas only supports SQLAlchemy con
 
 # Union type for database connections
 DBConnection = Union[sqlite3.Connection, pymysql_connection]
+MIN_MYSQL_VERSION = (8, 0, 0)
+
+
+def validate_mysql_server_version(version: str) -> tuple[int, int, int]:
+    """Require Oracle MySQL 8+ for SKIP LOCKED and queue-fencing semantics."""
+    normalized = version.strip()
+    if "mariadb" in normalized.lower():
+        raise RuntimeError(
+            f"MySQL 8.0+ is required; unsupported MariaDB server reported {normalized!r}"
+        )
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", normalized)
+    if not match:
+        raise RuntimeError(f"Could not parse MySQL server version {normalized!r}")
+    parsed = tuple(int(part) for part in match.groups())
+    if parsed < MIN_MYSQL_VERSION:
+        raise RuntimeError(
+            f"MySQL 8.0+ is required; server reported {normalized!r}"
+        )
+    return parsed
 
 
 def _normalize_sql_for_backend(sql: str, backend: str) -> str:
@@ -105,6 +125,16 @@ def _create_mysql_connection() -> pymysql_connection:
             port=parsed.port or 3306,
             cursorclass=pymysql.cursors.Cursor,
         )
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT VERSION()")
+                version_row = cursor.fetchone()
+            if not version_row:
+                raise RuntimeError("MySQL server did not return a version")
+            validate_mysql_server_version(str(version_row[0]))
+        except Exception:
+            conn.close()
+            raise
         return conn
     except Exception as e:
         raise RuntimeError(f"Failed to connect to MySQL: {e}")
