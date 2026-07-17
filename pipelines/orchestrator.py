@@ -65,6 +65,7 @@ def run_stages(
 
     results: list[dict[str, Any]] = []
     for ordinal, stage in enumerate(stages):
+        result: dict[str, Any]
         if cancellation_requested and cancellation_requested():
             logger.info("Pipeline cancellation requested before stage %s", stage.name)
             break
