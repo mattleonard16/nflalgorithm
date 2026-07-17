@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from config import config
 from config.runtime import env_flag
 from schema_migrations import MigrationManager
+from scripts.preflight import collect_diagnostics, print_diagnostics
 from utils.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ def service_commands() -> list[list[str]]:
             python,
             "-m",
             "uvicorn",
-            "api.server:app",
+            "api.application:app",
             "--host",
             "0.0.0.0",
             "--port",
@@ -63,6 +64,14 @@ def main() -> None:
         extra={"event": "startup.migrations"},
     )
     MigrationManager(config.database.path).run()
+    diagnostics = collect_diagnostics(check_schema=True)
+    print_diagnostics(diagnostics)
+    if any(item.failed for item in diagnostics):
+        logger.error(
+            "Service startup preflight failed",
+            extra={"event": "startup.preflight_failed"},
+        )
+        raise SystemExit(2)
 
     def stop(_signum: int, _frame: object) -> None:
         _terminate(processes)

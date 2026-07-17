@@ -5,7 +5,7 @@ services:
     plan: starter
     dockerfilePath: ./Dockerfile.api
     dockerContext: .
-    healthCheckPath: /api/health
+    healthCheckPath: /readyz
     autoDeploy: true
     envVars:
       - key: DB_BACKEND
@@ -14,6 +14,10 @@ services:
         value: /data/nfl_data.db
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: LOG_FORMAT
+        value: json
+      - key: LOG_LEVEL
+        value: INFO
       - key: ENABLE_QUEUE_MONITOR
         value: "true"
       - key: ODDS_API_KEY

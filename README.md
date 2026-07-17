@@ -29,19 +29,19 @@ A comprehensive NFL betting algorithm combining:
 git clone https://github.com/mattleonard16/nflalgorithm.git
 cd nflalgorithm
 
-# Install dependencies (auto-detects UV or venv)
+# Configure and install dependencies
+cp .env.example .env
 make install
+make frontend-install
+make migrate
+make doctor
 
-# Ingest real NFL data (2024 + 2025 seasons)
+# Launch the supervised React stack (worker + API + frontend)
+make fullstack          # http://localhost:3000
+
+# Optional: ingest real NFL data or launch the legacy dashboard
 make ingest-nfl
-
-# Option 1: Launch Streamlit dashboard (legacy)
-make dashboard
-
-# Option 2: Launch React dashboard (recommended)
-make api                # Start FastAPI backend on :8000
-make pipeline-worker    # Start durable NFL worker (separate terminal)
-make frontend-dev       # Start Next.js frontend on :3000
+make dashboard          # http://localhost:8501
 ```
 
 ### Weekly Workflow
@@ -75,18 +75,22 @@ The project now includes a modern React/Next.js dashboard alongside the original
 
 ### Running the React Dashboard
 
+Use `make fullstack` for supervised startup, readiness waiting, and graceful cleanup. For separate terminals:
+
 ```bash
-# Terminal 1: Start the API
+# Terminal 1: migrate, then start the API
 make api
 
-# Terminal 2: Start the worker
+# Terminal 2: start the worker
 make pipeline-worker
 
-# Terminal 3: Start the frontend
-cd frontend && npm run dev
+# Terminal 3: start the frontend
+make frontend-dev
 
 # Visit http://localhost:3000
 ```
+
+See [Troubleshooting](docs/TROUBLESHOOTING.md) for database, migration, API-key, private-module, CORS, port, and deployment failures.
 
 ### Frontend Structure
 ```
@@ -255,8 +259,9 @@ Access at `http://localhost:8501`:
 ### Database Setup
 
 ```bash
-# Copy example config
+# Copy the Make-compatible environment template; Make exports its values to child processes.
 cp .env.example .env
+make doctor
 ```
 
 **SQLite (Local Dev):**
@@ -271,13 +276,17 @@ DB_BACKEND=mysql
 DB_URL="mysql://user:pass@host:port/database"
 ```
 
-### API Keys
+### API Keys and Logging
 
 ```env
-ODDS_API_KEY="your_odds_api_key"
+ODDS_API_KEY=your_odds_api_key
+LOG_FORMAT=console  # use json in deployments
+LOG_LEVEL=INFO
 ```
 
-> **Security**: Never commit `.env` to version control!
+The UI and read-only API can start without `ODDS_API_KEY`, but live-odds NFL runs fail closed. `make doctor-production` also requires deployment-supplied private NFL modules.
+
+> **Security**: Never commit `.env`, database credentials, or API keys to version control.
 
 ---
 
@@ -296,13 +305,17 @@ make validate      # Cross-season validation
 
 | Command | Description |
 |---------|-------------|
-| `make install` | Smart install (UV or venv) |
-| `make ingest-nfl` | Fetch real NFL data (2024+2025) |
+| `make install` | Install with UV, falling back to Python 3.13 venv |
+| `make frontend-install` | Install locked frontend dependencies with `npm ci` |
+| `make migrate` | Back up and migrate local SQLite |
+| `make doctor` | Validate local tools, configuration, DB, schema, keys, and modules |
+| `make fullstack` | Supervise worker, API, readiness, and frontend |
+| `make ingest-nfl` | Fetch real NFL data |
 | `make week-predict` | Generate week projections |
 | `make week-materialize` | Materialize value view |
 | `make dashboard` | Launch Streamlit UI |
 | `make test` | Run test suite |
-| `make report` | Generate shareable reports |
+| `make list-targets` | Print every Make target |
 
 ---
 

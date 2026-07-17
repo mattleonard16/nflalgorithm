@@ -21,21 +21,23 @@ SQLite lives on the persistent disk. Survives redeploys but is **not** backed up
 4. Set env vars (marked `sync: false`) in each service's dashboard. See `.env.render.example`.
    - API: `ODDS_API_KEY`, `ALLOWED_ORIGINS`
    - Frontend: `NEXT_PUBLIC_API_URL` (the API service's public URL)
-5. First deploy builds both images. API healthcheck: `GET /api/health`.
+5. First deploy builds both images. API readiness probe: `GET /readyz`.
 
 ## Seed the database
 
-Fresh disk = empty SQLite. After first deploy, run migrations + ingest via Render shell:
+The API container applies migrations before starting the API and worker. A fresh disk still needs data ingestion via the Render shell:
 
 ```bash
 # In Render shell for nflalgorithm-api
-python -c "from schema_migrations import MigrationManager; MigrationManager('/data/nfl_data.db').run()"
 python scripts/ingest_real_nfl_data.py
+python -m scripts.preflight --check-schema --require-live-odds --require-private-modules
 ```
+
+`/livez` checks only the API process. `/readyz` returns 503 when the database is unavailable or required migrations are missing. Set `LOG_FORMAT=json` for structured service-entrypoint logs.
 
 ## CORS
 
-`api/server.py` reads `ALLOWED_ORIGINS` (comma-separated). Unset = falls back to `localhost:3000/3001`. Set it to the frontend Render URL on the API service before the frontend can reach the API.
+The deployment-supplied `api/server.py` reads `ALLOWED_ORIGINS` (comma-separated); tracked startup goes through `api/application.py` to attach operational probes. Unset CORS origins fall back to `localhost:3000/3001`. Set the frontend Render URL before the frontend can reach the API.
 
 ## Known gaps before going live
 

@@ -1,8 +1,19 @@
 # Weekly Operations
 
-1. Run migrations once after pulling updates:
+## Startup
+
+```bash
+make migrate
+make doctor
+make fullstack
+```
+
+`make fullstack` supervises the worker, API, and frontend. It waits for `/readyz`; `/livez` only verifies that the API process is running. Use `LOG_FORMAT=json` in deployments.
+
+1. Run migrations and preflight after pulling updates:
    ```bash
-   python scripts/run_migrations.py
+   make migrate
+   make doctor
    ```
 2. Update a specific NFL week (idempotent upserts):
    ```bash
@@ -27,4 +38,4 @@
    make dashboard
    ```
 
-All commands are idempotent; rerun if data feeds update.
+All commands are idempotent; rerun if data feeds update. For common database, migration, API-key, private-module, CORS, frontend, and port failures, see [Troubleshooting](TROUBLESHOOTING.md).

@@ -1,7 +1,15 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest ingest-ncaab ncaab-bracket ncaab-predict ncaab-full ingest-ncaab-modifiers week-refresh
+.PHONY: help list-targets install install-uv install-venv runtime-preflight doctor doctor-production migrate test lint format validate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest ingest-ncaab ncaab-bracket ncaab-predict ncaab-full ingest-ncaab-modifiers week week-update week-predict week-refresh week-materialize week-grade production-run health health-check
+
+# Load a Make-compatible local environment file without adding a dotenv dependency.
+ENV_FILE ?= .env
+ifneq (,$(wildcard $(ENV_FILE)))
+include $(ENV_FILE)
+ENV_KEYS := $(shell sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' $(ENV_FILE))
+export $(ENV_KEYS)
+endif
 
 # Environment detection - defaults to UV if available
 ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && echo "uv" || echo "venv")
@@ -33,9 +41,11 @@ define require_season
 	fi
 endef
 
-# Database backend - default to SQLite for local development
+# Runtime defaults for local development
 DB_BACKEND ?= sqlite
 SQLITE_DB_PATH ?= nfl_data.db
+API_HOST ?= 0.0.0.0
+API_PORT ?= 8000
 DB_ENV := DB_BACKEND=$(DB_BACKEND) SQLITE_DB_PATH=$(SQLITE_DB_PATH)
 
 # Conditional commands based on ENV_TYPE
@@ -53,38 +63,35 @@ endif
 
 # Default target
 help:
-	@echo "NFL Algorithm Professional Pipeline - UV Enhanced"
-	@echo "==============================================="
+	@echo "NFL Algorithm developer commands"
+	@echo "================================"
+	@echo "Environment: $(ENV_TYPE) | Database: $(DB_BACKEND)"
 	@echo ""
-	@echo "Current Environment: $(ENV_TYPE) $(shell [ "$(ENV_TYPE)" = "uv" ] && echo "(UV)" || echo "(venv)")"
+	@echo "Setup and diagnostics:"
+	@echo "  make install             Install Python dependencies (UV preferred, venv fallback)"
+	@echo "  make frontend-install    Install locked frontend dependencies"
+	@echo "  make migrate             Back up and migrate the local SQLite database"
+	@echo "  make doctor              Validate tools, config, database, migrations, keys, and modules"
+	@echo "  make doctor-production   Require live-odds key and private execution modules"
 	@echo ""
-	@echo "Available targets:"
-	@echo "  install        - Smart install (auto-detects UV/venv)"
-	@echo "  install-uv     - Force UV installation"
-	@echo "  install-venv   - Force venv installation"
-	@echo "  fast-sync      - Lightning-fast UV dependency sync"
-	@echo "  test          - Run test suite"
-	@echo "  lint          - Run linting (mypy)"
-	@echo "  format        - Format code (black + isort)"
-	@echo "  validate      - Run cross-season validation"
-	@echo "  optimize      - Run hyperparameter optimization"
-	@echo "  dashboard     - Launch Streamlit dashboard"
-	@echo "  report        - Run weekly prop update and generate shareable reports"
-	@echo "  enhanced-report - Build enhanced HTML/CSV/MD report and open HTML"
-	@echo "  validate-report - Run validation and print leaderboard"
-	@echo "  start_pipeline - Start complete automated pipeline"
-	@echo "  stop_pipeline - Stop automated pipeline"
-	@echo "  clean         - Clean temporary files (caches, coverage) (safe for venv/.venv)"
-	@echo "  clean-root    - Archive root clutter (exports, logs, backup DB copies)"
-	@echo "  archive-week  - Archive current week's reports (use WEEK=N)"
-	@echo "  archive-all   - Full archive (reports + root cleanup)"
-	@echo "  migrate-to-uv (deprecated) - See UV_MIGRATION_NOTES.md"
-	@echo "  env-info      - Show environment information"
-	@echo "  health-check  - Comprehensive environment health check"
+	@echo "Local applications:"
+	@echo "  make fullstack           Supervise worker, API (:8000), and frontend (:3000)"
+	@echo "  make api                 Migrate and start the development API"
+	@echo "  make pipeline-worker     Start the durable pipeline worker"
+	@echo "  make frontend-dev        Start the Next.js frontend"
+	@echo "  make dashboard           Start the legacy Streamlit dashboard (:8501)"
 	@echo ""
-	@echo "Data Ingestion:"
-	@echo "  ingest-nfl    - Ingest configured historical seasons plus the current NFL season"
-	@echo "  week-refresh  - Refresh roster/schedule/history and generate predictions (SEASON/WEEK)"
+	@echo "Weekly NFL workflow (requires SEASON and WEEK):"
+	@echo "  make week-refresh SEASON=2026 WEEK=1"
+	@echo "  make production-run SEASON=2026 WEEK=1"
+	@echo "  make pipeline-worker-once"
+	@echo "  make health SEASON=2026 WEEK=1"
+	@echo ""
+	@echo "Quality: make test | make lint | make format | make validate"
+	@echo "All target names: make list-targets"
+
+list-targets:
+	@$(MAKE) -qp 2>/dev/null | awk -F: '/^[A-Za-z0-9][A-Za-z0-9_.-]*:([^=]|$$)/ {print $$1}' | sort -u
 
 # Smart installation - auto-detects best environment
 install:
@@ -94,10 +101,12 @@ install:
 	elif [ -d "venv" ]; then \
 		echo "Installing with venv (detected)..."; \
 		$(MAKE) install-venv; \
+	elif command -v python3.13 >/dev/null 2>&1; then \
+		echo "UV not detected; installing with Python 3.13 venv..."; \
+		$(MAKE) install-venv; \
 	else \
-		echo "❓ No environment detected. Recommendations:"; \
-		echo "  • For 10x faster builds: make migrate-to-uv"; \
-		echo "  • For traditional setup: make install-venv"; \
+		echo "ERROR: install requires either UV or Python 3.13." >&2; \
+		echo "Install UV from https://docs.astral.sh/uv/ or install Python 3.13." >&2; \
 		exit 1; \
 	fi
 
@@ -205,25 +214,39 @@ api-preflight:
 		echo "Skipping SQLite API preflight for DB_BACKEND=$(DB_BACKEND)"; \
 	fi
 
+migrate: api-preflight
+
+runtime-preflight:
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema
+
+# Validate a migrated local environment. Warnings identify optional live/private features.
+doctor:
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --check-frontend
+
+doctor-production:
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --check-frontend --require-live-odds --require-private-modules
+
 # Launch FastAPI backend after callers complete any required preflight.
 api-serve:
-	@echo "Starting FastAPI backend on port 8000..."
-	$(DB_ENV) $(PYTHON) -m uvicorn api.server:app --host 0.0.0.0 --port 8000 --reload
+	@echo "Starting FastAPI backend on $(API_HOST):$(API_PORT)..."
+	$(DB_ENV) $(PYTHON) -m uvicorn api.application:app --host $(API_HOST) --port $(API_PORT) --reload
 
 api: api-preflight
+	@$(MAKE) runtime-preflight
 	@$(MAKE) api-serve
 
 api-prod-serve:
-	@echo "Starting FastAPI backend (production) on port 8000..."
-	$(DB_ENV) $(PYTHON) -m uvicorn api.server:app --host 0.0.0.0 --port 8000
+	@echo "Starting FastAPI backend (production) on $(API_HOST):$(API_PORT)..."
+	$(DB_ENV) $(PYTHON) -m uvicorn api.application:app --host $(API_HOST) --port $(API_PORT)
 
 api-prod: api-preflight
+	@$(MAKE) runtime-preflight
 	@$(MAKE) api-prod-serve
 
 # Frontend commands
 frontend-install:
-	@echo "Installing frontend dependencies..."
-	cd frontend && npm install
+	@echo "Installing locked frontend dependencies..."
+	cd frontend && npm ci
 
 frontend-dev:
 	@echo "Starting Next.js frontend on port 3000..."
@@ -233,14 +256,10 @@ frontend-build:
 	@echo "Building frontend for production..."
 	cd frontend && npm run build
 
-# Full stack - run both API and frontend
-fullstack:
+# Full stack - supervised startup with readiness waiting and graceful cleanup.
+fullstack: api-preflight
 	@echo "Starting worker, API, and frontend..."
-	@$(MAKE) api-preflight
-	@$(MAKE) pipeline-worker &
-	@$(MAKE) api-serve &
-	@sleep 2
-	@$(MAKE) frontend-dev
+	$(DB_ENV) $(PYTHON) -m scripts.run_local_services
 
 # Weekly report with timing
 report:
@@ -322,11 +341,11 @@ production-run:
 	@echo "Queueing production pipeline for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.production_runner --season $(SEASON) --week $(WEEK)
 
-pipeline-worker:
+pipeline-worker: runtime-preflight
 	@echo "Starting durable NFL pipeline worker..."
 	$(DB_ENV) $(PYTHON) -m pipeline_jobs.worker
 
-pipeline-worker-once:
+pipeline-worker-once: runtime-preflight
 	@echo "Processing at most one durable NFL pipeline job..."
 	$(DB_ENV) $(PYTHON) -m pipeline_jobs.worker --once
 

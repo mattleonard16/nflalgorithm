@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from scripts.preflight import Diagnostic
 from scripts.queue_monitor import alert_reasons
 from scripts.run_services import service_commands
 
@@ -12,7 +15,7 @@ def test_supervisor_starts_api_and_worker_as_separate_processes(monkeypatch) -> 
     commands = service_commands()
 
     assert [command[2:] for command in commands] == [
-        ["uvicorn", "api.server:app", "--host", "0.0.0.0", "--port", "8000"],
+        ["uvicorn", "api.application:app", "--host", "0.0.0.0", "--port", "8000"],
         ["pipeline_jobs.worker"],
     ]
 
@@ -39,3 +42,26 @@ def test_queue_monitor_alerts_on_stale_or_old_work(monkeypatch) -> None:
         "stale worker lease detected",
         "oldest queued job exceeded threshold",
     ]
+
+
+def test_supervisor_stops_before_children_when_preflight_fails(monkeypatch) -> None:
+    import scripts.run_services as run_services
+
+    monkeypatch.setattr(run_services, "configure_logging", lambda _service: None)
+    monkeypatch.setattr(run_services.MigrationManager, "run", lambda _self: None)
+    monkeypatch.setattr(
+        run_services,
+        "collect_diagnostics",
+        lambda **_kwargs: [Diagnostic("database", "fail", "unavailable")],
+    )
+    monkeypatch.setattr(run_services, "print_diagnostics", lambda _items: None)
+    monkeypatch.setattr(
+        run_services.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("children must not start"),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_services.main()
+
+    assert exc_info.value.code == 2
