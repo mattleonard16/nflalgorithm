@@ -135,6 +135,20 @@ def test_worker_claims_fifo_and_records_stage_timeline(job_db) -> None:
     assert queued == [("completed",), ("queued",)]
 
 
+def test_every_claim_receives_a_unique_attempt_token(job_db) -> None:
+    service = JobService(retry_base_seconds=0)
+    service.create_pipeline_job(season=2026, week=1, source="scheduler", max_attempts=2)
+
+    first = service.claim_next("worker")
+    assert first is not None and first.claim_token
+    service.fail(first, "retry")
+    second = service.claim_next("worker")
+
+    assert second is not None and second.claim_token
+    assert second.attempts == 2
+    assert second.claim_token != first.claim_token
+
+
 def test_queued_job_can_be_cancelled_without_execution(job_db) -> None:
     service = JobService()
     job = service.create_pipeline_job(season=2026, week=1, source="cli")

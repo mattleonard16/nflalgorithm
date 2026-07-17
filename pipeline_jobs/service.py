@@ -14,9 +14,17 @@ from utils.db import execute, fetchall, fetchone, get_connection, is_sqlite_conn
 
 QUEUED_STATUSES = ("queued", "retry_scheduled")
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+LEGAL_TRANSITIONS = {
+    "queued": frozenset({"running", "cancelled"}),
+    "retry_scheduled": frozenset({"running", "cancelled"}),
+    "running": frozenset({"completed", "failed", "retry_scheduled", "cancelled"}),
+    "failed": frozenset({"queued"}),
+    "completed": frozenset(),
+    "cancelled": frozenset(),
+}
 _JOB_COLUMNS = (
     "job_id, run_id, job_type, payload_json, status, priority, attempts, max_attempts, "
-    "available_at, claimed_at, heartbeat_at, worker_id, cancel_requested, "
+    "available_at, claimed_at, heartbeat_at, worker_id, claim_token, cancel_requested, "
     "idempotency_key, source, requested_by, created_at, updated_at, last_error"
 )
 
@@ -27,6 +35,18 @@ def _utcnow() -> datetime:
 
 def _iso(value: datetime | None = None) -> str:
     return (value or _utcnow()).isoformat()
+
+
+def _text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode("ascii")
+    return str(value)
+
+
+class LeaseLostError(RuntimeError):
+    """Raised when an execution attempt no longer owns its database lease."""
 
 
 def _lock_active_lease(conn: Any, job_id: str, worker_id: str) -> None:
@@ -60,6 +80,7 @@ class PipelineJob:
     claimed_at: str | None
     heartbeat_at: str | None
     worker_id: str | None
+    claim_token: str | None
     cancel_requested: bool
     idempotency_key: str | None
     source: str
@@ -83,13 +104,14 @@ class PipelineJob:
             claimed_at=row[9],
             heartbeat_at=row[10],
             worker_id=row[11],
-            cancel_requested=bool(row[12]),
-            idempotency_key=row[13],
-            source=str(row[14]),
-            requested_by=row[15],
-            created_at=str(row[16]),
-            updated_at=str(row[17]),
-            last_error=row[18],
+            claim_token=_text(row[12]),
+            cancel_requested=bool(row[13]),
+            idempotency_key=row[14],
+            source=str(row[15]),
+            requested_by=row[16],
+            created_at=str(row[17]),
+            updated_at=str(row[18]),
+            last_error=row[19],
         )
 
 
@@ -253,14 +275,15 @@ class JobService:
                 return None
 
             job = PipelineJob.from_row(row)
+            claim_token = uuid.uuid4().hex
             affected = execute(
                 """
                 UPDATE pipeline_jobs
                 SET status = 'running', attempts = attempts + 1, claimed_at = ?, heartbeat_at = ?,
-                    worker_id = ?, updated_at = ?
-                WHERE job_id = ? AND status IN (?, ?)
+                    worker_id = ?, claim_token = ?, updated_at = ?
+                WHERE job_id = ? AND status IN (?, ?) AND cancel_requested = 0
                 """,
-                (now, now, worker_id, now, job.job_id, *QUEUED_STATUSES),
+                (now, now, worker_id, claim_token, now, job.job_id, *QUEUED_STATUSES),
                 conn=conn,
             )
             if affected != 1:
@@ -306,7 +329,7 @@ class JobService:
                     """
                     UPDATE pipeline_jobs
                     SET status = ?, available_at = ?, claimed_at = NULL, heartbeat_at = NULL,
-                        worker_id = NULL, updated_at = ?, last_error = ?
+                        worker_id = NULL, claim_token = NULL, updated_at = ?, last_error = ?
                     WHERE job_id = ? AND status = 'running' AND worker_id = ?
                     """,
                     (
@@ -443,7 +466,7 @@ class JobService:
                 """
                 UPDATE pipeline_jobs
                 SET status = 'queued', attempts = 0, available_at = ?, claimed_at = NULL,
-                    heartbeat_at = NULL, worker_id = NULL, cancel_requested = 0,
+                    heartbeat_at = NULL, worker_id = NULL, claim_token = NULL, cancel_requested = 0,
                     last_error = NULL, updated_at = ?
                 WHERE job_id = ? AND status = 'failed'
                 """,
@@ -684,7 +707,7 @@ class JobService:
                 """
                 UPDATE pipeline_jobs
                 SET status = ?, available_at = ?, claimed_at = NULL, heartbeat_at = NULL,
-                    worker_id = NULL, updated_at = ?, last_error = ?
+                    worker_id = NULL, claim_token = NULL, updated_at = ?, last_error = ?
                 WHERE job_id = ? AND worker_id = ? AND status = 'running'
                 """,
                 (
