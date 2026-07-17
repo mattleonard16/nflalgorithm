@@ -802,3 +802,38 @@ def test_heartbeat_failure_racing_with_completion_prevents_terminal_write(job_db
     assert completion_called.is_set() is False
     current = service.get_job(queued.job_id)
     assert current is not None and current.status == "running"
+
+
+def test_heartbeat_loss_hard_stops_during_noncooperative_side_effect(job_db) -> None:
+    service = JobService()
+    queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    service.heartbeat = lambda _job: False  # type: ignore[method-assign]
+    side_effect_in_flight = Event()
+    release_side_effect = Event()
+    hard_stop_called = Event()
+    reasons: list[str] = []
+
+    def blocking_runner(*args, **kwargs):
+        side_effect_in_flight.set()
+        assert release_side_effect.wait(timeout=1)
+        return {"success": True, "stages": [], "errors": []}
+
+    def hard_stop(reason: str) -> None:
+        assert side_effect_in_flight.is_set()
+        reasons.append(reason)
+        hard_stop_called.set()
+        release_side_effect.set()
+
+    worker = PipelineWorker(
+        worker_id="hard-stop-worker",
+        service=service,
+        runner=blocking_runner,
+        heartbeat_seconds=0.01,
+        lease_loss_handler=hard_stop,
+    )
+
+    assert worker.process_once() is True
+    assert hard_stop_called.is_set()
+    assert reasons == ["heartbeat renewal updated zero rows"]
+    current = service.get_job(queued.job_id)
+    assert current is not None and current.status == "running"

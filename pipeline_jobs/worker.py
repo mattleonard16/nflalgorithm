@@ -17,6 +17,14 @@ from scripts.production_runner import run_production_pipeline
 logger = logging.getLogger(__name__)
 
 PipelineRunner = Callable[..., Mapping[str, Any]]
+LeaseLossHandler = Callable[[str], None]
+LEASE_LOST_EXIT_CODE = 75
+
+
+def _terminate_process_for_lease_loss(reason: str) -> None:
+    """Hard-stop production execution when cooperative cancellation is impossible."""
+    logger.critical("Terminating worker after lease loss: %s", reason)
+    os._exit(LEASE_LOST_EXIT_CODE)
 
 
 class PipelineWorker:
@@ -29,11 +37,13 @@ class PipelineWorker:
         service: JobService | None = None,
         runner: PipelineRunner = run_production_pipeline,
         heartbeat_seconds: float = 15.0,
+        lease_loss_handler: LeaseLossHandler | None = None,
     ) -> None:
         self.worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}"
         self.service = service or JobService()
         self.runner = runner
         self.heartbeat_seconds = max(0.01, heartbeat_seconds)
+        self.lease_loss_handler = lease_loss_handler
 
     def process_once(self) -> bool:
         job = self.service.claim_next(self.worker_id)
@@ -52,9 +62,12 @@ class PipelineWorker:
         def mark_lease_lost(reason: str) -> None:
             if terminal_written.is_set():
                 return
-            if not lease_lost.is_set():
+            first_loss = not lease_lost.is_set()
+            if first_loss:
                 logger.error("Pipeline job %s lost its lease: %s", job.job_id, reason)
             lease_lost.set()
+            if first_loss and self.lease_loss_handler:
+                self.lease_loss_handler(reason)
 
         def ensure_lease() -> None:
             if lease_lost.is_set():
@@ -243,7 +256,10 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
 
-    worker = PipelineWorker(worker_id=args.worker_id)
+    worker = PipelineWorker(
+        worker_id=args.worker_id,
+        lease_loss_handler=_terminate_process_for_lease_loss,
+    )
     if args.once:
         worker.process_once()
     else:
