@@ -14,8 +14,13 @@ Production MySQL must be Oracle MySQL 8.0 or newer. Startup rejects MySQL 5.7 an
 than silently weakening `SKIP LOCKED` claim and fencing behavior.
 
 The worker is the only process allowed to execute stages or publish cards. A heartbeat exception or
-zero-row renewal means lease loss; the worker stops before the next stage or terminal write. Failed
+zero-row renewal means lease loss; the production worker exits immediately with code 75, including
+while a non-cooperative stage handler is running. The service supervisor must restart it. Failed
 attempt history is append-only and visible through the authenticated pipeline API and metrics.
+
+Automatic retries are fail-closed. Every executed stage must declare `retry_safe=true`; an unknown
+runner exception or undeclared side effect becomes terminal so the worker cannot repeat an external
+publication whose acknowledgement may have been lost.
 
 1. Run migrations and preflight after pulling updates:
    ```bash

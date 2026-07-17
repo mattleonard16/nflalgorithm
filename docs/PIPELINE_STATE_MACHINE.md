@@ -32,7 +32,13 @@ Heartbeat renewal, cancellation checks, stage writes, completion, failure,
 card promotion, and artifact registration require that tuple and a currently
 running job. The token is compared as binary data so case-insensitive database
 collations cannot weaken fencing. Reclaims clear the prior token before a new
-attempt receives a different one.
+attempt receives a different one. During a rolling deployment, stale claims
+created by a pre-token worker are conditionally recovered by job and attempt
+with `claim_token IS NULL`; they are never accepted as modern active leases.
+
+A heartbeat exception or zero-row renewal is lease loss. The production worker
+signals cooperative cancellation and exits immediately with code 75, so a
+non-cooperative in-process handler cannot continue after its lease is lost.
 
 ## Attempt history
 
@@ -51,10 +57,21 @@ The odds stage must prove all of the following before value ranking begins:
 - every response has age metadata and the oldest is within `NFL_ODDS_MAX_AGE_SECONDS`;
 - scheduled-event coverage meets `NFL_ODDS_MIN_EVENT_COVERAGE`;
 - required event/market coverage meets `NFL_ODDS_MIN_MARKET_COVERAGE`;
+- every covered event/market reports bookmaker provenance and enough distinct
+  books to meet `NFL_ODDS_MIN_SPORTSBOOKS_PER_EVENT_MARKET`;
 - at least one complete two-sided row was persisted.
 
 The validation reason and metrics are stored per run and attempt in
 `pipeline_odds_validations` and included in the stage result exposed by the API.
+
+## Retry side-effect safety
+
+Automatic retry is allowed only when every executed stage explicitly reports
+`retry_safe=true`. The canonical NFL stages carry that declaration because
+their writes are upserts, point-in-time snapshots, or run/attempt-scoped
+staging operations. Unknown runners, unhandled runner exceptions, and stages
+without that declaration fail terminally instead of risking duplicate external
+side effects. An operator may investigate and issue an explicit retry.
 
 ## Card publication
 

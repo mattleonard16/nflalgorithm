@@ -55,8 +55,10 @@ flowchart LR
 - `pipeline_jobs.worker` atomically claims one available job and records worker ownership,
   renewable heartbeat leases, attempts, stage status, results, and errors. Expired leases are
   reclaimed within the retry budget and stale workers are fenced from terminal writes.
-- Failures retry with bounded exponential backoff. Terminal failures require an explicit retry.
-- Cancellation is immediate for queued jobs and cooperative between running stages.
+- Failures retry with bounded exponential backoff only when every executed stage declares its
+  effects retry-safe. Terminal or unproven failures require an explicit operator retry.
+- Cancellation is immediate for queued jobs and cooperative between running stages. Lease loss
+  additionally hard-stops the worker process so a non-cooperative handler cannot keep executing.
 - Live-odds failure stops the pipeline before value, risk, agents, or materialization can use a
   stale card.
 - CLI and scheduler call the same `JobService` used by the API.
