@@ -25,7 +25,7 @@ class SimpleRateLimiter:
     def __init__(self, capacity: int = 60, refill_rate: int = 60):
         self.capacity = capacity
         self.refill_rate = refill_rate  # tokens per minute
-        self.tokens = capacity
+        self.tokens: float = float(capacity)
         self.last_refill = time.time()
 
     def consume(self, tokens: int = 1) -> bool:
