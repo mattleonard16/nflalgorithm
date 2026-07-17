@@ -17,8 +17,11 @@ def promote_staged_card(
 ) -> int:
     """Replace the active weekly card from one fenced attempt in its transaction."""
     row = fetchone(
-        "SELECT COUNT(*) FROM pipeline_card_staging WHERE run_id = ? AND attempt = ?",
-        (run_id, attempt),
+        """
+        SELECT COUNT(*) FROM pipeline_card_staging
+        WHERE run_id = ? AND attempt = ? AND season = ? AND week = ?
+        """,
+        (run_id, attempt, season, week),
         conn=conn,
     )
     count = int(row[0]) if row else 0
