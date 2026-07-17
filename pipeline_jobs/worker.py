@@ -47,28 +47,24 @@ class PipelineWorker:
 
         def on_stage_start(stage_name: str, ordinal: int) -> None:
             self.service.record_stage_started(
-                job.run_id,
+                job,
                 stage_name,
                 ordinal,
-                job_id=job.job_id,
-                worker_id=self.worker_id,
             )
 
         def on_stage_result(stage_name: str, ordinal: int, result: Mapping[str, Any]) -> None:
             self.service.record_stage_result(
-                job.run_id,
+                job,
                 stage_name,
                 ordinal,
                 result,
-                job_id=job.job_id,
-                worker_id=self.worker_id,
             )
 
         heartbeat_stop = threading.Event()
 
         def renew_lease() -> None:
             while not heartbeat_stop.wait(self.heartbeat_seconds):
-                self.service.heartbeat(job.job_id, self.worker_id)
+                self.service.heartbeat(job)
 
         heartbeat_thread = threading.Thread(target=renew_lease, daemon=True)
         heartbeat_thread.start()
@@ -82,9 +78,7 @@ class PipelineWorker:
                         skip_odds=bool(payload.get("skip_odds", False)),
                         on_stage_start=on_stage_start,
                         on_stage_result=on_stage_result,
-                        cancellation_requested=lambda: self.service.cancellation_requested(
-                            job.job_id
-                        ),
+                        cancellation_requested=lambda: self.service.cancellation_requested(job),
                     )
                 )
             except Exception as exc:
@@ -95,7 +89,7 @@ class PipelineWorker:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=self.heartbeat_seconds + 1)
 
-        if self.service.cancellation_requested(job.job_id) or report.get("cancelled"):
+        if self.service.cancellation_requested(job) or report.get("cancelled"):
             self.service.cancel_running(job, report)
             return
 

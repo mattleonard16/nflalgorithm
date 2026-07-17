@@ -223,9 +223,9 @@ def test_explicit_retry_clears_prior_attempt_read_models(job_db) -> None:
     )
     claimed = service.claim_next("worker")
     assert claimed is not None
-    service.record_stage_started(claimed.run_id, "prepare_week", 0)
+    service.record_stage_started(claimed, "prepare_week", 0)
     service.record_stage_result(
-        claimed.run_id,
+        claimed,
         "prepare_week",
         0,
         {"status": "ok", "stage": "prepare_week"},

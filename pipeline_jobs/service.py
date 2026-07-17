@@ -49,21 +49,42 @@ class LeaseLostError(RuntimeError):
     """Raised when an execution attempt no longer owns its database lease."""
 
 
-def _lock_active_lease(conn: Any, job_id: str, worker_id: str) -> None:
+def _lease_clause(conn: Any) -> str:
+    worker_match = (
+        "worker_id = ? COLLATE BINARY" if is_sqlite_connection(conn) else "BINARY worker_id = BINARY ?"
+    )
+    return (
+        f"job_id = ? AND {worker_match} AND attempts = ? AND claim_token = ? "
+        "AND status = 'running'"
+    )
+
+
+def _lease_values(job: "PipelineJob") -> tuple[Any, ...]:
+    if not job.worker_id or not job.claim_token or job.attempts < 1:
+        raise ValueError("job does not contain an active attempt lease")
+    return (job.job_id, job.worker_id, job.attempts, job.claim_token.encode("ascii"))
+
+
+def _lock_active_lease(conn: Any, job: "PipelineJob", *, allow_cancel: bool = False) -> bool:
     if is_sqlite_connection(conn):
         conn.execute("BEGIN IMMEDIATE")
         suffix = ""
     else:
         suffix = " FOR UPDATE"
     owned = fetchone(
-        "SELECT 1 FROM pipeline_jobs "
-        f"WHERE job_id = ? AND worker_id = ? AND status = 'running'{suffix}",
-        (job_id, worker_id),
+        "SELECT cancel_requested FROM pipeline_jobs "
+        f"WHERE {_lease_clause(conn)}{suffix}",
+        _lease_values(job),
         conn=conn,
     )
     if not owned:
         conn.rollback()
-        raise RuntimeError("worker lease is no longer active")
+        raise LeaseLostError("worker attempt lease is no longer active")
+    cancelled = bool(owned[0])
+    if cancelled and not allow_cancel:
+        conn.rollback()
+        raise LeaseLostError("worker attempt was cancelled")
+    return cancelled
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,7 +304,15 @@ class JobService:
                     worker_id = ?, claim_token = ?, updated_at = ?
                 WHERE job_id = ? AND status IN (?, ?) AND cancel_requested = 0
                 """,
-                (now, now, worker_id, claim_token, now, job.job_id, *QUEUED_STATUSES),
+                (
+                    now,
+                    now,
+                    worker_id,
+                    claim_token.encode("ascii"),
+                    now,
+                    job.job_id,
+                    *QUEUED_STATUSES,
+                ),
                 conn=conn,
             )
             if affected != 1:
@@ -373,19 +402,30 @@ class JobService:
             conn.commit()
         return recovered
 
-    def heartbeat(self, job_id: str, worker_id: str) -> None:
+    def heartbeat(self, job: PipelineJob) -> bool:
         now = _iso()
-        execute(
-            """
+        with get_connection() as conn:
+            affected = execute(
+                f"""
             UPDATE pipeline_jobs SET heartbeat_at = ?, updated_at = ?
-            WHERE job_id = ? AND worker_id = ? AND status = 'running'
+            WHERE {_lease_clause(conn)} AND cancel_requested = 0
             """,
-            (now, now, job_id, worker_id),
-        )
+                (now, now, *_lease_values(job)),
+                conn=conn,
+            )
+            conn.commit()
+        return affected == 1
 
-    def cancellation_requested(self, job_id: str) -> bool:
-        row = fetchone("SELECT cancel_requested FROM pipeline_jobs WHERE job_id = ?", (job_id,))
-        return bool(row and row[0])
+    def cancellation_requested(self, job: PipelineJob) -> bool:
+        with get_connection() as conn:
+            row = fetchone(
+                f"SELECT cancel_requested FROM pipeline_jobs WHERE {_lease_clause(conn)}",
+                _lease_values(job),
+                conn=conn,
+            )
+        if not row:
+            raise LeaseLostError("worker attempt lease is no longer active")
+        return bool(row[0])
 
     def request_cancel(self, run_id: str) -> PipelineJob:
         now = _iso()
@@ -500,31 +540,30 @@ class JobService:
 
     def record_stage_started(
         self,
-        run_id: str,
+        job: PipelineJob,
         stage_name: str,
         ordinal: int,
-        *,
-        job_id: str | None = None,
-        worker_id: str | None = None,
     ) -> None:
         now = _iso()
         with get_connection() as conn:
-            if job_id and worker_id:
-                _lock_active_lease(conn, job_id, worker_id)
+            _lock_active_lease(conn, job)
             existing = fetchone(
-                "SELECT 1 FROM pipeline_stage_runs WHERE run_id = ? AND stage_name = ?",
-                (run_id, stage_name),
+                """
+                SELECT 1 FROM pipeline_stage_runs
+                WHERE run_id = ? AND attempt = ? AND stage_name = ?
+                """,
+                (job.run_id, job.attempts, stage_name),
                 conn=conn,
             )
             if existing:
                 execute(
                     """
                     UPDATE pipeline_stage_runs
-                    SET ordinal = ?, status = 'running', attempt = attempt + 1, started_at = ?,
+                    SET ordinal = ?, status = 'running', started_at = ?,
                         finished_at = NULL, result_json = NULL, error_message = NULL
-                    WHERE run_id = ? AND stage_name = ?
+                    WHERE run_id = ? AND attempt = ? AND stage_name = ?
                     """,
-                    (ordinal, now, run_id, stage_name),
+                    (ordinal, now, job.run_id, job.attempts, stage_name),
                     conn=conn,
                 )
             else:
@@ -532,41 +571,42 @@ class JobService:
                     """
                     INSERT INTO pipeline_stage_runs
                         (run_id, stage_name, ordinal, status, attempt, started_at)
-                    VALUES (?, ?, ?, 'running', 1, ?)
+                    VALUES (?, ?, ?, 'running', ?, ?)
                     """,
-                    (run_id, stage_name, ordinal, now),
+                    (job.run_id, stage_name, ordinal, job.attempts, now),
                     conn=conn,
                 )
-            if job_id and worker_id:
-                execute(
-                    """
-                    UPDATE pipeline_jobs SET heartbeat_at = ?, updated_at = ?
-                    WHERE job_id = ? AND worker_id = ? AND status = 'running'
-                    """,
-                    (now, now, job_id, worker_id),
-                    conn=conn,
-                )
+            affected = execute(
+                f"""
+                UPDATE pipeline_jobs SET heartbeat_at = ?, updated_at = ?
+                WHERE {_lease_clause(conn)} AND cancel_requested = 0
+                """,
+                (now, now, *_lease_values(job)),
+                conn=conn,
+            )
+            if affected != 1:
+                conn.rollback()
+                raise LeaseLostError("worker attempt lease was lost during stage start")
             conn.commit()
 
     def record_stage_result(
         self,
-        run_id: str,
+        job: PipelineJob,
         stage_name: str,
         ordinal: int,
         result: Mapping[str, Any],
-        *,
-        job_id: str | None = None,
-        worker_id: str | None = None,
     ) -> None:
         now = _iso()
         status = "completed" if result.get("status") in {"ok", "skipped"} else "failed"
         error = result.get("error") or result.get("detail")
         with get_connection() as conn:
-            if job_id and worker_id:
-                _lock_active_lease(conn, job_id, worker_id)
+            _lock_active_lease(conn, job)
             existing = fetchone(
-                "SELECT 1 FROM pipeline_stage_runs WHERE run_id = ? AND stage_name = ?",
-                (run_id, stage_name),
+                """
+                SELECT 1 FROM pipeline_stage_runs
+                WHERE run_id = ? AND attempt = ? AND stage_name = ?
+                """,
+                (job.run_id, job.attempts, stage_name),
                 conn=conn,
             )
             if not existing:
@@ -574,16 +614,16 @@ class JobService:
                     """
                     INSERT INTO pipeline_stage_runs
                         (run_id, stage_name, ordinal, status, attempt, started_at)
-                    VALUES (?, ?, ?, 'running', 1, ?)
+                    VALUES (?, ?, ?, 'running', ?, ?)
                     """,
-                    (run_id, stage_name, ordinal, now),
+                    (job.run_id, stage_name, ordinal, job.attempts, now),
                     conn=conn,
                 )
             execute(
                 """
                 UPDATE pipeline_stage_runs
                 SET ordinal = ?, status = ?, finished_at = ?, result_json = ?, error_message = ?
-                WHERE run_id = ? AND stage_name = ?
+                WHERE run_id = ? AND attempt = ? AND stage_name = ?
                 """,
                 (
                     ordinal,
@@ -591,7 +631,8 @@ class JobService:
                     now,
                     json.dumps(dict(result), default=str, separators=(",", ":")),
                     str(error) if error else None,
-                    run_id,
+                    job.run_id,
+                    job.attempts,
                     stage_name,
                 ),
                 conn=conn,
@@ -599,25 +640,27 @@ class JobService:
             completed = fetchone(
                 """
                 SELECT COUNT(*) FROM pipeline_stage_runs
-                WHERE run_id = ? AND status = 'completed'
+                WHERE run_id = ? AND attempt = ? AND status = 'completed'
                 """,
-                (run_id,),
+                (job.run_id, job.attempts),
                 conn=conn,
             )
             execute(
                 "UPDATE pipeline_runs SET stages_completed = ?, updated_at = ? WHERE run_id = ?",
-                (int(completed[0]) if completed else 0, now, run_id),
+                (int(completed[0]) if completed else 0, now, job.run_id),
                 conn=conn,
             )
-            if job_id and worker_id:
-                execute(
-                    """
-                    UPDATE pipeline_jobs SET heartbeat_at = ?, updated_at = ?
-                    WHERE job_id = ? AND worker_id = ? AND status = 'running'
-                    """,
-                    (now, now, job_id, worker_id),
-                    conn=conn,
-                )
+            affected = execute(
+                f"""
+                UPDATE pipeline_jobs SET heartbeat_at = ?, updated_at = ?
+                WHERE {_lease_clause(conn)} AND cancel_requested = 0
+                """,
+                (now, now, *_lease_values(job)),
+                conn=conn,
+            )
+            if affected != 1:
+                conn.rollback()
+                raise LeaseLostError("worker attempt lease was lost during stage result")
             conn.commit()
 
     def complete(

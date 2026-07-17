@@ -113,12 +113,10 @@ def test_worker_crash_recovers_and_fences_stale_attempt(runtime_database) -> Non
     assert service.complete(stale_claim, {"success": True}) is False
     with pytest.raises(RuntimeError, match="lease is no longer active"):
         service.record_stage_result(
-            queued.run_id,
+            stale_claim,
             "materialize",
             5,
             {"status": "ok", "card_size": 99},
-            job_id=queued.job_id,
-            worker_id="crashed-worker",
         )
 
 
@@ -195,19 +193,15 @@ def test_operational_metrics_cover_queue_failures_and_stage_duration(runtime_dat
     claimed = service.claim_next("metrics-worker")
     assert claimed is not None and claimed.job_id == failing.job_id
     service.record_stage_started(
-        claimed.run_id,
+        claimed,
         "odds",
         1,
-        job_id=claimed.job_id,
-        worker_id="metrics-worker",
     )
     service.record_stage_result(
-        claimed.run_id,
+        claimed,
         "odds",
         1,
         {"status": "error", "error": "provider unavailable"},
-        job_id=claimed.job_id,
-        worker_id="metrics-worker",
     )
     service.fail(claimed, "provider unavailable", retryable=False)
 
