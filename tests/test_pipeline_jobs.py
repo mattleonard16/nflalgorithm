@@ -304,6 +304,43 @@ def test_automatic_retry_is_blocked_for_unproven_side_effect(job_db) -> None:
     assert current.attempts == 1
 
 
+def test_automatic_retry_rejects_malformed_stage_evidence(job_db) -> None:
+    service = JobService(retry_base_seconds=0)
+    job = service.create_pipeline_job(
+        season=2026,
+        week=1,
+        source="api",
+        max_attempts=2,
+    )
+
+    def malformed_runner(*args, **kwargs):
+        return {
+            "success": False,
+            "stages": [
+                {
+                    "stage": "external_publish",
+                    "status": "error",
+                    "error": "provider response malformed",
+                    "retry_safe": True,
+                },
+                "missing-stage-object",
+            ],
+            "errors": [{"stage": "external_publish", "error": "provider response malformed"}],
+        }
+
+    worker = PipelineWorker(
+        worker_id="malformed-retry-worker",
+        service=service,
+        runner=malformed_runner,
+    )
+
+    assert worker.process_once() is True
+    current = service.get_job(job.job_id)
+    assert current is not None
+    assert current.status == "failed"
+    assert current.attempts == 1
+
+
 def test_expired_worker_lease_is_reclaimed_and_fenced(job_db) -> None:
     service = JobService(retry_base_seconds=0, stale_after_seconds=30)
     queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")

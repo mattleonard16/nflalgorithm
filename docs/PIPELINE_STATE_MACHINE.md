@@ -67,11 +67,13 @@ The validation reason and metrics are stored per run and attempt in
 ## Retry side-effect safety
 
 Automatic retry is allowed only when every executed stage explicitly reports
-`retry_safe=true`. The canonical NFL stages carry that declaration because
-their writes are upserts, point-in-time snapshots, or run/attempt-scoped
-staging operations. Unknown runners, unhandled runner exceptions, and stages
-without that declaration fail terminally instead of risking duplicate external
-side effects. An operator may investigate and issue an explicit retry.
+`retry_safe=true`. Canonical stages opt in individually after their writes are
+verified as upserts, point-in-time snapshots, or run/attempt-scoped staging
+operations. The deployment-supplied value adapter remains excluded until its
+side effects satisfy that contract. Unknown runners, malformed stage evidence,
+unhandled runner exceptions, and stages without the declaration fail terminally
+instead of risking duplicate external side effects. An operator may investigate
+and issue an explicit retry.
 
 ## Card publication
 

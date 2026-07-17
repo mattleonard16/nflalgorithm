@@ -47,6 +47,28 @@ def test_run_reports_are_unique_and_written_atomically(tmp_path, monkeypatch) ->
     assert list((tmp_path / "production_runs").glob("*.tmp")) == []
 
 
+def test_retry_safety_is_explicit_per_canonical_stage(monkeypatch) -> None:
+    captured = {}
+
+    def capture_stages(stages, **kwargs):
+        captured.update({stage.name: stage.retry_safe for stage in stages})
+        return []
+
+    monkeypatch.setattr(production_runner, "run_stages", capture_stages)
+    monkeypatch.setattr(production_runner, "_persist_run_report", lambda report: None)
+
+    production_runner.run_production_pipeline(2026, 1)
+
+    assert captured == {
+        "prepare_week": True,
+        "odds": True,
+        "value_ranking": False,
+        "risk_assessment": True,
+        "agents": True,
+        "materialize": True,
+    }
+
+
 def test_pipeline_always_runs_canonical_prepare_even_when_reusing_history(monkeypatch) -> None:
     calls: list[tuple[str, object]] = []
 

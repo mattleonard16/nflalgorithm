@@ -32,11 +32,11 @@ def _automatic_retry_is_safe(report: Mapping[str, Any]) -> bool:
     stages = report.get("stages")
     if not isinstance(stages, list):
         return False
-    executed = [
-        stage
-        for stage in stages
-        if isinstance(stage, Mapping) and stage.get("status") in {"ok", "error"}
-    ]
+    if not stages or any(not isinstance(stage, Mapping) for stage in stages):
+        return False
+    if any(stage.get("status") not in {"ok", "error", "skipped"} for stage in stages):
+        return False
+    executed = [stage for stage in stages if stage.get("status") in {"ok", "error"}]
     return bool(executed) and all(stage.get("retry_safe") is True for stage in executed)
 
 

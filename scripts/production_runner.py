@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from config import config
+from pipelines.nfl_contract import NFL_AUTOMATIC_RETRY_SAFE_STAGES
 from pipelines.orchestrator import PipelineStage, run_stages
 from utils.db import fetchone, read_dataframe
 
@@ -267,7 +268,7 @@ def run_production_pipeline(
                 week,
                 refresh_history=False if skip_ingest else None,
             ),
-            retry_safe=True,
+            retry_safe="prepare_week" in NFL_AUTOMATIC_RETRY_SAFE_STAGES,
         ),
         *[
             PipelineStage(
@@ -282,7 +283,7 @@ def run_production_pipeline(
                         else {}
                     ),
                 ),
-                retry_safe=True,
+                retry_safe=stage_name in NFL_AUTOMATIC_RETRY_SAFE_STAGES,
             )
             for stage_name, stage_fn in POST_PREPARE_STAGES
         ],
