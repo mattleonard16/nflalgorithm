@@ -47,6 +47,7 @@ class PipelineWorker:
         heartbeat_stop = threading.Event()
         lease_lost = threading.Event()
         terminal_written = threading.Event()
+        lease_operation_lock = threading.Lock()
 
         def mark_lease_lost(reason: str) -> None:
             if terminal_written.is_set():
@@ -85,16 +86,36 @@ class PipelineWorker:
                 mark_lease_lost(str(exc))
                 return True
 
+        def write_terminal(action: Callable[[], Any], *, renew_first: bool = False) -> Any:
+            """Serialize the last renewal and terminal write against the heartbeat loop."""
+            with lease_operation_lock:
+                ensure_lease()
+                if renew_first:
+                    try:
+                        renewed = self.service.heartbeat(job)
+                    except Exception as exc:
+                        mark_lease_lost(f"final heartbeat raised {type(exc).__name__}: {exc}")
+                        raise LeaseLostError("final heartbeat failed") from exc
+                    if not renewed:
+                        mark_lease_lost("final lease renewal updated zero rows")
+                        raise LeaseLostError("final heartbeat lost the worker attempt lease")
+                result = action()
+                terminal_written.set()
+                return result
+
         def renew_lease() -> None:
             while not heartbeat_stop.wait(self.heartbeat_seconds):
-                try:
-                    renewed = self.service.heartbeat(job)
-                except Exception as exc:
-                    mark_lease_lost(f"heartbeat raised {type(exc).__name__}: {exc}")
-                    return
-                if not renewed:
-                    mark_lease_lost("heartbeat renewal updated zero rows")
-                    return
+                with lease_operation_lock:
+                    if terminal_written.is_set():
+                        return
+                    try:
+                        renewed = self.service.heartbeat(job)
+                    except Exception as exc:
+                        mark_lease_lost(f"heartbeat raised {type(exc).__name__}: {exc}")
+                        return
+                    if not renewed:
+                        mark_lease_lost("heartbeat renewal updated zero rows")
+                        return
 
         heartbeat_thread = threading.Thread(target=renew_lease, daemon=True)
         heartbeat_thread.start()
@@ -121,8 +142,7 @@ class PipelineWorker:
                 if lease_lost.is_set():
                     return
                 try:
-                    self.service.fail(job, str(exc))
-                    terminal_written.set()
+                    write_terminal(lambda: self.service.fail(job, str(exc)))
                 except LeaseLostError as lease_exc:
                     mark_lease_lost(str(lease_exc))
                 return
@@ -135,8 +155,10 @@ class PipelineWorker:
                 mark_lease_lost(str(exc))
                 return
             if cancellation_requested or report.get("cancelled"):
-                self.service.cancel_running(job, report)
-                terminal_written.set()
+                try:
+                    write_terminal(lambda: self.service.cancel_running(job, report))
+                except LeaseLostError as exc:
+                    mark_lease_lost(str(exc))
                 return
 
             if report.get("success"):
@@ -150,31 +172,31 @@ class PipelineWorker:
                 if lease_lost.is_set():
                     return
                 try:
-                    if not self.service.heartbeat(job):
-                        mark_lease_lost("final lease renewal updated zero rows")
-                        return
-                except Exception as exc:
-                    mark_lease_lost(f"final heartbeat raised {type(exc).__name__}: {exc}")
+                    artifact_uri = report.get("artifact_uri")
+                    artifact = (
+                        {
+                            "kind": "run_report",
+                            "uri": str(artifact_uri),
+                            "metadata": {"season": payload["season"], "week": payload["week"]},
+                        }
+                        if artifact_uri
+                        else None
+                    )
+                    completed = write_terminal(
+                        lambda: self.service.complete(
+                            job,
+                            report,
+                            data_health=health,
+                            artifact=artifact,
+                        ),
+                        renew_first=True,
+                    )
+                except LeaseLostError as exc:
+                    mark_lease_lost(str(exc))
                     return
-                artifact_uri = report.get("artifact_uri")
-                artifact = (
-                    {
-                        "kind": "run_report",
-                        "uri": str(artifact_uri),
-                        "metadata": {"season": payload["season"], "week": payload["week"]},
-                    }
-                    if artifact_uri
-                    else None
-                )
-                if not self.service.complete(
-                    job,
-                    report,
-                    data_health=health,
-                    artifact=artifact,
-                ):
+                if not completed:
                     logger.warning("Discarding completion from stale worker for %s", job.run_id)
                     return
-                terminal_written.set()
                 try:
                     from api.cache import value_bets_cache
 
@@ -186,18 +208,19 @@ class PipelineWorker:
             errors = report.get("errors") or []
             detail = "; ".join(str(item.get("error", "pipeline failed")) for item in errors)
             try:
-                self.service.fail(
-                    job,
-                    detail
-                    or (
-                        "pipeline stopped before final card"
-                        if report.get("incomplete")
-                        else "pipeline failed"
-                    ),
-                    report,
-                    retryable=not bool(report.get("incomplete")),
+                write_terminal(
+                    lambda: self.service.fail(
+                        job,
+                        detail
+                        or (
+                            "pipeline stopped before final card"
+                            if report.get("incomplete")
+                            else "pipeline failed"
+                        ),
+                        report,
+                        retryable=not bool(report.get("incomplete")),
+                    )
                 )
-                terminal_written.set()
             except LeaseLostError as exc:
                 mark_lease_lost(str(exc))
         finally:

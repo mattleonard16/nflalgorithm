@@ -7,13 +7,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from threading import Event
 
 import pytest
 
 from pipeline_jobs.service import JobService, require_legal_transition
 from pipeline_jobs.worker import PipelineWorker
 from schema_migrations import MigrationManager
-from utils.db import execute, fetchall, fetchone, get_table_columns, table_exists
+from utils.db import execute, fetchall, fetchone, get_connection, get_table_columns, table_exists
 
 
 @pytest.fixture()
@@ -416,6 +417,33 @@ def test_completion_atomically_promotes_staged_card(job_db) -> None:
         """) == (1, claimed.run_id)
 
 
+def test_card_promotion_count_only_includes_target_week(job_db) -> None:
+    from pipeline_jobs.cards import promote_staged_card
+
+    service = JobService()
+    service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    claimed = service.claim_next("worker")
+    assert claimed is not None
+    _insert_staged_card(claimed)
+    execute(
+        "UPDATE pipeline_card_staging SET season = 2025 WHERE run_id = ? AND attempt = ?",
+        (claimed.run_id, claimed.attempts),
+    )
+
+    with get_connection() as conn:
+        published = promote_staged_card(
+            conn,
+            run_id=claimed.run_id,
+            attempt=claimed.attempts,
+            season=2026,
+            week=1,
+        )
+        conn.commit()
+
+    assert published == 0
+    assert fetchone("SELECT COUNT(*) FROM materialized_value_view") == (0,)
+
+
 def test_cancellation_during_card_materialization_never_publishes(job_db) -> None:
     service = JobService()
     queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
@@ -707,5 +735,41 @@ def test_lease_loss_after_runner_prevents_completion(job_db) -> None:
     )
 
     assert worker.process_once() is True
+    current = service.get_job(queued.job_id)
+    assert current is not None and current.status == "running"
+
+
+def test_heartbeat_failure_racing_with_completion_prevents_terminal_write(job_db) -> None:
+    service = JobService()
+    queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    heartbeat_started = Event()
+    completion_called = Event()
+    original_complete = service.complete
+
+    def failing_heartbeat(job):
+        heartbeat_started.set()
+        time.sleep(0.05)
+        return False
+
+    def tracked_complete(*args, **kwargs):
+        completion_called.set()
+        return original_complete(*args, **kwargs)
+
+    service.heartbeat = failing_heartbeat  # type: ignore[method-assign]
+    service.complete = tracked_complete  # type: ignore[method-assign]
+
+    def finishing_runner(*args, **kwargs):
+        assert heartbeat_started.wait(timeout=1)
+        return {"success": True, "stages": [], "errors": []}
+
+    worker = PipelineWorker(
+        worker_id="lease-race-worker",
+        service=service,
+        runner=finishing_runner,
+        heartbeat_seconds=0.01,
+    )
+
+    assert worker.process_once() is True
+    assert completion_called.is_set() is False
     current = service.get_job(queued.job_id)
     assert current is not None and current.status == "running"
