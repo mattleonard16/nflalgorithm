@@ -55,3 +55,20 @@ def test_nba_value_stage_receives_model_options(monkeypatch) -> None:
     )
 
     assert calls == [(True, True)]
+
+
+def test_explicit_empty_stage_selection_runs_nothing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        nba_production_runner,
+        "STAGES",
+        [("ingest", lambda game_date, season: {"stage": "ingest", "status": "ok"})],
+    )
+    monkeypatch.setattr(nba_production_runner, "_write_run_report", lambda *args: None)
+
+    results = nba_production_runner.run_nba_pipeline(
+        "2026-02-21",
+        season=2025,
+        stages=[],
+    )
+
+    assert results == []

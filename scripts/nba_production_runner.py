@@ -350,7 +350,7 @@ def run_nba_pipeline(
         skipped["odds"] = "skip_odds flag"
     results = run_stages(
         bound_stages,
-        only=set(stages) if stages else None,
+        only=set(stages) if stages is not None else None,
         skip=skipped,
         stop_on_error=False,
     )

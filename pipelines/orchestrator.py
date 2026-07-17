@@ -52,7 +52,7 @@ def run_stages(
     selected = set(only) if only is not None else None
     skipped = dict(skip or {})
 
-    unknown = ((selected or set()) | set(skipped)) - known_names
+    unknown = ((selected or set()) | set(skipped) | set(stop_after_skip)) - known_names
     if unknown:
         names = ", ".join(sorted(unknown))
         raise ValueError(f"Unknown pipeline stage(s): {names}")
@@ -78,10 +78,12 @@ def run_stages(
             raw_result = stage.handler()
         except Exception as exc:
             logger.exception("Pipeline stage %s raised unexpectedly", stage.name)
+            message = str(exc)
             result = {
                 "status": "error",
                 "stage": stage.name,
-                "error": str(exc),
+                "error": message,
+                "detail": message,
             }
         else:
             result = _normalize_result(stage.name, raw_result)

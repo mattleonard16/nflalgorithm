@@ -69,6 +69,13 @@ def test_unknown_selected_stage_is_rejected() -> None:
         run_stages(stages, only={"predict"})
 
 
+def test_unknown_stop_after_skip_stage_is_rejected() -> None:
+    stages = [PipelineStage("odds", lambda: {"status": "ok"})]
+
+    with pytest.raises(ValueError, match="Unknown pipeline stage"):
+        run_stages(stages, stop_after_skip={"value"})
+
+
 def test_duplicate_stage_names_are_rejected() -> None:
     stages = [
         PipelineStage("predict", lambda: {"status": "ok"}),
@@ -99,4 +106,11 @@ def test_handler_exceptions_become_stage_errors() -> None:
 
     results = run_stages([PipelineStage("ingest", invalid_input)])
 
-    assert results == [{"status": "error", "stage": "ingest", "error": "bad slate"}]
+    assert results == [
+        {
+            "status": "error",
+            "stage": "ingest",
+            "error": "bad slate",
+            "detail": "bad slate",
+        }
+    ]

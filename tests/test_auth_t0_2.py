@@ -14,6 +14,12 @@ from fastapi.testclient import TestClient
 from config import config
 from schema_migrations import MigrationManager
 
+API_SERVER_AVAILABLE = (Path(__file__).parent.parent / "api" / "server.py").is_file()
+requires_api_server = pytest.mark.skipif(
+    not API_SERVER_AVAILABLE,
+    reason="private API server implementation is unavailable",
+)
+
 
 @pytest.fixture
 def temp_db(monkeypatch):
@@ -33,12 +39,14 @@ def temp_db(monkeypatch):
 
 def test_hash_password_uses_bcrypt(temp_db):
     from api.auth import hash_password
+
     h = hash_password("hunter2_safe")
     assert h.startswith(("$2a$", "$2b$", "$2y$")), "expected bcrypt prefix"
 
 
 def test_verify_password_bcrypt_roundtrip(temp_db):
     from api.auth import hash_password, verify_password
+
     h = hash_password("hunter2_safe")
     assert verify_password("hunter2_safe", h) is True
     assert verify_password("wrong-password", h) is False
@@ -59,20 +67,28 @@ def test_verify_password_legacy_sha256_still_works(temp_db):
 
 def test_verify_password_rejects_empty_hash(temp_db):
     from api.auth import verify_password
+
     assert verify_password("anything", "") is False
 
 
 def test_userresponse_user_id_alias(temp_db):
     from api.auth import UserResponse
+
     u = UserResponse(
-        id="u-123", email="x@y.com", name=None,
-        subscription_tier="free", bankroll=100.0, created_at="2024-01-01",
+        id="u-123",
+        email="x@y.com",
+        name=None,
+        subscription_tier="free",
+        bankroll=100.0,
+        created_at="2024-01-01",
     )
     assert u.user_id == "u-123"
 
 
+@requires_api_server
 def test_register_endpoint_uses_pydantic_signature(temp_db):
     from api.server import app
+
     with TestClient(app) as c:
         resp = c.post(
             "/api/auth/register",
@@ -91,8 +107,10 @@ def test_register_endpoint_uses_pydantic_signature(temp_db):
     assert hash_value.startswith(("$2a$", "$2b$", "$2y$"))
 
 
+@requires_api_server
 def test_login_endpoint_uses_pydantic_signature(temp_db):
     from api.server import app
+
     with TestClient(app) as c:
         c.post(
             "/api/auth/register",
@@ -106,8 +124,10 @@ def test_login_endpoint_uses_pydantic_signature(temp_db):
     assert "session_id" in resp.json()
 
 
+@requires_api_server
 def test_login_rejects_bad_password(temp_db):
     from api.server import app
+
     with TestClient(app) as c:
         c.post(
             "/api/auth/register",
@@ -120,6 +140,7 @@ def test_login_rejects_bad_password(temp_db):
     assert resp.status_code == 401
 
 
+@requires_api_server
 def test_legacy_sha256_user_can_login_and_gets_rehashed(temp_db):
     """Existing pre-T0 #2 users still authenticate; their hash rehashes to bcrypt."""
     import hashlib

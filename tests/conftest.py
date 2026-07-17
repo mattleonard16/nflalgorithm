@@ -37,9 +37,22 @@ _private_algorithm_tests = [
     "test_value_engine_side.py",
     "test_weekly_pipeline.py",
 ]
-collect_ignore = (
-    [] if all(path.is_file() for path in _private_algorithm_files) else _private_algorithm_tests
-)
+collect_ignore = []
+if not all(path.is_file() for path in _private_algorithm_files):
+    collect_ignore.extend(_private_algorithm_tests)
+
+_private_api_server = Path(_project_root) / "api" / "server.py"
+_private_api_tests = [
+    "test_api_contract.py",
+    "test_export_api.py",
+    "test_nba_api.py",
+    "test_nba_api_contract.py",
+    "test_pipeline_run_api.py",
+    "test_record_bet_api.py",
+    "test_risk_api.py",
+]
+if not _private_api_server.is_file():
+    collect_ignore.extend(_private_api_tests)
 
 # Force tests to run against a local SQLite database regardless of .env settings.
 TEST_DB_DIR = Path(__file__).parent / "_tmp"

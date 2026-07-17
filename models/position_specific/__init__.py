@@ -36,4 +36,4 @@ def predict_week(*args: Any, **kwargs: Any) -> Any:
     return _weekly_module().predict_week(*args, **kwargs)
 
 
-__all__ = ["BasePositionModel", "RBModel", "train_weekly_models", "predict_week"]
+__all__ = ["BasePositionModel", "RBModel", "predict_week", "train_weekly_models"]
