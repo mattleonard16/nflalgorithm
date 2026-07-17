@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -415,3 +416,58 @@ def test_terminal_stale_recovery_closes_running_stage(job_db) -> None:
     assert stage[0] == "failed"
     assert stage[1] is not None
     assert stage[2] == "worker heartbeat lease expired"
+
+
+@pytest.mark.parametrize("heartbeat_mode", ["exception", "zero-row"])
+def test_heartbeat_failure_stops_execution_before_completion(job_db, heartbeat_mode) -> None:
+    service = JobService()
+    queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    original_heartbeat = service.heartbeat
+
+    def broken_heartbeat(job):
+        if heartbeat_mode == "exception":
+            raise RuntimeError("database unavailable")
+        return False
+
+    service.heartbeat = broken_heartbeat  # type: ignore[method-assign]
+
+    def cooperative_runner(*args, **kwargs):
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and not kwargs["cancellation_requested"]():
+            time.sleep(0.01)
+        return {"success": True, "stages": [], "errors": []}
+
+    worker = PipelineWorker(
+        worker_id="heartbeat-worker",
+        service=service,
+        runner=cooperative_runner,
+        heartbeat_seconds=0.01,
+    )
+
+    assert worker.process_once() is True
+    service.heartbeat = original_heartbeat  # type: ignore[method-assign]
+    current = service.get_job(queued.job_id)
+    assert current is not None and current.status == "running"
+
+
+def test_lease_loss_after_runner_prevents_completion(job_db) -> None:
+    service = JobService()
+    queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
+
+    def losing_runner(*args, **kwargs):
+        execute(
+            "UPDATE pipeline_jobs SET claim_token = ? WHERE job_id = ?",
+            (b"replacement-token", queued.job_id),
+        )
+        return {"success": True, "stages": [], "errors": []}
+
+    worker = PipelineWorker(
+        worker_id="lease-worker",
+        service=service,
+        runner=losing_runner,
+        heartbeat_seconds=60,
+    )
+
+    assert worker.process_once() is True
+    current = service.get_job(queued.job_id)
+    assert current is not None and current.status == "running"
