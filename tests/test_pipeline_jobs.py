@@ -346,6 +346,7 @@ def test_expired_worker_lease_is_reclaimed_and_fenced(job_db) -> None:
     queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
     first_claim = service.claim_next("dead-worker")
     assert first_claim is not None
+    service.record_stage_started(first_claim, "prepare_week", 0)
     expired = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
     execute(
         "UPDATE pipeline_jobs SET heartbeat_at = ? WHERE job_id = ?",
@@ -395,6 +396,7 @@ def test_reclaimed_attempt_is_fenced_even_with_same_worker_id(job_db) -> None:
     queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
     stale = service.claim_next("reused-worker")
     assert stale is not None
+    service.record_stage_started(stale, "prepare_week", 0)
     execute(
         "UPDATE pipeline_jobs SET heartbeat_at = ? WHERE job_id = ?",
         ((datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(), queued.job_id),
@@ -620,6 +622,7 @@ def test_stale_attempt_cannot_register_artifact(job_db) -> None:
     service.create_pipeline_job(season=2026, week=1, source="scheduler")
     stale = service.claim_next("same-worker")
     assert stale is not None
+    service.record_stage_started(stale, "prepare_week", 0)
     execute(
         "UPDATE pipeline_jobs SET heartbeat_at = ? WHERE job_id = ?",
         ((datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(), stale.job_id),
@@ -790,6 +793,67 @@ def test_terminal_stale_recovery_closes_running_stage(job_db) -> None:
     assert stage[0] == "failed"
     assert stage[1] is not None
     assert stage[2] == "worker heartbeat lease expired"
+
+
+def test_stale_recovery_never_retries_an_unaudited_stage(job_db) -> None:
+    service = JobService(retry_base_seconds=0, stale_after_seconds=30)
+    queued = service.create_pipeline_job(
+        season=2026,
+        week=1,
+        source="scheduler",
+        max_attempts=3,
+    )
+    claimed = service.claim_next("dead-worker")
+    assert claimed is not None
+    service.record_stage_started(claimed, "value_ranking", 2)
+    execute(
+        "UPDATE pipeline_jobs SET heartbeat_at = ? WHERE job_id = ?",
+        ((datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(), claimed.job_id),
+    )
+
+    assert service.recover_stale_jobs() == 1
+
+    recovered = service.get_job(queued.job_id)
+    assert recovered is not None
+    assert recovered.status == "failed"
+    assert recovered.attempts == 1
+    assert service.claim_next("replacement-worker") is None
+    stage = fetchone(
+        """
+        SELECT status, error_message FROM pipeline_stage_runs
+        WHERE run_id = ? AND attempt = ? AND stage_name = 'value_ranking'
+        """,
+        (claimed.run_id, claimed.attempts),
+    )
+    assert stage == (
+        "failed",
+        "worker heartbeat lease expired; automatic retry blocked by unaudited stage(s): "
+        "value_ranking",
+    )
+
+
+def test_stale_recovery_requires_persisted_stage_evidence(job_db) -> None:
+    service = JobService(retry_base_seconds=0, stale_after_seconds=30)
+    queued = service.create_pipeline_job(
+        season=2026,
+        week=1,
+        source="scheduler",
+        max_attempts=3,
+    )
+    claimed = service.claim_next("dead-worker")
+    assert claimed is not None
+    execute(
+        "UPDATE pipeline_jobs SET heartbeat_at = ? WHERE job_id = ?",
+        ((datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(), claimed.job_id),
+    )
+
+    assert service.recover_stale_jobs() == 1
+    recovered = service.get_job(queued.job_id)
+    assert recovered is not None
+    assert recovered.status == "failed"
+    assert recovered.last_error == (
+        "worker heartbeat lease expired; automatic retry blocked: no stage evidence"
+    )
 
 
 @pytest.mark.parametrize("heartbeat_mode", ["exception", "zero-row"])

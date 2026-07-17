@@ -83,6 +83,7 @@ def test_worker_crash_recovers_and_fences_stale_attempt(runtime_database) -> Non
     queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
 
     def crash_runner(*args, **kwargs):
+        kwargs["on_stage_start"]("prepare_week", 0)
         raise SystemExit("simulated worker process crash")
 
     crashed_worker = PipelineWorker(
@@ -128,6 +129,7 @@ def test_reclaim_fences_same_and_case_equivalent_worker_ids(runtime_database) ->
     queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
     stale = service.claim_next("Worker-A")
     assert stale is not None
+    service.record_stage_started(stale, "prepare_week", 0)
     expired = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
     execute(
         "UPDATE pipeline_jobs SET heartbeat_at = ? WHERE job_id = ?",
@@ -175,6 +177,34 @@ def test_mixed_version_tokenless_lease_recovers_on_real_backend(runtime_database
         (legacy_claim.run_id, legacy_claim.attempts),
     )
     assert stage == ("failed", "worker heartbeat lease expired")
+
+
+def test_stale_recovery_blocks_unaudited_side_effects(runtime_database) -> None:
+    service = JobService(retry_base_seconds=0, stale_after_seconds=30)
+    queued = service.create_pipeline_job(
+        season=2026,
+        week=1,
+        source="scheduler",
+        max_attempts=3,
+    )
+    stale = service.claim_next("dead-worker")
+    assert stale is not None
+    service.record_stage_started(stale, "value_ranking", 2)
+    expired = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    execute(
+        "UPDATE pipeline_jobs SET heartbeat_at = ? WHERE job_id = ?",
+        (expired, queued.job_id),
+    )
+
+    assert service.recover_stale_jobs() == 1
+    recovered = service.get_job(queued.job_id)
+    assert recovered is not None
+    assert recovered.status == "failed"
+    assert recovered.attempts == 1
+    assert "automatic retry blocked by unaudited stage(s): value_ranking" in str(
+        recovered.last_error
+    )
+    assert service.claim_next("replacement-worker") is None
 
 
 def test_backend_terminal_transitions_honor_cancellation(runtime_database) -> None:

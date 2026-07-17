@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
-from pipelines.nfl_contract import NFL_STAGE_COUNT
+from pipelines.nfl_contract import NFL_AUTOMATIC_RETRY_SAFE_STAGES, NFL_STAGE_COUNT
 from utils.db import execute, fetchall, fetchone, get_connection, is_sqlite_connection
 
 QUEUED_STATUSES = ("queued", "retry_scheduled")
@@ -85,6 +85,31 @@ def _stale_recovery_lease(conn: Any, job: "PipelineJob") -> tuple[str, tuple[Any
         "job_id = ? AND attempts = ? AND claim_token IS NULL AND status = 'running'",
         (job.job_id, job.attempts),
     )
+
+
+def _stale_retry_safety(conn: Any, job: "PipelineJob") -> tuple[bool, str]:
+    """Fail closed unless every persisted stage is audited for automatic retry."""
+    rows = fetchall(
+        """
+        SELECT stage_name FROM pipeline_stage_runs
+        WHERE run_id = ? AND attempt = ?
+        """,
+        (job.run_id, job.attempts),
+        conn=conn,
+    )
+    if not rows:
+        return False, "worker heartbeat lease expired; automatic retry blocked: no stage evidence"
+
+    unsafe_stages = sorted(
+        {str(row[0]) for row in rows if str(row[0]) not in NFL_AUTOMATIC_RETRY_SAFE_STAGES}
+    )
+    if unsafe_stages:
+        return (
+            False,
+            "worker heartbeat lease expired; automatic retry blocked by unaudited stage(s): "
+            + ", ".join(unsafe_stages),
+        )
+    return True, "worker heartbeat lease expired"
 
 
 def _lock_active_lease(conn: Any, job: "PipelineJob", *, allow_cancel: bool = False) -> bool:
@@ -391,10 +416,15 @@ class JobService:
             for row in rows:
                 job = PipelineJob.from_row(row)
                 recovery_clause, recovery_values = _stale_recovery_lease(conn, job)
+                recovery_reason = "worker heartbeat lease expired"
                 if job.cancel_requested:
                     status = run_status = "cancelled"
                 elif job.attempts < job.max_attempts:
-                    status, run_status = "retry_scheduled", "queued"
+                    retry_safe, recovery_reason = _stale_retry_safety(conn, job)
+                    if retry_safe:
+                        status, run_status = "retry_scheduled", "queued"
+                    else:
+                        status = run_status = "failed"
                 else:
                     status = run_status = "failed"
                 require_legal_transition(job.status, status)
@@ -409,7 +439,7 @@ class JobService:
                         status,
                         now,
                         now,
-                        "worker heartbeat lease expired",
+                        recovery_reason,
                         *recovery_values,
                         cutoff,
                     ),
@@ -427,7 +457,7 @@ class JobService:
                     (
                         stage_status,
                         now,
-                        "worker heartbeat lease expired",
+                        recovery_reason,
                         job.run_id,
                         job.attempts,
                     ),
@@ -450,7 +480,7 @@ class JobService:
                     (
                         run_status,
                         0 if status == "retry_scheduled" else int(completed[0]) if completed else 0,
-                        "worker heartbeat lease expired",
+                        recovery_reason,
                         now if run_status in TERMINAL_STATUSES else None,
                         now,
                         job.run_id,

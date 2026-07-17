@@ -46,7 +46,9 @@ non-cooperative in-process handler cannot continue after its lease is lost.
 and stale recovery never erase a prior attempt's result, error, or duration.
 The run read model computes `stages_completed` from the current attempt only.
 Terminal stale recovery closes an in-progress stage consistently as failed or
-cancelled; retry recovery leaves history intact and starts a new attempt.
+cancelled. Stale recovery starts a new attempt only when the expired attempt has
+nonempty stage evidence and every recorded stage is audited retry-safe; missing
+or unaudited evidence fails terminally with the blocking reason persisted.
 
 ## Odds validation
 
@@ -72,8 +74,10 @@ verified as upserts, point-in-time snapshots, or run/attempt-scoped staging
 operations. The deployment-supplied value adapter remains excluded until its
 side effects satisfy that contract. Unknown runners, malformed stage evidence,
 unhandled runner exceptions, and stages without the declaration fail terminally
-instead of risking duplicate external side effects. An operator may investigate
-and issue an explicit retry.
+instead of risking duplicate external side effects. The same rule applies after
+a worker crash: stale recovery reads the attempt's persisted stage history and
+fails closed when evidence is absent or includes an unaudited stage. An operator
+may investigate and issue an explicit retry.
 
 ## Card publication
 

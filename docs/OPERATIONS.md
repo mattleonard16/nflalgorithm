@@ -20,7 +20,9 @@ attempt history is append-only and visible through the authenticated pipeline AP
 
 Automatic retries are fail-closed. Every executed stage must declare `retry_safe=true`; an unknown
 runner exception or undeclared side effect becomes terminal so the worker cannot repeat an external
-publication whose acknowledgement may have been lost.
+publication whose acknowledgement may have been lost. Crash recovery applies the same policy to
+persisted stage history: empty history or any unaudited stage blocks automatic requeue and records
+the reason on the job, run, and interrupted stage.
 
 1. Run migrations and preflight after pulling updates:
    ```bash
