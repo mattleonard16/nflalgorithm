@@ -144,6 +144,39 @@ def test_reclaim_fences_same_and_case_equivalent_worker_ids(runtime_database) ->
     assert service.heartbeat(replacement) is True
 
 
+def test_mixed_version_tokenless_lease_recovers_on_real_backend(runtime_database) -> None:
+    service = JobService(retry_base_seconds=0, stale_after_seconds=30)
+    queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    legacy_claim = service.claim_next("legacy-worker")
+    assert legacy_claim is not None
+    service.record_stage_started(legacy_claim, "odds", 1)
+    expired = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    execute(
+        "UPDATE pipeline_jobs SET claim_token = NULL, heartbeat_at = ? WHERE job_id = ?",
+        (expired, queued.job_id),
+    )
+
+    assert service.recover_stale_jobs() == 1
+    recovered = service.get_job(queued.job_id)
+    assert recovered is not None
+    assert recovered.status == "retry_scheduled"
+    assert recovered.worker_id is None
+    assert recovered.claim_token is None
+
+    replacement = service.claim_next("replacement-worker")
+    assert replacement is not None
+    assert replacement.attempts == legacy_claim.attempts + 1
+    assert replacement.claim_token is not None
+    stage = fetchone(
+        """
+        SELECT status, error_message FROM pipeline_stage_runs
+        WHERE run_id = ? AND attempt = ? AND stage_name = 'odds'
+        """,
+        (legacy_claim.run_id, legacy_claim.attempts),
+    )
+    assert stage == ("failed", "worker heartbeat lease expired")
+
+
 def test_backend_terminal_transitions_honor_cancellation(runtime_database) -> None:
     service = JobService(retry_base_seconds=0)
     completion_job = service.create_pipeline_job(season=2026, week=1, source="api", max_attempts=3)
