@@ -11,6 +11,18 @@ import pytest
 from scripts import production_runner
 
 
+def valid_odds_audit() -> dict[str, object]:
+    return {
+        "source_statuses": ["MISS"],
+        "response_ages_seconds": [1.0],
+        "snapshot_at": "2026-09-01T12:00:00+00:00",
+        "scheduled_events": 1,
+        "covered_events": 1,
+        "covered_event_markets": 3,
+        "odds_rows": 1,
+    }
+
+
 def test_run_reports_are_unique_and_written_atomically(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(production_runner.config, "logs_dir", tmp_path)
     report = {
@@ -145,14 +157,47 @@ def test_odds_stage_uses_live_only_weekly_scraper(monkeypatch) -> None:
     class FakeScraper:
         def run_weekly_update(self, week, season, allow_synthetic=True):
             calls.append((week, season, allow_synthetic))
-            return pd.DataFrame({"line": [55.5]})
+            odds = pd.DataFrame({"line": [55.5]})
+            odds.attrs["odds_audit"] = valid_odds_audit()
+            return odds
 
     monkeypatch.setattr(prop_line_scraper, "NFLPropScraper", FakeScraper)
 
     result = production_runner.stage_odds(2026, 1)
 
     assert calls == [(1, 2026, False)]
-    assert result == {"status": "ok", "stage": "odds", "odds_count": 1}
+    assert result["status"] == "ok"
+    assert result["stage"] == "odds"
+    assert result["odds_count"] == 1
+    assert result["odds_validation"]["reason_code"] == "validated"
+
+
+@pytest.mark.parametrize(
+    "audit_update,reason_code",
+    [
+        ({"source_statuses": ["STALE-ON-ERROR"]}, "stale_cache"),
+        ({"covered_event_markets": 2}, "market_coverage"),
+    ],
+)
+def test_odds_stage_rejects_stale_or_partial_snapshots(
+    monkeypatch, audit_update, reason_code
+) -> None:
+    from scripts import prop_line_scraper
+
+    class FakeScraper:
+        def run_weekly_update(self, week, season, allow_synthetic=True):
+            odds = pd.DataFrame({"line": [55.5]})
+            audit = valid_odds_audit()
+            audit.update(audit_update)
+            odds.attrs["odds_audit"] = audit
+            return odds
+
+    monkeypatch.setattr(prop_line_scraper, "NFLPropScraper", FakeScraper)
+
+    result = production_runner.stage_odds(2026, 1)
+
+    assert result["status"] == "error"
+    assert result["odds_validation"]["reason_code"] == reason_code
 
 
 def test_weekly_report_refresh_uses_prepare_then_live_odds(monkeypatch) -> None:

@@ -54,6 +54,7 @@ class NFLPropScraper:
         # Use the configured database backend via utils.db
         # Use cached client instead of plain requests.Session
         self.client = simple_cached_client
+        self.last_weekly_audit: Dict[str, Any] = {}
 
         # NFL team mapping
         self.team_mapping = {
@@ -152,6 +153,19 @@ class NFLPropScraper:
         except Exception as exc:
             logger.error("Failed to load snapshot %s: %s", path, exc)
             return None
+
+    @staticmethod
+    def _response_provenance(response: Any) -> tuple[str, float | None, str | None]:
+        status = str(response.headers.get("X-Cache", "UNKNOWN")).upper()
+        age = None
+        raw_age = response.headers.get("X-Cache-Age-Seconds")
+        if raw_age is not None:
+            try:
+                age = max(0.0, float(raw_age))
+            except (TypeError, ValueError):
+                age = None
+        created_at = response.headers.get("X-Cache-Created-At")
+        return status, age, created_at
 
     @staticmethod
     def _select_scheduled_events(events: List[Dict], schedule: pd.DataFrame) -> List[Dict]:
@@ -345,6 +359,10 @@ class NFLPropScraper:
         """
         markets = ["player_rush_yds", "player_rec_yds", "player_pass_yds"]
         results: List[Dict] = []
+        source_statuses: set[str] = set()
+        response_ages: List[float] = []
+        response_timestamps: List[str] = []
+        covered_pairs: set[tuple[str, str]] = set()
         fallback_snapshot = self._load_snapshot(load_json_path)
         if not self.odds_api_key:
             if not allow_synthetic:
@@ -423,6 +441,12 @@ class NFLPropScraper:
             events_params = {"apiKey": self.odds_api_key}
             events_response = self.client.get(events_url, params=events_params, api_type="odds")
             events_response.raise_for_status()
+            status, age, created_at = self._response_provenance(events_response)
+            source_statuses.add(status)
+            if age is not None:
+                response_ages.append(age)
+            if created_at:
+                response_timestamps.append(created_at)
             events = events_response.json()
             logger.info(f"Found {len(events)} upcoming NFL games")
         except Exception as e:
@@ -432,6 +456,7 @@ class NFLPropScraper:
                     e,
                 )
                 events = fallback_snapshot.get("events", [])
+                source_statuses.add("FALLBACK-SNAPSHOT")
             else:
                 logger.error(f"Failed to fetch NFL events: {e}")
                 return []
@@ -474,6 +499,12 @@ class NFLPropScraper:
                     try:
                         response = self.client.get(url, params=params, api_type="odds")
                         response.raise_for_status()
+                        status, age, created_at = self._response_provenance(response)
+                        source_statuses.add(status)
+                        if age is not None:
+                            response_ages.append(age)
+                        if created_at:
+                            response_timestamps.append(created_at)
                         market_payload = response.json()
                         break
                     except Exception as e:
@@ -510,6 +541,7 @@ class NFLPropScraper:
                         market,
                     )
                     market_payload = fallback_data
+                    source_statuses.add("FALLBACK-SNAPSHOT")
                     snapshot.setdefault("event_markets", {}).setdefault(event_id, {})[
                         market
                     ] = market_payload
@@ -519,6 +551,7 @@ class NFLPropScraper:
                     ] = market_payload
 
                 stat_category = stat_mapping.get(market, market)
+                rows_before_market = len(results)
 
                 # Data structure: single event with bookmakers
                 for bookmaker in market_payload.get("bookmakers", []):
@@ -597,9 +630,22 @@ class NFLPropScraper:
                                 }
                             )
 
+                if len(results) > rows_before_market:
+                    covered_pairs.add((str(event_id), market))
+
                 time.sleep(0.2)
         if save_json_path:
             self._save_snapshot(Path(save_json_path), snapshot)
+        self.last_weekly_audit = {
+            "source_statuses": sorted(source_statuses),
+            "response_ages_seconds": response_ages,
+            "response_timestamps": response_timestamps,
+            "snapshot_at": datetime.now(timezone.utc).isoformat(),
+            "scheduled_events": len(schedule),
+            "covered_events": len({event_id for event_id, _market in covered_pairs}),
+            "covered_event_markets": len(covered_pairs),
+            "odds_rows": len(results),
+        }
         return results
 
     def save_weekly_odds(self, rows: List[Dict], week: int, season: int) -> int:
@@ -674,6 +720,9 @@ class NFLPropScraper:
             raise RuntimeError(f"Persisted only {saved} of {len(rows)} weekly odds rows")
         # Export CSV
         df = pd.DataFrame(rows)
+        audit = dict(self.last_weekly_audit)
+        audit["odds_rows"] = saved
+        df.attrs["odds_audit"] = audit
         out = Path("reports") / f"week_{week}_prop_lines.csv"
         out.parent.mkdir(exist_ok=True)
         df.to_csv(out, index=False)

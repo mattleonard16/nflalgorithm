@@ -53,6 +53,7 @@ def stage_odds(season: int, week: int) -> Dict[str, Any]:
     """Refresh live odds; synthetic/demo lines are forbidden here."""
     try:
         from scripts.prop_line_scraper import NFLPropScraper
+        from pipelines.odds_validation import validate_odds_snapshot
 
         odds = NFLPropScraper().run_weekly_update(
             week,
@@ -61,7 +62,21 @@ def stage_odds(season: int, week: int) -> Dict[str, Any]:
         )
         if odds.empty:
             raise RuntimeError("Live odds refresh returned no rows")
-        return {"status": "ok", "stage": "odds", "odds_count": len(odds)}
+        validation = validate_odds_snapshot(odds.attrs.get("odds_audit", {}))
+        if not validation["valid"]:
+            return {
+                "status": "error",
+                "stage": "odds",
+                "error": validation["reason"],
+                "odds_count": len(odds),
+                "odds_validation": validation,
+            }
+        return {
+            "status": "ok",
+            "stage": "odds",
+            "odds_count": len(odds),
+            "odds_validation": validation,
+        }
     except Exception as exc:
         logger.error("Odds refresh failed: %s", exc)
         return {"status": "error", "stage": "odds", "error": str(exc)}

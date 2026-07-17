@@ -62,7 +62,7 @@ def validate_odds_snapshot(
     if not source_statuses or not response_ages:
         reason_code = "provenance_missing"
         reason = "Odds response provenance or age is missing"
-    elif any(status == "HIT-OFFLINE" for status in source_statuses):
+    elif any(status in {"HIT-OFFLINE", "FALLBACK-SNAPSHOT"} for status in source_statuses):
         reason_code = "offline_cache"
         reason = "Offline cache cannot authorize a production betting card"
     elif any("STALE" in status for status in source_statuses):
@@ -110,4 +110,3 @@ def validate_odds_snapshot(
         "odds_rows": odds_rows,
         "requirements": asdict(required),
     }
-
