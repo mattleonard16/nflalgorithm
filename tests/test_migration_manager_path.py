@@ -135,3 +135,60 @@ def test_mysql_ddl_bounds_key_text_and_translates_auto_increment() -> None:
     assert "event_id VARCHAR(128) NOT NULL" in translated
     assert "market VARCHAR(64) NOT NULL" in translated
     assert "notes TEXT" in translated
+
+
+def test_migration_fences_running_jobs_without_claim_tokens(tmp_path, monkeypatch) -> None:
+    database_path = tmp_path / "legacy-running.db"
+    monkeypatch.setenv("DB_BACKEND", "sqlite")
+    monkeypatch.setenv("SQLITE_DB_PATH", str(database_path))
+    monkeypatch.setattr(config.database, "backend", "sqlite")
+    monkeypatch.setattr(config.database, "path", str(database_path))
+    MigrationManager(database_path).run()
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO pipeline_runs
+                (run_id, season, week, status, stages_requested, stages_completed,
+                 started_at, updated_at)
+            VALUES ('run', 2026, 1, 'running', 6, 0, 'now', 'now')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO pipeline_jobs
+                (job_id, run_id, job_type, payload_json, status, priority, attempts,
+                 max_attempts, available_at, worker_id, cancel_requested, source,
+                 created_at, updated_at)
+            VALUES ('job', 'run', 'nfl_weekly', '{}', 'running', 0, 1, 3,
+                    'now', 'legacy-worker', 0, 'scheduler', 'now', 'now')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO pipeline_stage_runs
+                (run_id, stage_name, ordinal, status, attempt, started_at)
+            VALUES ('run', 'odds', 1, 'running', 1, 'now')
+            """
+        )
+        conn.commit()
+
+    MigrationManager(database_path).run()
+
+    with sqlite3.connect(database_path) as conn:
+        job = conn.execute(
+            "SELECT status, worker_id, claim_token, last_error FROM pipeline_jobs"
+        ).fetchone()
+        run = conn.execute("SELECT status, finished_at FROM pipeline_runs").fetchone()
+        stage = conn.execute(
+            "SELECT status, finished_at, error_message FROM pipeline_stage_runs"
+        ).fetchone()
+    assert job == (
+        "retry_scheduled",
+        None,
+        None,
+        "legacy worker lease fenced during claim-token migration",
+    )
+    assert run == ("queued", None)
+    assert stage[0] == "failed"
+    assert stage[1] is not None
+    assert stage[2] == "legacy worker lease fenced during claim-token migration"

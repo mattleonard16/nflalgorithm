@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -1056,6 +1057,7 @@ class MigrationManager:
         ):
             cursor.execute("ALTER TABLE pipeline_jobs ADD COLUMN claim_token VARBINARY(64)")
         self._migrate_pipeline_stage_attempt_pk(cursor)
+        self._migrate_legacy_pipeline_leases(cursor)
 
         # Phase 1+2: Add sigma, usage_rate, volatility_score to nba_projections
         if table_exists("nba_projections", conn=cursor.connection):
@@ -1234,6 +1236,65 @@ class MigrationManager:
             """
         )
         cursor.execute("DROP TABLE _pipeline_stage_runs_old")
+
+    def _migrate_legacy_pipeline_leases(self, cursor: Any) -> None:
+        """Fence running pre-token attempts so deployment cannot leave them stuck."""
+        if not table_exists("pipeline_jobs", conn=cursor.connection):
+            return
+        cursor.execute(
+            """
+            SELECT job_id, run_id, attempts, max_attempts, cancel_requested
+            FROM pipeline_jobs
+            WHERE status = 'running' AND claim_token IS NULL
+            """
+        )
+        rows = cursor.fetchall()
+        if not rows:
+            return
+        def parameters(sql: str) -> str:
+            return sql.replace("?", "%s") if get_backend() == "mysql" else sql
+
+        now = datetime.now(timezone.utc).isoformat()
+        reason = "legacy worker lease fenced during claim-token migration"
+        for job_id, run_id, attempt, max_attempts, cancel_requested in rows:
+            if bool(cancel_requested):
+                status = run_status = stage_status = "cancelled"
+            elif int(attempt) < int(max_attempts):
+                status, run_status, stage_status = "retry_scheduled", "queued", "failed"
+            else:
+                status = run_status = stage_status = "failed"
+            cursor.execute(
+                parameters("""
+                UPDATE pipeline_stage_runs
+                SET status = ?, finished_at = ?, error_message = ?
+                WHERE run_id = ? AND attempt = ? AND status = 'running'
+                """),
+                (stage_status, now, reason, run_id, attempt),
+            )
+            cursor.execute(
+                parameters("""
+                UPDATE pipeline_jobs
+                SET status = ?, available_at = ?, claimed_at = NULL, heartbeat_at = NULL,
+                    worker_id = NULL, claim_token = NULL, updated_at = ?, last_error = ?
+                WHERE job_id = ? AND status = 'running' AND claim_token IS NULL
+                """),
+                (status, now, now, reason, job_id),
+            )
+            cursor.execute(
+                parameters("""
+                UPDATE pipeline_runs
+                SET status = ?, stages_completed = 0, error_message = ?,
+                    finished_at = ?, updated_at = ?
+                WHERE run_id = ?
+                """),
+                (
+                    run_status,
+                    reason,
+                    now if run_status in {"cancelled", "failed"} else None,
+                    now,
+                    run_id,
+                ),
+            )
 
     def _migrate_nba_odds_pk(self, cursor: Any) -> None:
         """Recreate nba_odds with as_of in PK if it has the old 4-column PK."""
