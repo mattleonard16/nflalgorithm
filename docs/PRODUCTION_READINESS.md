@@ -6,8 +6,8 @@ addition to local tests.
 
 | Gate | Current evidence | Remaining proof |
 |---|---|---|
-| Known commit SHA | Pending until the validation changes are committed | Record the final SHA used by staging |
-| Integrated with `origin/main` | Pending until the final commit is rebased onto current `origin/main` | Confirm ahead/behind is `0 N` after the last fetch |
+| Known commit SHA | Satisfied for the local candidate; the final SHA is recorded in the handoff | Use that exact SHA for staging and retain it with the release evidence |
+| Integrated with `origin/main` | Satisfied locally after rebasing onto the fetched `origin/main`; the fetched main commit is an ancestor of the candidate | Recheck ancestry after the final fetch before staging promotion |
 | Old/new output equivalence | Deterministic inline-versus-worker report matrix passes on SQLite and MySQL | Run one real weekly legacy capture and queued shadow capture; require matching hashes |
 | SQLite/MySQL matrices | Real SQLite and temporary MySQL 9.5 migration, concurrency, recovery, and equivalence checks pass locally; MySQL 8.4 CI service is configured | Require green remote CI for the committed SHA |
 | No double claims | Eight concurrent claimers produce one winner on both databases | Repeat under staging worker concurrency and retain logs |
