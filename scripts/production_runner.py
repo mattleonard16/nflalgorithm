@@ -189,8 +189,7 @@ def stage_materialize(
             count_params = (run_id, attempt)
         else:
             count_query = (
-                "SELECT COUNT(*) as n FROM materialized_value_view "
-                "WHERE season = ? AND week = ?"
+                "SELECT COUNT(*) as n FROM materialized_value_view " "WHERE season = ? AND week = ?"
             )
             count_params = (season, week)
         df = read_dataframe(count_query, params=count_params)

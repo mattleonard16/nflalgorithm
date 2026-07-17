@@ -145,31 +145,25 @@ def test_migration_fences_running_jobs_without_claim_tokens(tmp_path, monkeypatc
     monkeypatch.setattr(config.database, "path", str(database_path))
     MigrationManager(database_path).run()
     with sqlite3.connect(database_path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             INSERT INTO pipeline_runs
                 (run_id, season, week, status, stages_requested, stages_completed,
                  started_at, updated_at)
             VALUES ('run', 2026, 1, 'running', 6, 0, 'now', 'now')
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             INSERT INTO pipeline_jobs
                 (job_id, run_id, job_type, payload_json, status, priority, attempts,
                  max_attempts, available_at, worker_id, cancel_requested, source,
                  created_at, updated_at)
             VALUES ('job', 'run', 'nfl_weekly', '{}', 'running', 0, 1, 3,
                     'now', 'legacy-worker', 0, 'scheduler', 'now', 'now')
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             INSERT INTO pipeline_stage_runs
                 (run_id, stage_name, ordinal, status, attempt, started_at)
             VALUES ('run', 'odds', 1, 'running', 1, 'now')
-            """
-        )
+            """)
         conn.commit()
 
     MigrationManager(database_path).run()

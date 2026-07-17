@@ -47,9 +47,7 @@ def validate_mysql_server_version(version: str) -> tuple[int, int, int]:
         raise RuntimeError(f"Could not parse MySQL server version {normalized!r}")
     parsed = tuple(int(part) for part in match.groups())
     if parsed < MIN_MYSQL_VERSION:
-        raise RuntimeError(
-            f"MySQL 8.0+ is required; server reported {normalized!r}"
-        )
+        raise RuntimeError(f"MySQL 8.0+ is required; server reported {normalized!r}")
     return parsed
 
 

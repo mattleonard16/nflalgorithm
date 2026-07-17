@@ -1178,25 +1178,21 @@ class MigrationManager:
         if not table_exists("pipeline_stage_runs", conn=cursor.connection):
             return
         if get_backend() == "mysql":
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT column_name
                 FROM information_schema.key_column_usage
                 WHERE table_schema = DATABASE()
                   AND table_name = 'pipeline_stage_runs'
                   AND constraint_name = 'PRIMARY'
                 ORDER BY ordinal_position
-                """
-            )
+                """)
             primary_key = [str(row[0]) for row in cursor.fetchall()]
             if primary_key != ["run_id", "attempt", "stage_name"]:
-                cursor.execute(
-                    """
+                cursor.execute("""
                     ALTER TABLE pipeline_stage_runs
                     DROP PRIMARY KEY,
                     ADD PRIMARY KEY (run_id, attempt, stage_name)
-                    """
-                )
+                    """)
             return
 
         cursor.execute("PRAGMA table_info(pipeline_stage_runs)")
@@ -1208,8 +1204,7 @@ class MigrationManager:
         if primary_key == ["run_id", "attempt", "stage_name"]:
             return
         cursor.execute("ALTER TABLE pipeline_stage_runs RENAME TO _pipeline_stage_runs_old")
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE pipeline_stage_runs (
                 run_id VARCHAR(36) NOT NULL,
                 stage_name VARCHAR(64) NOT NULL,
@@ -1223,34 +1218,30 @@ class MigrationManager:
                 PRIMARY KEY (run_id, attempt, stage_name),
                 FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
             )
-            """
-        )
-        cursor.execute(
-            """
+            """)
+        cursor.execute("""
             INSERT INTO pipeline_stage_runs
                 (run_id, stage_name, ordinal, status, attempt, started_at,
                  finished_at, result_json, error_message)
             SELECT run_id, stage_name, ordinal, status, attempt, started_at,
                    finished_at, result_json, error_message
             FROM _pipeline_stage_runs_old
-            """
-        )
+            """)
         cursor.execute("DROP TABLE _pipeline_stage_runs_old")
 
     def _migrate_legacy_pipeline_leases(self, cursor: Any) -> None:
         """Fence running pre-token attempts so deployment cannot leave them stuck."""
         if not table_exists("pipeline_jobs", conn=cursor.connection):
             return
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT job_id, run_id, attempts, max_attempts, cancel_requested
             FROM pipeline_jobs
             WHERE status = 'running' AND claim_token IS NULL
-            """
-        )
+            """)
         rows = cursor.fetchall()
         if not rows:
             return
+
         def parameters(sql: str) -> str:
             return sql.replace("?", "%s") if get_backend() == "mysql" else sql
 

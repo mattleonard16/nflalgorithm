@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pipelines.odds_validation import OddsRequirements, validate_odds_snapshot
 
-
 REQUIREMENTS = OddsRequirements(
     max_age_seconds=300,
     min_event_coverage=1.0,
@@ -61,4 +60,3 @@ def test_partial_odds_coverage_is_rejected() -> None:
     assert result["valid"] is False
     assert result["reason_code"] == "market_coverage"
     assert result["market_coverage"] == 5 / 6
-

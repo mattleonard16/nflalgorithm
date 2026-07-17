@@ -56,7 +56,9 @@ def require_legal_transition(source: str, target: str) -> None:
 
 def _lease_clause(conn: Any) -> str:
     worker_match = (
-        "worker_id = ? COLLATE BINARY" if is_sqlite_connection(conn) else "BINARY worker_id = BINARY ?"
+        "worker_id = ? COLLATE BINARY"
+        if is_sqlite_connection(conn)
+        else "BINARY worker_id = BINARY ?"
     )
     return (
         f"job_id = ? AND {worker_match} AND attempts = ? AND claim_token = ? "
@@ -77,8 +79,7 @@ def _lock_active_lease(conn: Any, job: "PipelineJob", *, allow_cancel: bool = Fa
     else:
         suffix = " FOR UPDATE"
     owned = fetchone(
-        "SELECT cancel_requested FROM pipeline_jobs "
-        f"WHERE {_lease_clause(conn)}{suffix}",
+        "SELECT cancel_requested FROM pipeline_jobs " f"WHERE {_lease_clause(conn)}{suffix}",
         _lease_values(job),
         conn=conn,
     )
@@ -156,11 +157,7 @@ class JobService:
         priority: int,
         max_attempts: int,
     ) -> None:
-        if (
-            job.payload != payload
-            or job.priority != priority
-            or job.max_attempts != max_attempts
-        ):
+        if job.payload != payload or job.priority != priority or job.max_attempts != max_attempts:
             raise ValueError("idempotency key was already used for a different request")
 
     def create_pipeline_job(

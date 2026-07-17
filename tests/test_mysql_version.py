@@ -16,4 +16,3 @@ def test_mysql_8_or_newer_is_supported(version: str) -> None:
 def test_unsupported_mysql_versions_fail_startup(version: str) -> None:
     with pytest.raises(RuntimeError, match="MySQL|parse"):
         validate_mysql_server_version(version)
-

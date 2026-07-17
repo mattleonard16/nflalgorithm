@@ -46,4 +46,3 @@ def promote_staged_card(
         conn=conn,
     )
     return count
-

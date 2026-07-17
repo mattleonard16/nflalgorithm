@@ -146,18 +146,14 @@ def test_reclaim_fences_same_and_case_equivalent_worker_ids(runtime_database) ->
 
 def test_backend_terminal_transitions_honor_cancellation(runtime_database) -> None:
     service = JobService(retry_base_seconds=0)
-    completion_job = service.create_pipeline_job(
-        season=2026, week=1, source="api", max_attempts=3
-    )
+    completion_job = service.create_pipeline_job(season=2026, week=1, source="api", max_attempts=3)
     completion_claim = service.claim_next("complete-worker")
     assert completion_claim is not None
     service.request_cancel(completion_job.run_id)
     assert service.complete(completion_claim, {"success": True}) is False
     assert service.get_job(completion_job.job_id).status == "cancelled"
 
-    failure_job = service.create_pipeline_job(
-        season=2026, week=2, source="api", max_attempts=3
-    )
+    failure_job = service.create_pipeline_job(season=2026, week=2, source="api", max_attempts=3)
     failure_claim = service.claim_next("fail-worker")
     assert failure_claim is not None
     service.request_cancel(failure_job.run_id)

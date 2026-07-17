@@ -70,19 +70,13 @@ def validate_odds_snapshot(
         reason = "Stale-on-error cache cannot authorize a production betting card"
     elif max_response_age is None or max_response_age > required.max_age_seconds:
         reason_code = "stale_snapshot"
-        reason = (
-            f"Odds response age {max_response_age!r}s exceeds "
-            f"{required.max_age_seconds}s"
-        )
+        reason = f"Odds response age {max_response_age!r}s exceeds " f"{required.max_age_seconds}s"
     elif scheduled_events <= 0:
         reason_code = "schedule_missing"
         reason = "No scheduled events were available for odds coverage validation"
     elif event_coverage < required.min_event_coverage:
         reason_code = "event_coverage"
-        reason = (
-            f"Odds cover {covered_events}/{scheduled_events} events "
-            f"({event_coverage:.1%})"
-        )
+        reason = f"Odds cover {covered_events}/{scheduled_events} events " f"({event_coverage:.1%})"
     elif market_coverage < required.min_market_coverage:
         reason_code = "market_coverage"
         reason = (

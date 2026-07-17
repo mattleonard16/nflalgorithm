@@ -42,9 +42,7 @@ def test_job_schema_is_part_of_normal_migrations(job_db) -> None:
 
 def test_stage_history_primary_key_is_attempt_specific(job_db) -> None:
     columns = fetchall("PRAGMA table_info(pipeline_stage_runs)")
-    primary_key = [
-        row[1] for row in sorted(columns, key=lambda row: row[5]) if row[5] > 0
-    ]
+    primary_key = [row[1] for row in sorted(columns, key=lambda row: row[5]) if row[5] > 0]
 
     assert primary_key == ["run_id", "attempt", "stage_name"]
 
@@ -329,9 +327,7 @@ def test_cancellation_wins_race_with_complete(job_db) -> None:
 
 def test_cancellation_wins_race_with_fail(job_db) -> None:
     service = JobService(retry_base_seconds=0)
-    queued = service.create_pipeline_job(
-        season=2026, week=1, source="api", max_attempts=3
-    )
+    queued = service.create_pipeline_job(season=2026, week=1, source="api", max_attempts=3)
     claimed = service.claim_next("worker")
     assert claimed is not None
     service.request_cancel(queued.run_id)
@@ -414,12 +410,10 @@ def test_completion_atomically_promotes_staged_card(job_db) -> None:
 
     assert service.complete(claimed, _staged_success_report()) is True
 
-    assert fetchone(
-        """
+    assert fetchone("""
         SELECT COUNT(*), MIN(published_run_id) FROM materialized_value_view
         WHERE season = 2026 AND week = 1
-        """
-    ) == (1, claimed.run_id)
+        """) == (1, claimed.run_id)
 
 
 def test_cancellation_during_card_materialization_never_publishes(job_db) -> None:
@@ -547,9 +541,7 @@ def test_explicit_retry_preserves_prior_attempt_history(job_db) -> None:
 
 def test_explicit_retry_uses_new_attempt_and_publication_is_idempotent(job_db) -> None:
     service = JobService(retry_base_seconds=0)
-    queued = service.create_pipeline_job(
-        season=2026, week=1, source="api", max_attempts=1
-    )
+    queued = service.create_pipeline_job(season=2026, week=1, source="api", max_attempts=1)
     first = service.claim_next("worker")
     assert first is not None
     _insert_staged_card(first)
@@ -573,9 +565,7 @@ def test_explicit_retry_uses_new_attempt_and_publication_is_idempotent(job_db) -
 
 def test_retry_records_a_new_stage_attempt_without_overwriting_history(job_db) -> None:
     service = JobService(retry_base_seconds=0)
-    service.create_pipeline_job(
-        season=2026, week=1, source="api", max_attempts=2
-    )
+    service.create_pipeline_job(season=2026, week=1, source="api", max_attempts=2)
     first = service.claim_next("worker")
     assert first is not None
     service.record_stage_started(first, "odds", 1)
@@ -643,9 +633,7 @@ def test_odds_validation_reason_and_metrics_are_persisted(job_db) -> None:
 
 def test_terminal_stale_recovery_closes_running_stage(job_db) -> None:
     service = JobService(retry_base_seconds=0, stale_after_seconds=30)
-    service.create_pipeline_job(
-        season=2026, week=1, source="scheduler", max_attempts=1
-    )
+    service.create_pipeline_job(season=2026, week=1, source="scheduler", max_attempts=1)
     claimed = service.claim_next("dead-worker")
     assert claimed is not None
     service.record_stage_started(claimed, "materialize", 5)
