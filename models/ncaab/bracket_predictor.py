@@ -14,6 +14,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -57,7 +58,8 @@ def load_bracket(season: int) -> list[dict]:
         "SELECT * FROM ncaab_bracket WHERE season = ? ORDER BY round, slot",
         (season,),
     )
-    return [row.to_dict() for _, row in df.iterrows()]
+    records = df.astype(object).where(df.notna(), None)
+    return cast(list[dict], records.to_dict(orient="records"))
 
 
 def _load_vegas_lines(filepath: str) -> dict[str, dict]:
