@@ -117,8 +117,6 @@ def test_handler_exceptions_become_stage_errors() -> None:
 
 
 def test_retry_safe_contract_is_attached_by_stage_definition() -> None:
-    results = run_stages(
-        [PipelineStage("publish", lambda: {"status": "ok"}, retry_safe=True)]
-    )
+    results = run_stages([PipelineStage("publish", lambda: {"status": "ok"}, retry_safe=True)])
 
     assert results == [{"status": "ok", "stage": "publish", "retry_safe": True}]

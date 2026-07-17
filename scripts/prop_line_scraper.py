@@ -642,9 +642,9 @@ class NFLPropScraper:
                                 }
                             )
                             if book_name and book_name != "Unknown":
-                                sportsbooks_by_pair.setdefault(
-                                    (str(event_id), market), set()
-                                ).add(str(book_name))
+                                sportsbooks_by_pair.setdefault((str(event_id), market), set()).add(
+                                    str(book_name)
+                                )
 
                 if len(results) > rows_before_market:
                     covered_pairs.add((str(event_id), market))

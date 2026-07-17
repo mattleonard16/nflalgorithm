@@ -249,8 +249,7 @@ class PipelineWorker:
                             else "pipeline failed"
                         ),
                         report,
-                        retryable=not bool(report.get("incomplete"))
-                        and automatic_retry_safe,
+                        retryable=not bool(report.get("incomplete")) and automatic_retry_safe,
                     )
                 )
             except LeaseLostError as exc:

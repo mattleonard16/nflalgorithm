@@ -68,15 +68,12 @@ def validate_odds_snapshot(
     raw_sportsbook_counts = observed.get("sportsbooks_per_event_market", {})
     if not isinstance(raw_sportsbook_counts, Mapping):
         raise ValueError("sportsbooks_per_event_market must be a mapping")
-    sportsbook_counts = {
-        str(pair): int(count) for pair, count in raw_sportsbook_counts.items()
-    }
+    sportsbook_counts = {str(pair): int(count) for pair, count in raw_sportsbook_counts.items()}
     if any(count < 0 for count in sportsbook_counts.values()):
         raise ValueError("sportsbook counts cannot be negative")
     sportsbook_pairs_reported = len(sportsbook_counts)
     sportsbook_qualified_event_markets = sum(
-        count >= required.min_sportsbooks_per_event_market
-        for count in sportsbook_counts.values()
+        count >= required.min_sportsbooks_per_event_market for count in sportsbook_counts.values()
     )
     sportsbook_coverage = (
         sportsbook_qualified_event_markets / required_event_markets

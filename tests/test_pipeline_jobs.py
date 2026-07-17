@@ -290,9 +290,7 @@ def test_automatic_retry_is_blocked_for_unproven_side_effect(job_db) -> None:
                     "error": "response lost after publish",
                 }
             ],
-            "errors": [
-                {"stage": "external_publish", "error": "response lost after publish"}
-            ],
+            "errors": [{"stage": "external_publish", "error": "response lost after publish"}],
         }
 
     worker = PipelineWorker(worker_id="retry-safety-worker", service=service, runner=unsafe_runner)
