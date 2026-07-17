@@ -89,10 +89,8 @@ NBA = _sport(
     ),
 )
 
-NCAAB = _sport("ncaab", "NCAAB", "tournament", ())
-
 SPORT_REGISTRY: Mapping[str, SportSpec] = MappingProxyType(
-    {sport.key: sport for sport in (NFL, NBA, NCAAB)}
+    {sport.key: sport for sport in (NFL, NBA)}
 )
 MARKET_REGISTRY: Mapping[str, Mapping[str, MarketSpec]] = MappingProxyType(
     {sport_key: sport.markets for sport_key, sport in SPORT_REGISTRY.items()}

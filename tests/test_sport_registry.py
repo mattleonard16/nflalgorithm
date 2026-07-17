@@ -9,7 +9,7 @@ from sports.markets import SPORT_REGISTRY, get_sport
 
 
 def test_registry_exposes_supported_sports() -> None:
-    assert set(SPORT_REGISTRY) == {"nfl", "nba", "ncaab"}
+    assert set(SPORT_REGISTRY) == {"nfl", "nba"}
 
 
 def test_market_mappings_are_sport_scoped() -> None:
@@ -35,7 +35,6 @@ def test_market_definitions_are_immutable() -> None:
 def test_period_names_allow_shared_pipeline_language() -> None:
     assert get_sport("nfl").period_name == "week"
     assert get_sport("nba").period_name == "game_date"
-    assert get_sport("ncaab").period_name == "tournament"
 
 
 def test_nba_model_capabilities_are_registered_without_following_registry_growth() -> None:

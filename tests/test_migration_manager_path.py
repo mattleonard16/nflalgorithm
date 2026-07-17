@@ -31,6 +31,15 @@ def test_migration_manager_honors_explicit_sqlite_path(tmp_path, monkeypatch) ->
     assert table == ("materialized_value_view",)
 
     with sqlite3.connect(requested_path) as conn:
+        retired_tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ncaab_%'"
+            ).fetchall()
+        }
+    assert retired_tables == set()
+
+    with sqlite3.connect(requested_path) as conn:
         roster_table = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='nfl_roster_players'"
         ).fetchone()
