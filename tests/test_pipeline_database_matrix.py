@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from threading import Barrier
 
@@ -120,6 +121,48 @@ def test_worker_crash_recovers_and_fences_stale_attempt(runtime_database) -> Non
             5,
             {"status": "ok", "card_size": 99},
         )
+
+
+def test_reclaim_fences_same_and_case_equivalent_worker_ids(runtime_database) -> None:
+    service = JobService(retry_base_seconds=0, stale_after_seconds=30)
+    queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    stale = service.claim_next("Worker-A")
+    assert stale is not None
+    expired = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    execute(
+        "UPDATE pipeline_jobs SET heartbeat_at = ? WHERE job_id = ?",
+        (expired, queued.job_id),
+    )
+
+    replacement = service.claim_next("Worker-A")
+
+    assert replacement is not None
+    assert replacement.attempts == stale.attempts + 1
+    assert replacement.claim_token != stale.claim_token
+    assert service.complete(stale, {"success": True}) is False
+    assert service.heartbeat(replace(replacement, worker_id="worker-a")) is False
+    assert service.heartbeat(replacement) is True
+
+
+def test_backend_terminal_transitions_honor_cancellation(runtime_database) -> None:
+    service = JobService(retry_base_seconds=0)
+    completion_job = service.create_pipeline_job(
+        season=2026, week=1, source="api", max_attempts=3
+    )
+    completion_claim = service.claim_next("complete-worker")
+    assert completion_claim is not None
+    service.request_cancel(completion_job.run_id)
+    assert service.complete(completion_claim, {"success": True}) is False
+    assert service.get_job(completion_job.job_id).status == "cancelled"
+
+    failure_job = service.create_pipeline_job(
+        season=2026, week=2, source="api", max_attempts=3
+    )
+    failure_claim = service.claim_next("fail-worker")
+    assert failure_claim is not None
+    service.request_cancel(failure_job.run_id)
+    assert service.fail(failure_claim, "cancel race") == "cancelled"
+    assert service.get_job(failure_job.job_id).status == "cancelled"
 
 
 def test_inline_and_worker_paths_produce_equivalent_reports(
