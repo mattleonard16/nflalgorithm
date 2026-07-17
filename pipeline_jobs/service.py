@@ -14,6 +14,14 @@ from utils.db import execute, fetchall, fetchone, get_connection, is_sqlite_conn
 
 QUEUED_STATUSES = ("queued", "retry_scheduled")
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+LEGAL_TRANSITIONS = {
+    "queued": frozenset({"running", "cancelled"}),
+    "retry_scheduled": frozenset({"running", "cancelled"}),
+    "running": frozenset({"completed", "failed", "retry_scheduled", "cancelled"}),
+    "failed": frozenset({"queued"}),
+    "completed": frozenset(),
+    "cancelled": frozenset(),
+}
 _JOB_COLUMNS = (
     "job_id, run_id, job_type, payload_json, status, priority, attempts, max_attempts, "
     "available_at, claimed_at, heartbeat_at, worker_id, claim_token, cancel_requested, "
@@ -39,6 +47,11 @@ def _text(value: Any) -> str | None:
 
 class LeaseLostError(RuntimeError):
     """Raised when an execution attempt no longer owns its database lease."""
+
+
+def require_legal_transition(source: str, target: str) -> None:
+    if target not in LEGAL_TRANSITIONS.get(source, frozenset()):
+        raise RuntimeError(f"illegal pipeline job transition: {source} -> {target}")
 
 
 def _lease_clause(conn: Any) -> str:
@@ -312,6 +325,7 @@ class JobService:
                 return None
 
             job = PipelineJob.from_row(row)
+            require_legal_transition(job.status, "running")
             claim_token = uuid.uuid4().hex
             affected = execute(
                 """
@@ -370,6 +384,7 @@ class JobService:
                     status, run_status = "retry_scheduled", "queued"
                 else:
                     status = run_status = "failed"
+                require_legal_transition(job.status, status)
                 affected = execute(
                     f"""
                     UPDATE pipeline_jobs
@@ -478,6 +493,7 @@ class JobService:
                 conn.commit()
                 return job
             if job.status in QUEUED_STATUSES:
+                require_legal_transition(job.status, "cancelled")
                 execute(
                     """
                     UPDATE pipeline_jobs
@@ -533,6 +549,7 @@ class JobService:
             job = PipelineJob.from_row(row)
             if job.status != "failed":
                 raise ValueError("only failed jobs can be retried")
+            require_legal_transition(job.status, "queued")
             execute(
                 """
                 UPDATE pipeline_jobs
@@ -749,6 +766,7 @@ class JobService:
             except LeaseLostError:
                 return False
             if cancelled:
+                require_legal_transition("running", "cancelled")
                 affected = execute(
                     f"""
                     UPDATE pipeline_jobs
@@ -773,6 +791,7 @@ class JobService:
                 )
                 conn.commit()
                 return False
+            require_legal_transition("running", "completed")
             affected = execute(
                 f"""
                 UPDATE pipeline_jobs
@@ -842,6 +861,7 @@ class JobService:
 
     def cancel_running(self, job: PipelineJob, report: Mapping[str, Any] | None = None) -> bool:
         now = _iso()
+        require_legal_transition("running", "cancelled")
         with get_connection() as conn:
             try:
                 _lock_active_lease(conn, job, allow_cancel=True)
@@ -891,6 +911,7 @@ class JobService:
                 raise LeaseLostError("worker attempt lease is no longer active")
             max_attempts = int(budget_row[0])
             if cancelled:
+                require_legal_transition("running", "cancelled")
                 affected = execute(
                     f"""
                     UPDATE pipeline_jobs
@@ -924,6 +945,7 @@ class JobService:
 
             retrying = retryable and job.attempts < max_attempts
             status = "retry_scheduled" if retrying else "failed"
+            require_legal_transition("running", status)
             delay = self.retry_base_seconds * (2 ** max(0, job.attempts - 1))
             available_at = _iso(now + timedelta(seconds=delay))
             run_status = "queued" if retrying else "failed"

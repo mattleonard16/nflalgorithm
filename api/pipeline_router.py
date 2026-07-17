@@ -103,7 +103,7 @@ def _parse_pipeline_run_row(
             """
             SELECT stage_name, ordinal, status, attempt, started_at, finished_at,
                    result_json, error_message
-            FROM pipeline_stage_runs WHERE run_id = ? ORDER BY ordinal, stage_name
+            FROM pipeline_stage_runs WHERE run_id = ? ORDER BY attempt, ordinal, stage_name
             """,
             (row[0],),
         )
@@ -267,7 +267,7 @@ def get_architecture_status(reader_id: str = Depends(require_pipeline_reader)):
             SELECT run_id, stage_name, ordinal, status, attempt, started_at, finished_at,
                    result_json, error_message
             FROM pipeline_stage_runs WHERE run_id IN ({placeholders})
-            ORDER BY run_id, ordinal, stage_name
+            ORDER BY run_id, attempt, ordinal, stage_name
             """,
             tuple(run_ids),
         )

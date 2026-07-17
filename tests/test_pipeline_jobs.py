@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from pipeline_jobs.service import JobService
+from pipeline_jobs.service import JobService, require_legal_transition
 from pipeline_jobs.worker import PipelineWorker
 from schema_migrations import MigrationManager
 from utils.db import execute, fetchall, fetchone, get_table_columns, table_exists
@@ -155,6 +155,20 @@ def test_concurrent_duplicate_idempotent_creation_returns_one_job(job_db) -> Non
 def test_create_job_rejects_invalid_period(job_db, season: int, week: int) -> None:
     with pytest.raises(ValueError):
         JobService().create_pipeline_job(season=season, week=week, source="api")
+
+
+@pytest.mark.parametrize(
+    "source,target",
+    [
+        ("completed", "running"),
+        ("cancelled", "retry_scheduled"),
+        ("queued", "completed"),
+        ("failed", "completed"),
+    ],
+)
+def test_illegal_job_state_transitions_are_rejected(job_db, source, target) -> None:
+    with pytest.raises(RuntimeError, match="illegal pipeline job transition"):
+        require_legal_transition(source, target)
 
 
 def test_worker_claims_fifo_and_records_stage_timeline(job_db) -> None:
