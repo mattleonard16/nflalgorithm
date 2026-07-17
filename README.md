@@ -276,10 +276,16 @@ DB_BACKEND=mysql
 DB_URL="mysql://user:pass@host:port/database"
 ```
 
+MySQL 8.0+ is required. MySQL 5.7 and MariaDB are rejected at connection time.
+
 ### API Keys and Logging
 
 ```env
 ODDS_API_KEY=your_odds_api_key
+NFL_ODDS_MAX_AGE_SECONDS=300
+NFL_ODDS_MIN_EVENT_COVERAGE=1.0
+NFL_ODDS_MIN_MARKET_COVERAGE=1.0
+NFL_ODDS_REQUIRED_MARKETS=player_pass_yds,player_rush_yds,player_rec_yds
 LOG_FORMAT=console  # use json in deployments
 LOG_LEVEL=INFO
 ```

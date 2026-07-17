@@ -10,6 +10,13 @@ make fullstack
 
 `make fullstack` supervises the worker, API, and frontend. It waits for `/readyz`; `/livez` only verifies that the API process is running. Use `LOG_FORMAT=json` in deployments.
 
+Production MySQL must be Oracle MySQL 8.0 or newer. Startup rejects MySQL 5.7 and MariaDB rather
+than silently weakening `SKIP LOCKED` claim and fencing behavior.
+
+The worker is the only process allowed to execute stages or publish cards. A heartbeat exception or
+zero-row renewal means lease loss; the worker stops before the next stage or terminal write. Failed
+attempt history is append-only and visible through the authenticated pipeline API and metrics.
+
 1. Run migrations and preflight after pulling updates:
    ```bash
    make migrate
@@ -39,3 +46,7 @@ make fullstack
    ```
 
 All commands are idempotent; rerun if data feeds update. For common database, migration, API-key, private-module, CORS, frontend, and port failures, see [Troubleshooting](TROUBLESHOOTING.md).
+
+Do not use `make week-materialize` as a production publication path. Durable runs stage candidate
+rows and atomically promote them only while their job attempt still owns its lease, has not been
+cancelled, and has a persisted valid odds snapshot.

@@ -11,11 +11,11 @@ addition to local tests.
 | Old/new output equivalence | Deterministic inline-versus-worker report matrix passes on SQLite and MySQL | Run one real weekly legacy capture and queued shadow capture; require matching hashes |
 | SQLite/MySQL matrices | Real SQLite and temporary MySQL 9.5 migration, concurrency, recovery, and equivalence checks pass locally; MySQL 8.4 CI service is configured | Require green remote CI for the committed SHA |
 | No double claims | Eight concurrent claimers produce one winner on both databases | Repeat under staging worker concurrency and retain logs |
-| Crash recovery/fencing | Simulated worker process termination, lease recovery, stale completion rejection, and stale stage-write rejection pass on both databases | Kill a staging worker during a real stage and verify exactly one terminal run/card |
-| Live-odds fail closed | Odds failure stops before materialization and marks the run unsuccessful | Verify the deployed read API cannot publish a stale or failed-run card |
+| Crash recovery/fencing | Every claim has a binary attempt token; heartbeat exceptions, zero-row renewal, same-worker reclaims, case-equivalent IDs, stale terminal writes, and attempt-specific stage history are covered locally | Kill a staging worker during a real stage and verify exactly one terminal run/card |
+| Live-odds fail closed | Offline/stale cache, missing provenance, excessive age, partial event coverage, partial market coverage, and empty snapshots stop before value/risk/agents/card; reason and metrics persist per attempt | Capture provider/cache evidence from a staging run and verify the deployed read API cannot publish a rejected snapshot |
 | Private-server authorization | Black-box probe exists at `scripts/validate_deployed_pipeline_auth.py` | Run with real reader and operator identities against staging |
 | Staging soak | Harness exists at `scripts/pipeline_soak.py` | Complete a bounded soak with no stuck, failed, or duplicated jobs |
-| Migration/application rollback | Migrations are idempotent on fresh SQLite and MySQL databases | Rehearse database backup, deploy, application rollback, and post-rollback reads in staging |
+| Migration/application rollback | Migrations are idempotent on fresh SQLite and MySQL databases; legacy tokenless running jobs are fenced and requeued or terminated consistently | Rehearse database backup, deploy, application rollback, and post-rollback reads in staging |
 | Shadow weekly run | Deterministic snapshot/compare tool exists at `scripts/shadow_weekly_outputs.py` | Compare a real legacy weekly run with the queued candidate using identical point-in-time inputs |
 | Runtime monitoring | Authenticated metrics expose queue, lease, retry, failure, and stage-duration data; the supervised runtime emits structured monitoring logs | Confirm staging ingestion, alert routing, and a synthetic alert notification |
 
@@ -31,8 +31,25 @@ TEST_DB_URL=mysql://user:password@127.0.0.1:3306/nfl_test \
 python -m pytest tests/test_pipeline_database_matrix.py -v
 ```
 
-The MySQL matrix runs the real migration manager and database driver. Mocked dialect tests do not
-satisfy this gate.
+The MySQL matrix runs the real migration manager and database driver against MySQL 8 or newer.
+Startup rejects MySQL 5.7 and MariaDB because the queue relies on MySQL 8 locking semantics.
+Mocked dialect tests do not satisfy this gate.
+
+## Live-odds acceptance policy
+
+Production defaults require every scheduled event and every configured event/market pair to be
+covered by a snapshot no older than five minutes. Configure stricter values when necessary:
+
+```bash
+NFL_ODDS_MAX_AGE_SECONDS=300
+NFL_ODDS_MIN_EVENT_COVERAGE=1.0
+NFL_ODDS_MIN_MARKET_COVERAGE=1.0
+NFL_ODDS_REQUIRED_MARKETS=player_pass_yds,player_rush_yds,player_rec_yds
+```
+
+`HIT-OFFLINE`, `STALE-ON-ERROR`, fallback snapshots, missing response provenance, and incomplete
+coverage are always rejected. A successful durable run stages its final card and promotes it only
+inside the fenced completion transaction. See [Durable Pipeline State Machine](PIPELINE_STATE_MACHINE.md).
 
 ## Deployed authorization proof
 
