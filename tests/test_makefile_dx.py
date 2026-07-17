@@ -37,6 +37,11 @@ def test_obsolete_startup_and_synthetic_activation_targets_are_removed() -> None
             "populate-data",
             "train-models",
             "migrate-to-uv",
+            "ingest-ncaab",
+            "ingest-ncaab-modifiers",
+            "ncaab-bracket",
+            "ncaab-predict",
+            "ncaab-full",
         }
     )
 
