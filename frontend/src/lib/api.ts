@@ -20,7 +20,6 @@ import type {
   CorrelationResponse,
   RiskSummary,
   AgentReviewStatus,
-  BacktestResponse,
   UserBet,
   UserStats,
   RecordBetPayload,
@@ -474,26 +473,6 @@ export async function getCurrentUser(): Promise<User | null> {
     clearSessionToken();
     return null;
   }
-}
-
-// ============================================================================
-// Backtest API
-// ============================================================================
-
-/**
- * Get backtest summary (model vs line accuracy) for a given sport/season
- */
-export async function getBacktestSummary(
-  sport: "nfl" | "nba" = "nfl",
-  season?: number,
-  startDate?: string,
-  endDate?: string
-): Promise<BacktestResponse> {
-  const params = new URLSearchParams({ sport });
-  if (season != null) params.set("season", String(season));
-  if (startDate) params.set("start_date", startDate);
-  if (endDate) params.set("end_date", endDate);
-  return fetchAPI<BacktestResponse>(`/api/backtest/summary?${params.toString()}`);
 }
 
 // ============================================================================

@@ -328,32 +328,6 @@ export interface WeeklySummaryResponse {
   weeks: WeeklySummaryItem[];
 }
 
-// ── Backtest ──────────────────────────────────────────────────────────────────
-
-export interface BacktestSummary {
-  avg_model_mae: number | null;
-  avg_line_mae: number | null;
-  model_beats_line_pct: number | null;
-  total_bets: number;
-}
-
-export interface BacktestPick {
-  game_date: string;
-  player_name: string | null;
-  market: string;
-  line: number;
-  actual: number;
-  mu: number | null;
-  model_abs_error: number | null;
-  line_abs_error: number | null;
-  model_beats_line: number | null;
-}
-
-export interface BacktestResponse {
-  summary: BacktestSummary;
-  recent_picks: BacktestPick[];
-}
-
 // ── User Bet Slip ─────────────────────────────────────────────────────────────
 
 export interface UserBet {
