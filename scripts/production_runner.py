@@ -18,9 +18,11 @@ import argparse
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from functools import partial
+from typing import Any, Dict
 
 from config import config
+from pipelines.orchestrator import PipelineStage, run_stages
 from utils.db import read_dataframe
 
 logger = logging.getLogger(__name__)
@@ -158,34 +160,32 @@ def run_production_pipeline(
     Returns a run report with per-stage results.
     """
     started_at = datetime.now(timezone.utc).isoformat()
-    stage_results: List[Dict[str, Any]] = []
-
-    prepare_result = stage_prepare_week(
-        season,
-        week,
-        refresh_history=False if skip_ingest else None,
+    stages = [
+        PipelineStage(
+            "prepare_week",
+            partial(
+                stage_prepare_week,
+                season,
+                week,
+                refresh_history=False if skip_ingest else None,
+            ),
+        ),
+        *[
+            PipelineStage(
+                stage_name,
+                partial(stage_fn, season, week),
+            )
+            for stage_name, stage_fn in POST_PREPARE_STAGES
+        ],
+    ]
+    stage_results = run_stages(
+        stages,
+        skip={"odds": "skip_odds"} if skip_odds else None,
+        stop_on_error=True,
+        # Every remaining stage consumes weekly_odds. Skipping the refresh
+        # must never authorize a card from stale cached lines.
+        stop_after_skip={"odds"},
     )
-    stage_results.append(prepare_result)
-
-    if prepare_result.get("status") != "error":
-        for stage_name, stage_fn in POST_PREPARE_STAGES:
-            if skip_odds and stage_name == "odds":
-                stage_results.append(
-                    {"status": "skipped", "stage": stage_name, "reason": "skip_odds"}
-                )
-                # Every remaining stage consumes weekly_odds; skipping the
-                # refresh must never authorize a card from stale cached lines.
-                break
-
-            logger.info("Running stage: %s", stage_name)
-            result = stage_fn(season, week)
-            stage_results.append(result)
-            logger.info("Stage %s: %s", stage_name, result.get("status", "unknown"))
-
-            # Never build a card from stale/partial upstream state.
-            if result.get("status") == "error":
-                logger.warning("Stage %s failed; stopping pipeline", stage_name)
-                break
 
     finished_at = datetime.now(timezone.utc).isoformat()
 

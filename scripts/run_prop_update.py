@@ -12,7 +12,6 @@ from datetime import datetime
 import pandas as pd
 
 from config import config
-from prop_integration import PropIntegration
 from scripts.prepare_nfl_week import prepare_week
 from scripts.prop_line_scraper import NFLPropScraper
 
@@ -46,6 +45,8 @@ def refresh_pregame_inputs(
 
 def main():
     """Run complete prop line update process. Season and week are required."""
+    from prop_integration import PropIntegration
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--week", type=int, required=True, help="NFL week number (1-22)")
     parser.add_argument("--season", type=int, required=True, help="NFL season year (e.g., 2025)")

@@ -10,10 +10,10 @@ from typing import Any, Optional, Sequence
 
 from config import config
 from models.position_specific import predict_week
-from models.position_specific.weekly import INACTIVE_ROSTER_STATUSES
 from schema_migrations import MigrationManager
 from scripts.ingest_real_nfl_data import NFL_TEAM_COUNT, default_history_seasons, ingest_seasons
 from scripts.populate_player_dim import populate_player_dim
+from sports.nfl import INACTIVE_ROSTER_STATUSES
 from utils.db import fetchall, fetchone
 
 MIN_GSIS_HISTORY_COVERAGE = 0.95
