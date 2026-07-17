@@ -34,6 +34,15 @@ def test_job_schema_is_part_of_normal_migrations(job_db) -> None:
     assert "claim_token" in get_table_columns("pipeline_jobs")
 
 
+def test_stage_history_primary_key_is_attempt_specific(job_db) -> None:
+    columns = fetchall("PRAGMA table_info(pipeline_stage_runs)")
+    primary_key = [
+        row[1] for row in sorted(columns, key=lambda row: row[5]) if row[5] > 0
+    ]
+
+    assert primary_key == ["run_id", "attempt", "stage_name"]
+
+
 def test_create_job_is_idempotent_and_starts_queued(job_db) -> None:
     service = JobService()
 

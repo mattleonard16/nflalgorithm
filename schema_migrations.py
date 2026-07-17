@@ -568,7 +568,7 @@ class MigrationManager:
                 finished_at VARCHAR(40),
                 result_json TEXT,
                 error_message TEXT,
-                PRIMARY KEY (run_id, stage_name),
+                PRIMARY KEY (run_id, attempt, stage_name),
                 FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
             )
             """,
@@ -1073,6 +1073,7 @@ class MigrationManager:
             "pipeline_jobs", "claim_token", conn=cursor.connection
         ):
             cursor.execute("ALTER TABLE pipeline_jobs ADD COLUMN claim_token VARBINARY(64)")
+        self._migrate_pipeline_stage_attempt_pk(cursor)
 
         # Phase 1+2: Add sigma, usage_rate, volatility_score to nba_projections
         if table_exists("nba_projections", conn=cursor.connection):
@@ -1232,6 +1233,70 @@ class MigrationManager:
                     cursor.execute(
                         f"ALTER TABLE ncaab_bracket_predictions ADD COLUMN {col_name} {col_type}"
                     )
+
+    def _migrate_pipeline_stage_attempt_pk(self, cursor: Any) -> None:
+        """Preserve stage results for every job attempt instead of overwriting them."""
+        if not table_exists("pipeline_stage_runs", conn=cursor.connection):
+            return
+        if get_backend() == "mysql":
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.key_column_usage
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'pipeline_stage_runs'
+                  AND constraint_name = 'PRIMARY'
+                ORDER BY ordinal_position
+                """
+            )
+            primary_key = [str(row[0]) for row in cursor.fetchall()]
+            if primary_key != ["run_id", "attempt", "stage_name"]:
+                cursor.execute(
+                    """
+                    ALTER TABLE pipeline_stage_runs
+                    DROP PRIMARY KEY,
+                    ADD PRIMARY KEY (run_id, attempt, stage_name)
+                    """
+                )
+            return
+
+        cursor.execute("PRAGMA table_info(pipeline_stage_runs)")
+        primary_key = [
+            str(row[1])
+            for row in sorted(cursor.fetchall(), key=lambda row: int(row[5]))
+            if int(row[5]) > 0
+        ]
+        if primary_key == ["run_id", "attempt", "stage_name"]:
+            return
+        cursor.execute("ALTER TABLE pipeline_stage_runs RENAME TO _pipeline_stage_runs_old")
+        cursor.execute(
+            """
+            CREATE TABLE pipeline_stage_runs (
+                run_id VARCHAR(36) NOT NULL,
+                stage_name VARCHAR(64) NOT NULL,
+                ordinal INTEGER NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                attempt INTEGER NOT NULL DEFAULT 1,
+                started_at VARCHAR(40),
+                finished_at VARCHAR(40),
+                result_json TEXT,
+                error_message TEXT,
+                PRIMARY KEY (run_id, attempt, stage_name),
+                FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+            )
+            """
+        )
+        cursor.execute(
+            """
+            INSERT INTO pipeline_stage_runs
+                (run_id, stage_name, ordinal, status, attempt, started_at,
+                 finished_at, result_json, error_message)
+            SELECT run_id, stage_name, ordinal, status, attempt, started_at,
+                   finished_at, result_json, error_message
+            FROM _pipeline_stage_runs_old
+            """
+        )
+        cursor.execute("DROP TABLE _pipeline_stage_runs_old")
 
     def _migrate_nba_odds_pk(self, cursor: Any) -> None:
         """Recreate nba_odds with as_of in PK if it has the old 4-column PK."""
