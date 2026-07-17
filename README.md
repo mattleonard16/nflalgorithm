@@ -2,7 +2,7 @@
 
 > *Advanced NFL player performance prediction and value betting engine*
 
-**Version**: 2.1 | **Status**: Production Ready | **Target MAE**: ≤ 3.0 | **Sports**: NFL + NBA
+**Version**: 2.1 | **Status**: Production validation in progress | **Target MAE**: ≤ 3.0 | **Sports**: NFL + NBA
 
 ---
 
@@ -39,8 +39,9 @@ make ingest-nfl
 make dashboard
 
 # Option 2: Launch React dashboard (recommended)
-make api              # Start FastAPI backend on :8000
-make frontend-dev     # Start Next.js frontend on :3000
+make api                # Start FastAPI backend on :8000
+make pipeline-worker    # Start durable NFL worker (separate terminal)
+make frontend-dev       # Start Next.js frontend on :3000
 ```
 
 ### Weekly Workflow
@@ -67,8 +68,9 @@ make dashboard
 The project now includes a modern React/Next.js dashboard alongside the original Streamlit version.
 
 ### Stack
-- **Frontend**: Next.js 15 + TypeScript + Tailwind CSS + shadcn/ui
+- **Frontend**: Next.js 16 + TypeScript + Tailwind CSS + shadcn/ui
 - **Backend**: FastAPI serving the same SQLite database
+- **Execution**: Database-backed jobs processed outside the API process
 - **Charts**: Recharts for data visualization
 
 ### Running the React Dashboard
@@ -77,7 +79,10 @@ The project now includes a modern React/Next.js dashboard alongside the original
 # Terminal 1: Start the API
 make api
 
-# Terminal 2: Start the frontend
+# Terminal 2: Start the worker
+make pipeline-worker
+
+# Terminal 3: Start the frontend
 cd frontend && npm run dev
 
 # Visit http://localhost:3000
@@ -173,6 +178,13 @@ make fullstack    # Visit http://localhost:3000/nba
 ---
 
 ## Architecture
+
+FastAPI only creates durable jobs and reads materialized results. A dedicated worker owns the
+fail-closed NFL pipeline, bounded retries, cancellation, stage tracking, and artifact registration.
+See [the architecture guide](docs/ARCHITECTURE.md) for the complete six-level topology and
+operations contract. Production promotion is governed by the evidence gates in
+[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md); passing the unit suite alone is not
+treated as production readiness.
 
 ```
 nflalgorithm/

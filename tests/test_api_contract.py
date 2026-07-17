@@ -18,6 +18,7 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setenv("SQLITE_DB_PATH", db_path)
 
     import config as cfg
+
     monkeypatch.setattr(cfg.config.database, "path", db_path)
     monkeypatch.setattr(cfg.config.database, "backend", "sqlite")
 
@@ -28,12 +29,26 @@ def db(tmp_path, monkeypatch):
 @pytest.fixture()
 def client(db):
     from fastapi.testclient import TestClient
+
+    from api.pipeline_router import require_pipeline_operator
     from api.server import app
-    return TestClient(app)
+
+    app.dependency_overrides[require_pipeline_operator] = lambda: "test-operator"
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
 
 
-def _seed_value_bet(db, player_id="P001", season=2025, week=22, market="receiving_yards",
-                    sportsbook="draftkings", edge=0.15, confidence_tier="Premium"):
+def _seed_value_bet(
+    db,
+    player_id="P001",
+    season=2025,
+    week=22,
+    market="receiving_yards",
+    sportsbook="draftkings",
+    edge=0.15,
+    confidence_tier="Premium",
+):
     """Seed a materialized_value_view row and player_dim row."""
     execute(
         """
@@ -68,6 +83,9 @@ class TestOpenAPIContract:
             "/api/meta",
             "/api/performance",
             "/api/run/{run_id}",
+            "/api/run/{run_id}/cancel",
+            "/api/run/{run_id}/retry",
+            "/api/system/architecture",
             "/api/explain/{player_id}/{market}",
             "/api/analytics/correlation",
             "/api/analytics/risk-summary",
@@ -95,10 +113,20 @@ class TestValueBetsContract:
 
         bet = data["bets"][0]
         required_fields = [
-            "player_id", "player_name", "position", "market",
-            "sportsbook", "line", "price", "mu", "sigma",
-            "p_win", "edge_percentage", "expected_roi",
-            "kelly_fraction", "stake",
+            "player_id",
+            "player_name",
+            "position",
+            "market",
+            "sportsbook",
+            "line",
+            "price",
+            "mu",
+            "sigma",
+            "p_win",
+            "edge_percentage",
+            "expected_roi",
+            "kelly_fraction",
+            "stake",
         ]
         for field in required_fields:
             assert field in bet, f"Missing field: {field}"

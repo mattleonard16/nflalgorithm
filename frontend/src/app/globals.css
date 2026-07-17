@@ -280,6 +280,91 @@
   box-shadow: 0 6px 24px rgba(212, 168, 75, 0.12);
 }
 
+/* Pipeline control-room topology */
+.architecture-scroll {
+  scrollbar-color: rgba(56, 189, 248, 0.22) transparent;
+}
+
+.architecture-level {
+  animation: architectureEnter 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.architecture-level:nth-child(2) { animation-delay: 55ms; }
+.architecture-level:nth-child(3) { animation-delay: 110ms; }
+.architecture-level:nth-child(4) { animation-delay: 165ms; }
+.architecture-level:nth-child(5) { animation-delay: 220ms; }
+.architecture-level:nth-child(6) { animation-delay: 275ms; }
+
+@keyframes architectureEnter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.architecture-flow {
+  position: absolute;
+  z-index: 10;
+  top: 50%;
+  right: -14px;
+  width: 14px;
+  height: 1px;
+  background: rgba(125, 211, 252, 0.35);
+}
+
+.architecture-flow::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: -3px;
+  width: 0;
+  height: 0;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  border-left: 5px solid rgba(125, 211, 252, 0.7);
+}
+
+.architecture-flow > span {
+  position: absolute;
+  top: -1.5px;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: #7dd3fc;
+  box-shadow: 0 0 8px rgba(125, 211, 252, 0.7);
+  animation: architectureFlow 1.8s linear infinite;
+}
+
+@keyframes architectureFlow {
+  from { transform: translateX(0); opacity: 0; }
+  25% { opacity: 1; }
+  75% { opacity: 1; }
+  to { transform: translateX(10px); opacity: 0; }
+}
+
+.pipeline-node-active {
+  animation: pipelineActive 1.8s ease-in-out infinite;
+}
+
+@keyframes pipelineActive {
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .architecture-level,
+  .architecture-flow > span,
+  .pipeline-node-active,
+  .animate-fade-in,
+  .animate-row-in,
+  .animate-bar-sweep,
+  .shimmer-host::after,
+  .edge-glow {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* Slanted sport divider accent for section headers */
 .slant-accent {
   clip-path: polygon(0 0, 100% 0, calc(100% - 5px) 100%, 0 100%);

@@ -59,9 +59,10 @@ export interface AgentReviewStatus {
 // Pipeline run
 export interface PipelineRun {
   run_id: string;
+  job_id: string | null;
   season: number;
   week: number;
-  status: "running" | "completed" | "failed";
+  status: "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
   stages_requested: number;
   stages_completed: number;
   error_message: string | null;
@@ -69,6 +70,43 @@ export interface PipelineRun {
   finished_at: string | null;
   report_json: Record<string, unknown> | null;
   data_health: DataHealth | null;
+  source: "api" | "cli" | "scheduler" | "legacy" | null;
+  attempts: number;
+  max_attempts: number;
+  worker_id: string | null;
+  cancel_requested: boolean;
+  available_at: string | null;
+  stages: PipelineStageRun[];
+}
+
+export interface PipelineStageRun {
+  name: string;
+  ordinal: number;
+  status: "running" | "completed" | "failed";
+  attempt: number;
+  started_at: string | null;
+  finished_at: string | null;
+  result: Record<string, unknown> | null;
+  error_message: string | null;
+}
+
+export interface ArchitectureLevel {
+  id: "entry" | "control" | "execution" | "pipeline" | "decision" | "persistence";
+  level: number;
+  title: string;
+  tone: "blue" | "amber" | "green" | "purple";
+  nodes: string[];
+}
+
+export interface ArchitectureStatus {
+  database_backend: string;
+  queue: Record<string, number>;
+  workers_active: number;
+  artifact_count: number;
+  decision_count: number;
+  read_model_rows: number;
+  recent_runs: PipelineRun[];
+  levels: ArchitectureLevel[];
 }
 
 // Risk & correlation types

@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api-preflight api-serve api api-prod-serve api-prod frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest ingest-ncaab ncaab-bracket ncaab-predict ncaab-full ingest-ncaab-modifiers week-refresh
+.PHONY: help install install-uv install-venv test lint format validate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-dev frontend-build fullstack start_pipeline stop_pipeline clean report validate-report backfill-accuracy run-agents ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest ingest-ncaab ncaab-bracket ncaab-predict ncaab-full ingest-ncaab-modifiers week-refresh
 
 # Environment detection - defaults to UV if available
 ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && echo "uv" || echo "venv")
@@ -235,8 +235,9 @@ frontend-build:
 
 # Full stack - run both API and frontend
 fullstack:
-	@echo "Starting API and frontend..."
+	@echo "Starting worker, API, and frontend..."
 	@$(MAKE) api-preflight
+	@$(MAKE) pipeline-worker &
 	@$(MAKE) api-serve &
 	@sleep 2
 	@$(MAKE) frontend-dev
@@ -318,8 +319,16 @@ dry-run:
 
 production-run:
 	$(call require_season_week)
-	@echo "Running production pipeline for season $(SEASON), week $(WEEK)..."
+	@echo "Queueing production pipeline for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.production_runner --season $(SEASON) --week $(WEEK)
+
+pipeline-worker:
+	@echo "Starting durable NFL pipeline worker..."
+	$(DB_ENV) $(PYTHON) -m pipeline_jobs.worker
+
+pipeline-worker-once:
+	@echo "Processing at most one durable NFL pipeline job..."
+	$(DB_ENV) $(PYTHON) -m pipeline_jobs.worker --once
 
 learn:
 	$(call require_season_week)

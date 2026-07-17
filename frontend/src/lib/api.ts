@@ -24,6 +24,7 @@ import type {
   UserBet,
   UserStats,
   RecordBetPayload,
+  ArchitectureStatus,
 } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -255,21 +256,33 @@ export async function triggerPipelineRun(
     skip_ingest: skipIngest.toString(),
     skip_odds: skipOdds.toString(),
   });
-  return fetchAPI<PipelineRun>(`/api/run?${params.toString()}`, { method: "POST" });
+  return fetchAPIAuth<PipelineRun>(`/api/run?${params.toString()}`, { method: "POST" });
 }
 
 /**
  * Get pipeline run status
  */
 export async function getPipelineRun(runId: string): Promise<PipelineRun> {
-  return fetchAPI<PipelineRun>(`/api/run/${runId}`);
+  return fetchAPIAuth<PipelineRun>(`/api/run/${runId}`);
 }
 
 /**
  * Get latest pipeline run for a season/week
  */
 export async function getLatestRun(season: number, week: number): Promise<PipelineRun | null> {
-  return fetchAPI<PipelineRun | null>(`/api/run/latest?season=${season}&week=${week}`);
+  return fetchAPIAuth<PipelineRun | null>(`/api/run/latest?season=${season}&week=${week}`);
+}
+
+export async function cancelPipelineRun(runId: string): Promise<PipelineRun> {
+  return fetchAPIAuth<PipelineRun>(`/api/run/${runId}/cancel`, { method: "POST" });
+}
+
+export async function retryPipelineRun(runId: string): Promise<PipelineRun> {
+  return fetchAPIAuth<PipelineRun>(`/api/run/${runId}/retry`, { method: "POST" });
+}
+
+export async function getArchitectureStatus(): Promise<ArchitectureStatus> {
+  return fetchAPIAuth<ArchitectureStatus>("/api/system/architecture");
 }
 
 // ============================================================================

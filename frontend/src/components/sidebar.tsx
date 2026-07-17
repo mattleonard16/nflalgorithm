@@ -25,13 +25,13 @@ import { PerformanceWidget } from "@/components/performance-widget";
 
 type Sport = "nfl" | "nba";
 
-interface NavItem {
+export interface NavItem {
   title: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
 }
 
-const nflNavItems: NavItem[] = [
+export const nflNavItems: NavItem[] = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
   { title: "Performance", href: "/performance", icon: TrendingUp },
   { title: "Analytics", href: "/analytics", icon: BarChart3 },
@@ -49,6 +49,12 @@ const nbaNavItems: NavItem[] = [
   { title: "Backtest", href: "/backtest?sport=nba", icon: History },
   { title: "Bets", href: "/bets", icon: DollarSign },
 ];
+
+export function isNavActive(pathname: string, href: string) {
+  if (href === "/") return pathname === "/";
+  if (href === "/nba") return pathname === "/nba";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -89,16 +95,10 @@ export function Sidebar() {
     }
   };
 
-  const isNavActive = (href: string) => {
-    if (href === "/") return pathname === "/";
-    if (href === "/nba") return pathname === "/nba";
-    return pathname === href || pathname.startsWith(href + "/");
-  };
-
   return (
     <aside
       className={cn(
-        "flex flex-col h-screen bg-[#0d1220] border-r border-slate-800/50 transition-all duration-300",
+        "hidden md:flex flex-col h-screen bg-[#0d1220] border-r border-slate-800/50 transition-all duration-300",
         collapsed ? "w-16" : "w-64"
       )}
     >
@@ -194,7 +194,7 @@ export function Sidebar() {
           </p>
         )}
         {navItems.map((item) => {
-          const active = isNavActive(item.href);
+          const active = isNavActive(pathname, item.href);
           const Icon = item.icon;
           return (
             <Link

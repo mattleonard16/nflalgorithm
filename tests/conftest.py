@@ -54,23 +54,31 @@ _private_api_tests = [
 if not _private_api_server.is_file():
     collect_ignore.extend(_private_api_tests)
 
-# Force tests to run against a local SQLite database regardless of .env settings.
+# The normal suite is deterministic SQLite. The focused database-integration
+# matrix opts into a real MySQL service with TEST_DB_BACKEND=mysql.
+TEST_DB_BACKEND = os.getenv("TEST_DB_BACKEND", "sqlite").lower()
 TEST_DB_DIR = Path(__file__).parent / "_tmp"
 TEST_DB_DIR.mkdir(exist_ok=True)
 TEST_DB_PATH = TEST_DB_DIR / "test_suite.db"
 
-# Reset the file each session to avoid stale data bleeding into tests.
-TEST_DB_PATH.unlink(missing_ok=True)
-TEST_DB_PATH.touch()
-
-os.environ["DB_BACKEND"] = "sqlite"
-os.environ["SQLITE_DB_PATH"] = str(TEST_DB_PATH)
+if TEST_DB_BACKEND == "mysql":
+    test_db_url = os.getenv("TEST_DB_URL")
+    if not test_db_url:
+        raise RuntimeError("TEST_DB_URL is required when TEST_DB_BACKEND=mysql")
+    os.environ["DB_BACKEND"] = "mysql"
+    os.environ["DB_URL"] = test_db_url
+else:
+    # Reset the file each session to avoid stale data bleeding into tests.
+    TEST_DB_PATH.unlink(missing_ok=True)
+    TEST_DB_PATH.touch()
+    os.environ["DB_BACKEND"] = "sqlite"
+    os.environ["SQLITE_DB_PATH"] = str(TEST_DB_PATH)
 
 # Apply the schema deliberately instead of relying on a test-specific
 # MigrationManager call to mutate this shared database as a side effect.
 from schema_migrations import MigrationManager
 
-MigrationManager(TEST_DB_PATH).run()
+MigrationManager(TEST_DB_PATH if TEST_DB_BACKEND == "sqlite" else "unused-mysql-path").run()
 
 
 # Shared fixture for clearing NBA cache before tests that use TestClient

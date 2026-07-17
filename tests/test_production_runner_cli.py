@@ -11,6 +11,24 @@ import pytest
 from scripts import production_runner
 
 
+def test_run_reports_are_unique_and_written_atomically(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(production_runner.config, "logs_dir", tmp_path)
+    report = {
+        "season": 2026,
+        "week": 1,
+        "started_at": "2026-07-16T12:00:00+00:00",
+        "success": True,
+    }
+
+    first = production_runner._persist_run_report(report)
+    second = production_runner._persist_run_report(report)
+
+    assert first is not None and second is not None
+    assert first != second
+    assert first.exists() and second.exists()
+    assert list((tmp_path / "production_runs").glob("*.tmp")) == []
+
+
 def test_pipeline_always_runs_canonical_prepare_even_when_reusing_history(monkeypatch) -> None:
     calls: list[tuple[str, object]] = []
 
@@ -73,12 +91,50 @@ def test_skip_odds_never_builds_card_from_cached_lines(monkeypatch) -> None:
 
     report = production_runner.run_production_pipeline(2026, 1, skip_odds=True)
 
-    assert report["success"] is True
+    assert report["success"] is False
+    assert report["incomplete"] is True
     assert report["stages"][-1] == {
         "status": "skipped",
         "stage": "odds",
         "reason": "skip_odds",
     }
+
+
+def test_live_odds_failure_never_reaches_card_materialization(monkeypatch) -> None:
+    materialize_calls: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        production_runner,
+        "stage_prepare_week",
+        lambda season, week, refresh_history=None: {"status": "ok", "stage": "prepare_week"},
+    )
+    monkeypatch.setattr(
+        production_runner,
+        "POST_PREPARE_STAGES",
+        [
+            (
+                "odds",
+                lambda season, week: {
+                    "status": "error",
+                    "stage": "odds",
+                    "error": "live provider unavailable",
+                },
+            ),
+            (
+                "materialize",
+                lambda season, week: materialize_calls.append((season, week))
+                or {"status": "ok", "stage": "materialize", "card_size": 1},
+            ),
+        ],
+    )
+    monkeypatch.setattr(production_runner, "_persist_run_report", lambda report: None)
+
+    report = production_runner.run_production_pipeline(2026, 1)
+
+    assert materialize_calls == []
+    assert report["success"] is False
+    assert report["errors"] == [
+        {"status": "error", "stage": "odds", "error": "live provider unavailable"}
+    ]
 
 
 def test_odds_stage_uses_live_only_weekly_scraper(monkeypatch) -> None:
@@ -164,7 +220,7 @@ def test_makefile_week_entrypoints_do_not_call_legacy_prediction_paths() -> None
     assert "from data_pipeline import update_week" not in makefile
 
 
-def test_main_exits_nonzero_when_pipeline_report_has_errors(monkeypatch) -> None:
+def test_inline_main_exits_nonzero_when_pipeline_report_has_errors(monkeypatch) -> None:
     report: dict[str, Any] = {
         "success": False,
         "stages": [
@@ -180,7 +236,11 @@ def test_main_exits_nonzero_when_pipeline_report_has_errors(monkeypatch) -> None
     def failed_pipeline(*args: object, **kwargs: object) -> dict[str, Any]:
         return report
 
-    monkeypatch.setattr(sys, "argv", ["production_runner", "--season", "2026", "--week", "1"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["production_runner", "--season", "2026", "--week", "1", "--inline"],
+    )
     monkeypatch.setattr(production_runner, "run_production_pipeline", failed_pipeline)
 
     with pytest.raises(SystemExit) as exc_info:
@@ -189,7 +249,7 @@ def test_main_exits_nonzero_when_pipeline_report_has_errors(monkeypatch) -> None
     assert exc_info.value.code == 1
 
 
-def test_main_returns_normally_for_successful_pipeline_report(monkeypatch) -> None:
+def test_inline_main_returns_normally_for_successful_pipeline_report(monkeypatch) -> None:
     report: dict[str, Any] = {
         "success": True,
         "stages": [{"status": "ok", "stage": "ingest"}],
@@ -199,7 +259,43 @@ def test_main_returns_normally_for_successful_pipeline_report(monkeypatch) -> No
     def successful_pipeline(*args: object, **kwargs: object) -> dict[str, Any]:
         return report
 
-    monkeypatch.setattr(sys, "argv", ["production_runner", "--season", "2026", "--week", "1"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["production_runner", "--season", "2026", "--week", "1", "--inline"],
+    )
     monkeypatch.setattr(production_runner, "run_production_pipeline", successful_pipeline)
 
     production_runner.main()
+
+
+def test_main_enqueues_by_default(monkeypatch, capsys) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeJob:
+        job_id = "job-1"
+        run_id = "run-1"
+        status = "queued"
+
+    class FakeService:
+        def create_pipeline_job(self, **kwargs):
+            calls.append(kwargs)
+            return FakeJob()
+
+    import pipeline_jobs.service
+
+    monkeypatch.setattr(pipeline_jobs.service, "JobService", FakeService)
+    monkeypatch.setattr(sys, "argv", ["production_runner", "--season", "2026", "--week", "1"])
+
+    production_runner.main()
+
+    assert calls == [
+        {
+            "season": 2026,
+            "week": 1,
+            "source": "cli",
+            "skip_ingest": False,
+            "skip_odds": False,
+        }
+    ]
+    assert '"status": "queued"' in capsys.readouterr().out

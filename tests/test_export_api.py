@@ -15,6 +15,7 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setenv("SQLITE_DB_PATH", db_path)
 
     import config as cfg
+
     monkeypatch.setattr(cfg.config.database, "path", db_path)
     monkeypatch.setattr(cfg.config.database, "backend", "sqlite")
 
@@ -25,8 +26,14 @@ def db(tmp_path, monkeypatch):
 @pytest.fixture()
 def client(db):
     from fastapi.testclient import TestClient
+
+    from api.pipeline_router import require_pipeline_reader
     from api.server import app
-    return TestClient(app)
+
+    app.dependency_overrides[require_pipeline_reader] = lambda: "test-reader"
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
 
 
 def _seed_bets(db, season=2025, week=22):

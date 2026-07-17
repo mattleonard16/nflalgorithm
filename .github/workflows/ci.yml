@@ -30,6 +30,39 @@ jobs:
           file: ./coverage.xml
           fail_ci_if_error: false
 
+  pipeline-database-matrix:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: nfl_test
+          MYSQL_USER: nfl
+          MYSQL_PASSWORD: nfltest
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -unfl -pnfltest"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv venv
+          uv pip install -r requirements.txt
+      - name: Run MySQL queue and lease matrix
+        env:
+          TEST_DB_BACKEND: mysql
+          TEST_DB_URL: mysql://nfl:nfltest@127.0.0.1:3306/nfl_test
+        run: uv run python -m pytest tests/test_pipeline_database_matrix.py -v
+
   lint-frontend:
     runs-on: ubuntu-latest
     steps:
@@ -41,4 +74,5 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
-          npm run lint 2>/dev/null || echo "Lint check done"
+          npm run lint
+          npm run build

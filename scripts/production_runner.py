@@ -17,8 +17,12 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import uuid
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from functools import partial
+from pathlib import Path
 from typing import Any, Dict
 
 from config import config
@@ -66,8 +70,9 @@ def stage_odds(season: int, week: int) -> Dict[str, Any]:
 def stage_value_ranking(season: int, week: int) -> Dict[str, Any]:
     """Rank value opportunities with confidence scoring."""
     try:
-        from confidence_engine import score_plays
         from value_betting_engine import rank_weekly_value
+
+        from confidence_engine import score_plays
 
         raw = rank_weekly_value(season, week)
         if raw.empty:
@@ -154,6 +159,10 @@ def run_production_pipeline(
     week: int,
     skip_ingest: bool = False,
     skip_odds: bool = False,
+    *,
+    on_stage_start: Callable[[str, int], None] | None = None,
+    on_stage_result: Callable[[str, int, Mapping[str, Any]], None] | None = None,
+    cancellation_requested: Callable[[], bool] | None = None,
 ) -> Dict[str, Any]:
     """Execute the full production pipeline for a season/week.
 
@@ -185,10 +194,18 @@ def run_production_pipeline(
         # Every remaining stage consumes weekly_odds. Skipping the refresh
         # must never authorize a card from stale cached lines.
         stop_after_skip={"odds"},
+        on_stage_start=on_stage_start,
+        on_stage_result=on_stage_result,
+        cancellation_requested=cancellation_requested,
     )
 
     finished_at = datetime.now(timezone.utc).isoformat()
 
+    cancelled = bool(cancellation_requested and cancellation_requested())
+    final_stage = POST_PREPARE_STAGES[-1][0]
+    finalized = any(
+        stage.get("stage") == final_stage and stage.get("status") == "ok" for stage in stage_results
+    )
     run_report = {
         "season": season,
         "week": week,
@@ -196,24 +213,42 @@ def run_production_pipeline(
         "finished_at": finished_at,
         "stages": stage_results,
         "errors": [s for s in stage_results if s.get("status") == "error"],
-        "success": all(s.get("status") != "error" for s in stage_results),
+        "success": not cancelled
+        and finalized
+        and all(s.get("status") != "error" for s in stage_results),
+        "cancelled": cancelled,
+        "incomplete": not cancelled
+        and not finalized
+        and all(s.get("status") != "error" for s in stage_results),
     }
 
-    _persist_run_report(run_report)
+    artifact_path = _persist_run_report(run_report)
+    if artifact_path:
+        run_report["artifact_uri"] = str(artifact_path)
     return run_report
 
 
-def _persist_run_report(report: Dict[str, Any]) -> None:
+def _persist_run_report(report: Dict[str, Any]) -> Path | None:
     """Save run report to logs directory."""
-    logs_dir = config.logs_dir / "production_runs"
+    logs_dir = Path(config.logs_dir) / "production_runs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    path = logs_dir / f"run_{report['season']}_w{report['week']}_{report['started_at'][:10]}.json"
+    started = datetime.fromisoformat(str(report["started_at"]))
+    timestamp = started.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    unique = uuid.uuid4().hex[:8]
+    path = logs_dir / f"run_{report['season']}_w{report['week']}_{timestamp}_{unique}.json"
+    temporary_path = path.with_suffix(".tmp")
     try:
-        with open(path, "w") as f:
+        with open(temporary_path, "x") as f:
             json.dump(report, f, indent=2, default=str)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary_path, path)
         logger.info("Run report saved to %s", path)
+        return path
     except Exception as exc:
+        temporary_path.unlink(missing_ok=True)
         logger.error("Failed to save run report: %s", exc)
+        return None
 
 
 # ── CLI ──────────────────────────────────────────────────────────────
@@ -229,11 +264,40 @@ def main() -> None:
         help="Reuse historical data; current-week roster preparation still runs",
     )
     parser.add_argument("--skip-odds", action="store_true", help="Skip odds refresh stage")
+    parser.add_argument(
+        "--inline",
+        action="store_true",
+        help="Run in this process for debugging instead of enqueueing a worker job",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
 
-    print(f"Production pipeline: season={args.season} week={args.week}")
+    if not args.inline:
+        from pipeline_jobs.service import JobService
+
+        job = JobService().create_pipeline_job(
+            season=args.season,
+            week=args.week,
+            source="cli",
+            skip_ingest=args.skip_ingest,
+            skip_odds=args.skip_odds,
+        )
+        print(
+            json.dumps(
+                {
+                    "job_id": job.job_id,
+                    "run_id": job.run_id,
+                    "status": job.status,
+                    "season": args.season,
+                    "week": args.week,
+                },
+                indent=2,
+            )
+        )
+        return
+
+    print(f"Production pipeline (inline): season={args.season} week={args.week}")
     report = run_production_pipeline(
         args.season,
         args.week,

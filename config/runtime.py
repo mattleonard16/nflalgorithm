@@ -9,7 +9,7 @@ from types import SimpleNamespace
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _flag(name: str, default: bool = False) -> bool:
+def env_flag(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
     if raw is None:
         return default
@@ -27,9 +27,9 @@ api = SimpleNamespace(
     weather_api_key=os.getenv("WEATHER_API_KEY", ""),
     host=os.getenv("API_HOST", "0.0.0.0"),
     port=int(os.getenv("API_PORT", "8000")),
-    enable_caching=_flag("API_ENABLE_CACHING", True),
-    cache_offline_mode=_flag("API_CACHE_OFFLINE_MODE"),
-    force_cache_refresh=_flag("API_FORCE_CACHE_REFRESH"),
+    enable_caching=env_flag("API_ENABLE_CACHING", True),
+    cache_offline_mode=env_flag("API_CACHE_OFFLINE_MODE"),
+    force_cache_refresh=env_flag("API_FORCE_CACHE_REFRESH"),
 )
 
 cache = SimpleNamespace(
@@ -121,8 +121,8 @@ confidence = SimpleNamespace(
 )
 
 features = SimpleNamespace(
-    no_vig_enabled=_flag("NFL_FEATURE_NO_VIG"),
-    kelly_cap_enabled=_flag("NFL_FEATURE_KELLY_CAP"),
+    no_vig_enabled=env_flag("NFL_FEATURE_NO_VIG"),
+    kelly_cap_enabled=env_flag("NFL_FEATURE_KELLY_CAP"),
 )
 
 config = SimpleNamespace(

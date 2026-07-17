@@ -138,22 +138,21 @@ function getEdgeBarWidth(edge: number): string {
 
 /* ─── Animated count-up for KPI numbers ─── */
 function useCountUp(target: number, durationMs = 700): number {
-  const [display, setDisplay] = useState(0);
-  const prevRef = useRef(0);
+  const [display, setDisplay] = useState(target);
+  const prevRef = useRef(target);
 
   useEffect(() => {
     const from = prevRef.current;
     prevRef.current = target;
     if (from === target) {
-      setDisplay(target);
       return;
     }
     if (
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
-      setDisplay(target);
-      return;
+      const reducedMotionRaf = requestAnimationFrame(() => setDisplay(target));
+      return () => cancelAnimationFrame(reducedMotionRaf);
     }
     let raf: number;
     const start = performance.now();
@@ -632,13 +631,14 @@ export default function DashboardPage() {
       try {
         const run = await getPipelineRun(runId);
         setPipelineRun(run);
-        if (run.status !== "running") {
+        if (["completed", "failed", "cancelled"].includes(run.status)) {
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
           setRefreshing(false);
-          // Re-fetch bets after pipeline completes
-          const betsData = await getValueBets(filters, false);
-          setBets(betsData.bets);
+          if (run.status === "completed") {
+            const betsData = await getValueBets(filters, false);
+            setBets(betsData.bets);
+          }
         }
       } catch {
         if (pollRef.current) clearInterval(pollRef.current);
@@ -652,7 +652,7 @@ export default function DashboardPage() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      const run = await triggerPipelineRun(filters.season, filters.week, true, true);
+      const run = await triggerPipelineRun(filters.season, filters.week, true, false);
       setPipelineRun(run);
       startPolling(run.run_id);
     } catch (err) {

@@ -117,7 +117,9 @@ def get_connection() -> Iterator[DBConnection]:
 
     if backend == "sqlite":
         sqlite_path = config.database.path
-        conn = sqlite3.connect(sqlite_path)
+        conn = sqlite3.connect(sqlite_path, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA foreign_keys = ON")
         try:
             yield conn
         finally:
@@ -145,29 +147,33 @@ def read_dataframe(
         return pd.read_sql_query(normalized_sql, tmp_conn, params=params)
 
 
-def execute(sql: str, params: Optional[tuple] = None, conn: Optional[DBConnection] = None) -> None:
-    """Execute a single statement and commit immediately."""
+def execute(sql: str, params: Optional[tuple] = None, conn: Optional[DBConnection] = None) -> int:
+    """Execute one statement and return its affected-row count."""
     backend = _get_backend()
     normalized_sql = _normalize_sql_for_backend(sql, backend)
 
     if conn is not None:
         if isinstance(conn, sqlite3.Connection):
-            conn.execute(normalized_sql, params or ())
+            cursor = conn.execute(normalized_sql, params or ())
+            return cursor.rowcount
         else:
             # MySQL
             with conn.cursor() as cursor:
                 cursor.execute(normalized_sql, params or ())
-        return
+                return int(cursor.rowcount)
 
     with get_connection() as tmp_conn:
         if isinstance(tmp_conn, sqlite3.Connection):
-            tmp_conn.execute(normalized_sql, params or ())
+            cursor = tmp_conn.execute(normalized_sql, params or ())
             tmp_conn.commit()
+            return int(cursor.rowcount)
         else:
             # MySQL
             with tmp_conn.cursor() as cursor:
                 cursor.execute(normalized_sql, params or ())
+                affected = int(cursor.rowcount)
             tmp_conn.commit()
+            return affected
 
 
 def executemany(

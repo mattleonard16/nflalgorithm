@@ -2,12 +2,83 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from pipelines.nfl_contract import NFL_STAGE_COUNT
 from utils.db import column_exists, get_backend, get_connection, table_exists
+
+_MYSQL_KEY_LENGTHS = {
+    "agent_name": 64,
+    "as_of": 40,
+    "as_of_date": 40,
+    "bet_id": 128,
+    "check_type": 64,
+    "email": 255,
+    "event_id": 128,
+    "feature": 128,
+    "feed": 64,
+    "game_date": 40,
+    "game_id": 128,
+    "id": 128,
+    "job_id": 36,
+    "market": 64,
+    "player_id": 128,
+    "player_id_canonical": 128,
+    "player_id_odds": 128,
+    "player_name": 128,
+    "run_id": 36,
+    "session_id": 128,
+    "side": 8,
+    "sportsbook": 64,
+    "team_abbreviation": 16,
+    "team_name": 128,
+    "trained_at": 40,
+    "user_id": 128,
+}
+
+
+def _mysql_compatible_ddl(ddl: str) -> str:
+    """Translate SQLite-oriented table DDL at the narrow MySQL incompatibilities.
+
+    Most of the schema uses portable types. MySQL additionally requires bounded
+    string columns for keys and uses ``AUTO_INCREMENT`` rather than SQLite's
+    ``AUTOINCREMENT`` spelling. Non-key text stays unbounded.
+    """
+    key_columns: set[str] = set()
+    for match in re.finditer(
+        r"(?:PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\s*\(([^)]+)\)",
+        ddl,
+        flags=re.IGNORECASE,
+    ):
+        key_columns.update(
+            item.strip().strip('`"') for item in match.group(1).split(",") if item.strip()
+        )
+    for match in re.finditer(
+        r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s+TEXT\b[^,\n]*(?:PRIMARY\s+KEY|UNIQUE)",
+        ddl,
+        flags=re.IGNORECASE | re.MULTILINE,
+    ):
+        key_columns.add(match.group(1))
+
+    translated = ddl
+    for column in sorted(key_columns):
+        length = _MYSQL_KEY_LENGTHS.get(column, 128)
+        translated = re.sub(
+            rf"^(\s*{re.escape(column)}\s+)TEXT\b",
+            rf"\1VARCHAR({length})",
+            translated,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+    return re.sub(
+        r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b",
+        "BIGINT PRIMARY KEY AUTO_INCREMENT",
+        translated,
+        flags=re.IGNORECASE,
+    )
 
 
 @dataclass
@@ -20,6 +91,9 @@ class MigrationManager:
         if get_backend() == "sqlite":
             conn = sqlite3.connect(str(self.db_path))
             try:
+                # Journal mode is persistent. Set it once at bootstrap instead
+                # of reacquiring a database-wide lock on every connection.
+                conn.execute("PRAGMA journal_mode = WAL")
                 self._run_on_connection(conn)
             finally:
                 conn.close()
@@ -31,7 +105,7 @@ class MigrationManager:
     def _run_on_connection(self, conn: Any) -> None:
         cursor = conn.cursor()
         for ddl in self._ddl_statements():
-            cursor.execute(ddl)
+            cursor.execute(_mysql_compatible_ddl(ddl) if get_backend() == "mysql" else ddl)
         self._ensure_columns(cursor)
         self._ensure_indexes(cursor)
         conn.commit()
@@ -120,7 +194,7 @@ class MigrationManager:
                 sportsbook TEXT NOT NULL,
                 line REAL NOT NULL,
                 price INTEGER NOT NULL,
-                side TEXT NOT NULL DEFAULT 'over',
+                side VARCHAR(8) NOT NULL DEFAULT 'over',
                 mu REAL NOT NULL,
                 sigma REAL NOT NULL,
                 p_win REAL NOT NULL,
@@ -314,7 +388,7 @@ class MigrationManager:
                 email TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 name TEXT,
-                subscription_tier TEXT NOT NULL DEFAULT 'free',
+                subscription_tier VARCHAR(32) NOT NULL DEFAULT 'free',
                 bankroll REAL NOT NULL DEFAULT 1000.0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -440,18 +514,74 @@ class MigrationManager:
                 updated_at TEXT NOT NULL
             )
             """,
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS pipeline_runs (
-                run_id TEXT PRIMARY KEY,
+                run_id VARCHAR(36) PRIMARY KEY,
                 season INTEGER NOT NULL,
                 week INTEGER NOT NULL,
-                status TEXT NOT NULL DEFAULT 'running',
-                stages_requested INTEGER NOT NULL DEFAULT 7,
+                status VARCHAR(32) NOT NULL DEFAULT 'running',
+                stages_requested INTEGER NOT NULL DEFAULT {NFL_STAGE_COUNT},
                 stages_completed INTEGER NOT NULL DEFAULT 0,
                 error_message TEXT,
-                started_at TEXT NOT NULL,
-                finished_at TEXT,
-                report_json TEXT
+                started_at VARCHAR(40) NOT NULL,
+                finished_at VARCHAR(40),
+                report_json TEXT,
+                data_health_json TEXT,
+                source VARCHAR(32) DEFAULT 'legacy',
+                requested_by VARCHAR(128),
+                updated_at VARCHAR(40)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS pipeline_jobs (
+                job_id VARCHAR(36) PRIMARY KEY,
+                run_id VARCHAR(36) NOT NULL UNIQUE,
+                job_type VARCHAR(64) NOT NULL,
+                payload_json TEXT NOT NULL,
+                status VARCHAR(32) NOT NULL DEFAULT 'queued',
+                priority INTEGER NOT NULL DEFAULT 0,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 3,
+                available_at VARCHAR(40) NOT NULL,
+                claimed_at VARCHAR(40),
+                heartbeat_at VARCHAR(40),
+                worker_id VARCHAR(255),
+                cancel_requested INTEGER NOT NULL DEFAULT 0,
+                idempotency_key VARCHAR(255) UNIQUE,
+                source VARCHAR(32) NOT NULL,
+                requested_by VARCHAR(128),
+                created_at VARCHAR(40) NOT NULL,
+                updated_at VARCHAR(40) NOT NULL,
+                last_error TEXT,
+                FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS pipeline_stage_runs (
+                run_id VARCHAR(36) NOT NULL,
+                stage_name VARCHAR(64) NOT NULL,
+                ordinal INTEGER NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                attempt INTEGER NOT NULL DEFAULT 1,
+                started_at VARCHAR(40),
+                finished_at VARCHAR(40),
+                result_json TEXT,
+                error_message TEXT,
+                PRIMARY KEY (run_id, stage_name),
+                FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS pipeline_artifacts (
+                artifact_id VARCHAR(36) PRIMARY KEY,
+                run_id VARCHAR(36) NOT NULL,
+                kind VARCHAR(64) NOT NULL,
+                uri TEXT NOT NULL,
+                checksum VARCHAR(128),
+                size_bytes INTEGER,
+                metadata_json TEXT,
+                created_at VARCHAR(40) NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
             )
             """,
             """
@@ -735,7 +865,7 @@ class MigrationManager:
                 market TEXT NOT NULL,
                 feature TEXT NOT NULL,
                 mean_abs_shap REAL,
-                rank INTEGER,
+                `rank` INTEGER,
                 UNIQUE(game_date, market, feature)
             )
             """,
@@ -875,7 +1005,7 @@ class MigrationManager:
             # T0 #4: side column for over/under support (existing rows default to 'over')
             if not column_exists("materialized_value_view", "side", conn=cursor.connection):
                 cursor.execute(
-                    "ALTER TABLE materialized_value_view ADD COLUMN side TEXT NOT NULL DEFAULT 'over'"
+                    "ALTER TABLE materialized_value_view ADD COLUMN side VARCHAR(8) NOT NULL DEFAULT 'over'"
                 )
             # T1 C3: persist per-side fair probabilities so /api/value-bets can
             # show vig-removed prob alongside model prob without recomputing.
@@ -926,6 +1056,14 @@ class MigrationManager:
         if table_exists("pipeline_runs", conn=cursor.connection):
             if not column_exists("pipeline_runs", "data_health_json", conn=cursor.connection):
                 cursor.execute("ALTER TABLE pipeline_runs ADD COLUMN data_health_json TEXT")
+            if not column_exists("pipeline_runs", "source", conn=cursor.connection):
+                cursor.execute(
+                    "ALTER TABLE pipeline_runs ADD COLUMN source VARCHAR(32) DEFAULT 'legacy'"
+                )
+            if not column_exists("pipeline_runs", "requested_by", conn=cursor.connection):
+                cursor.execute("ALTER TABLE pipeline_runs ADD COLUMN requested_by VARCHAR(128)")
+            if not column_exists("pipeline_runs", "updated_at", conn=cursor.connection):
+                cursor.execute("ALTER TABLE pipeline_runs ADD COLUMN updated_at VARCHAR(40)")
 
         # Phase 1+2: Add sigma, usage_rate, volatility_score to nba_projections
         if table_exists("nba_projections", conn=cursor.connection):
@@ -984,7 +1122,7 @@ class MigrationManager:
                 )
             if not column_exists("nba_materialized_value_view", "side", conn=cursor.connection):
                 cursor.execute(
-                    "ALTER TABLE nba_materialized_value_view ADD COLUMN side TEXT DEFAULT 'over'"
+                    "ALTER TABLE nba_materialized_value_view ADD COLUMN side VARCHAR(8) DEFAULT 'over'"
                 )
             # Phase 4 (Monte Carlo): mc_p_win for simulation-based probability
             if not column_exists("nba_materialized_value_view", "mc_p_win", conn=cursor.connection):
@@ -1088,6 +1226,8 @@ class MigrationManager:
 
     def _migrate_nba_odds_pk(self, cursor: Any) -> None:
         """Recreate nba_odds with as_of in PK if it has the old 4-column PK."""
+        if get_backend() != "sqlite":
+            return
         if not table_exists("nba_odds", conn=cursor.connection):
             return
         # Check current CREATE TABLE sql for the old PK pattern
@@ -1179,7 +1319,7 @@ class MigrationManager:
                 sportsbook TEXT NOT NULL,
                 line REAL NOT NULL,
                 price INTEGER NOT NULL,
-                side TEXT NOT NULL DEFAULT 'over',
+                side VARCHAR(8) NOT NULL DEFAULT 'over',
                 mu REAL NOT NULL,
                 sigma REAL NOT NULL,
                 p_win REAL NOT NULL,
@@ -1209,10 +1349,51 @@ class MigrationManager:
         cursor.execute("DROP TABLE _mvv_old")
 
     def _ensure_indexes(self, cursor: Any) -> None:
-        # MySQL does not support CREATE INDEX IF NOT EXISTS. Index creation for
-        # that backend must be handled by an explicit, deployment-safe schema
-        # migration rather than making every weekly refresh fail here.
         if get_backend() == "mysql":
+            for table, index, columns in (
+                ("pipeline_runs", "idx_pipeline_runs_lookup", "season, week, status"),
+                (
+                    "pipeline_jobs",
+                    "idx_pipeline_jobs_claim",
+                    "status, available_at, priority, created_at",
+                ),
+                (
+                    "pipeline_jobs",
+                    "idx_pipeline_jobs_stale",
+                    "status, heartbeat_at",
+                ),
+                (
+                    "pipeline_stage_runs",
+                    "idx_pipeline_stage_runs_timeline",
+                    "run_id, ordinal",
+                ),
+                ("pipeline_artifacts", "idx_pipeline_artifacts_run", "run_id, created_at"),
+            ):
+                cursor.execute(
+                    """
+                    SELECT 1 FROM information_schema.statistics
+                    WHERE table_schema = DATABASE() AND table_name = %s AND index_name = %s
+                    LIMIT 1
+                    """,
+                    (table, index),
+                )
+                if cursor.fetchone() is None:
+                    try:
+                        cursor.execute(f"CREATE INDEX `{index}` ON `{table}` ({columns})")
+                    except Exception:
+                        # Multiple replicas may migrate concurrently. Suppress only
+                        # the race where another migrator created this exact index.
+                        cursor.execute(
+                            """
+                            SELECT 1 FROM information_schema.statistics
+                            WHERE table_schema = DATABASE() AND table_name = %s
+                              AND index_name = %s
+                            LIMIT 1
+                            """,
+                            (table, index),
+                        )
+                        if cursor.fetchone() is None:
+                            raise
             return
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_weekly_odds_lookup ON weekly_odds(season, week, player_id, market)"
@@ -1277,6 +1458,22 @@ class MigrationManager:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_player_dim_team ON player_dim(team)")
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_pipeline_runs_lookup ON pipeline_runs(season, week, status)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_claim "
+            "ON pipeline_jobs(status, available_at, priority, created_at)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_stale "
+            "ON pipeline_jobs(status, heartbeat_at)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pipeline_stage_runs_timeline "
+            "ON pipeline_stage_runs(run_id, ordinal)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pipeline_artifacts_run "
+            "ON pipeline_artifacts(run_id, created_at)"
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_nba_game_logs_player ON nba_player_game_logs(player_id, game_date)"

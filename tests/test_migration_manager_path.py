@@ -8,7 +8,7 @@ from typing import Iterator
 
 import schema_migrations
 from config import config
-from schema_migrations import MigrationManager
+from schema_migrations import MigrationManager, _mysql_compatible_ddl
 
 
 def test_migration_manager_honors_explicit_sqlite_path(tmp_path, monkeypatch) -> None:
@@ -40,9 +40,7 @@ def test_migration_manager_honors_explicit_sqlite_path(tmp_path, monkeypatch) ->
         ).fetchone()
         context_columns = {
             row[1]
-            for row in conn.execute(
-                "PRAGMA table_info(nfl_player_context_snapshots)"
-            ).fetchall()
+            for row in conn.execute("PRAGMA table_info(nfl_player_context_snapshots)").fetchall()
         }
         stat_columns = {
             row[1] for row in conn.execute("PRAGMA table_info(player_stats_enhanced)").fetchall()
@@ -86,17 +84,44 @@ def test_migration_manager_keeps_non_sqlite_connection_path(monkeypatch) -> None
     assert migrated == [connection]
 
 
-def test_mysql_index_refresh_skips_unsupported_if_not_exists(monkeypatch) -> None:
+def test_mysql_index_refresh_is_idempotent_without_if_not_exists(monkeypatch) -> None:
     class RecordingCursor:
         def __init__(self) -> None:
-            self.statements: list[str] = []
+            self.statements: list[tuple[str, tuple | None]] = []
 
-        def execute(self, statement: str) -> None:
-            self.statements.append(statement)
+        def execute(self, statement: str, params: tuple | None = None) -> None:
+            self.statements.append((statement, params))
+
+        def fetchone(self):
+            return None
 
     cursor = RecordingCursor()
     monkeypatch.setattr(schema_migrations, "get_backend", lambda: "mysql")
 
     MigrationManager("ignored-for-mysql.db")._ensure_indexes(cursor)
 
-    assert cursor.statements == []
+    create_statements = [
+        statement for statement, _params in cursor.statements if "CREATE INDEX" in statement
+    ]
+    assert len(create_statements) == 5
+    assert any("idx_pipeline_jobs_claim" in statement for statement in create_statements)
+    assert any("idx_pipeline_jobs_stale" in statement for statement in create_statements)
+
+
+def test_mysql_ddl_bounds_key_text_and_translates_auto_increment() -> None:
+    ddl = """
+        CREATE TABLE example (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL,
+            market TEXT NOT NULL,
+            notes TEXT,
+            UNIQUE(event_id, market)
+        )
+    """
+
+    translated = _mysql_compatible_ddl(ddl)
+
+    assert "id BIGINT PRIMARY KEY AUTO_INCREMENT" in translated
+    assert "event_id VARCHAR(128) NOT NULL" in translated
+    assert "market VARCHAR(64) NOT NULL" in translated
+    assert "notes TEXT" in translated

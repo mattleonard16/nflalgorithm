@@ -46,6 +46,9 @@ def run_stages(
     skip: Mapping[str, str] | None = None,
     stop_on_error: bool = True,
     stop_after_skip: Collection[str] = (),
+    on_stage_start: Callable[[str, int], None] | None = None,
+    on_stage_result: Callable[[str, int, Mapping[str, Any]], None] | None = None,
+    cancellation_requested: Callable[[], bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Run bound stages with explicit selection, skip, and failure policies."""
     known_names = _validate_names(stages)
@@ -58,22 +61,28 @@ def run_stages(
         raise ValueError(f"Unknown pipeline stage(s): {names}")
 
     results: list[dict[str, Any]] = []
-    for stage in stages:
+    for ordinal, stage in enumerate(stages):
+        if cancellation_requested and cancellation_requested():
+            logger.info("Pipeline cancellation requested before stage %s", stage.name)
+            break
         if selected is not None and stage.name not in selected:
             continue
         if stage.name in skipped:
-            results.append(
-                {
-                    "status": "skipped",
-                    "stage": stage.name,
-                    "reason": skipped[stage.name],
-                }
-            )
+            result = {
+                "status": "skipped",
+                "stage": stage.name,
+                "reason": skipped[stage.name],
+            }
+            results.append(result)
+            if on_stage_result:
+                on_stage_result(stage.name, ordinal, result)
             if stage.name in stop_after_skip:
                 break
             continue
 
         logger.info("Running pipeline stage: %s", stage.name)
+        if on_stage_start:
+            on_stage_start(stage.name, ordinal)
         try:
             raw_result = stage.handler()
         except Exception as exc:
@@ -88,6 +97,8 @@ def run_stages(
         else:
             result = _normalize_result(stage.name, raw_result)
         results.append(result)
+        if on_stage_result:
+            on_stage_result(stage.name, ordinal, result)
         logger.info("Pipeline stage %s: %s", stage.name, result["status"])
 
         if result["status"] == "error" and stop_on_error:
