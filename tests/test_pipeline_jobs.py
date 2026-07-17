@@ -10,7 +10,7 @@ import pytest
 from pipeline_jobs.service import JobService
 from pipeline_jobs.worker import PipelineWorker
 from schema_migrations import MigrationManager
-from utils.db import execute, fetchall, fetchone, table_exists
+from utils.db import execute, fetchall, fetchone, get_table_columns, table_exists
 
 
 @pytest.fixture()
@@ -31,6 +31,7 @@ def test_job_schema_is_part_of_normal_migrations(job_db) -> None:
     assert table_exists("pipeline_jobs")
     assert table_exists("pipeline_stage_runs")
     assert table_exists("pipeline_artifacts")
+    assert "claim_token" in get_table_columns("pipeline_jobs")
 
 
 def test_create_job_is_idempotent_and_starts_queued(job_db) -> None:

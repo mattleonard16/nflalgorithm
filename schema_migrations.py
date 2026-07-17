@@ -546,6 +546,7 @@ class MigrationManager:
                 claimed_at VARCHAR(40),
                 heartbeat_at VARCHAR(40),
                 worker_id VARCHAR(255),
+                claim_token VARBINARY(64),
                 cancel_requested INTEGER NOT NULL DEFAULT 0,
                 idempotency_key VARCHAR(255) UNIQUE,
                 source VARCHAR(32) NOT NULL,
@@ -1064,6 +1065,14 @@ class MigrationManager:
                 cursor.execute("ALTER TABLE pipeline_runs ADD COLUMN requested_by VARCHAR(128)")
             if not column_exists("pipeline_runs", "updated_at", conn=cursor.connection):
                 cursor.execute("ALTER TABLE pipeline_runs ADD COLUMN updated_at VARCHAR(40)")
+
+        # A claim token is a per-attempt, binary ownership credential. VARBINARY
+        # is accepted by SQLite and prevents MySQL collations from making token
+        # comparisons case-insensitive.
+        if table_exists("pipeline_jobs", conn=cursor.connection) and not column_exists(
+            "pipeline_jobs", "claim_token", conn=cursor.connection
+        ):
+            cursor.execute("ALTER TABLE pipeline_jobs ADD COLUMN claim_token VARBINARY(64)")
 
         # Phase 1+2: Add sigma, usage_rate, volatility_score to nba_projections
         if table_exists("nba_projections", conn=cursor.connection):
