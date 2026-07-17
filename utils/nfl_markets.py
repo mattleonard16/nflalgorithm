@@ -4,13 +4,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-MARKET_TO_STAT = {
-    "rushing_yards": "rushing_yards",
-    "receiving_yards": "receiving_yards",
-    "passing_yards": "passing_yards",
-    "receptions": "receptions",
-    "targets": "targets",
-}
+from sports.markets import get_sport
+
+MARKET_TO_STAT = {market: spec.stat_column for market, spec in get_sport("nfl").markets.items()}
 
 
 def melt_actuals(actuals: pd.DataFrame) -> pd.DataFrame:

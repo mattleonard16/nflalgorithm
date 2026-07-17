@@ -19,22 +19,18 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 import time
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import sys
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from pipelines.orchestrator import PipelineStage, run_stages
+
 logger = logging.getLogger(__name__)
-
-MARKETS = ["pts", "reb", "ast", "fg3m"]
-
-# Ordered stage names used to filter via --stages CLI flag
-ALL_STAGE_NAMES = ["ingest", "injuries", "predict", "odds", "value", "risk", "agents", "drift"]
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -102,7 +98,7 @@ def stage_predict(game_date: str, season: int) -> Dict[str, Any]:
     """Stage 3: Train MinutesModel then train + predict all stat markets."""
     t0 = time.monotonic()
     try:
-        from models.nba.stat_model import predict, train, _load_minutes_predictions
+        from models.nba.stat_model import MODELED_MARKETS, predict, train
     except ImportError as exc:
         return _result("predict", "skipped", f"module not found: {exc}")
 
@@ -110,12 +106,14 @@ def stage_predict(game_date: str, season: int) -> Dict[str, Any]:
     # the minutes lookup is shared across all predict() calls.
     minutes_lookup: Dict[str, Any] = {}
     try:
-        from models.nba.minutes_model import MinutesModel
         import os
-        from pathlib import Path
+
+        from models.nba.minutes_model import MinutesModel
 
         db_path = os.environ.get("SQLITE_DB_PATH", "nfl_data.db")
-        minutes_model_path = Path(__file__).parent.parent / "models" / "nba" / "minutes_model.joblib"
+        minutes_model_path = (
+            Path(__file__).parent.parent / "models" / "nba" / "minutes_model.joblib"
+        )
 
         mm = MinutesModel()
         logger.info("[predict] training MinutesModel …")
@@ -140,10 +138,12 @@ def stage_predict(game_date: str, season: int) -> Dict[str, Any]:
         }
         logger.info("[predict] MinutesModel produced %d player predictions", len(minutes_lookup))
     except Exception as exc:
-        logger.warning("[predict] MinutesModel stage failed (%s); stat models will use fallback minutes", exc)
+        logger.warning(
+            "[predict] MinutesModel stage failed (%s); stat models will use fallback minutes", exc
+        )
 
     errors: List[str] = []
-    for market in MARKETS:
+    for market in MODELED_MARKETS:
         try:
             logger.info("[predict] training market=%s", market)
             train(market)
@@ -159,7 +159,7 @@ def stage_predict(game_date: str, season: int) -> Dict[str, Any]:
         return _result("predict", "error", "; ".join(errors))
 
     logger.info("[predict] all markets done in %ss", elapsed)
-    return _result("predict", "ok", f"markets={MARKETS} elapsed={elapsed}s")
+    return _result("predict", "ok", f"markets={list(MODELED_MARKETS)} elapsed={elapsed}s")
 
 
 def stage_odds(game_date: str, season: int) -> Dict[str, Any]:
@@ -199,9 +199,14 @@ def stage_value(
     try:
         logger.info(
             "[value] materialising date=%s season=%d monte_carlo=%s calibrated=%s",
-            game_date, season, use_monte_carlo, calibrated,
+            game_date,
+            season,
+            use_monte_carlo,
+            calibrated,
         )
-        n = materialize_nba_value(game_date, season, use_monte_carlo=use_monte_carlo, calibrated=calibrated)
+        n = materialize_nba_value(
+            game_date, season, use_monte_carlo=use_monte_carlo, calibrated=calibrated
+        )
         elapsed = round(time.monotonic() - t0, 1)
         logger.info("[value] %d value bets written in %ss", n, elapsed)
         return _result("value", "ok", f"value_bets={n} elapsed={elapsed}s")
@@ -293,6 +298,7 @@ STAGES: List[tuple[str, Any]] = [
     ("agents", stage_agents),
     ("drift", stage_drift),
 ]
+ALL_STAGE_NAMES = [stage_name for stage_name, _ in STAGES]
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -323,31 +329,31 @@ def run_nba_pipeline(
     if season is None:
         season = _auto_season(game_date)
 
-    active_names = set(stages) if stages else None
-
     started_at = datetime.now(timezone.utc).isoformat()
-    results: List[Dict[str, Any]] = []
-
+    bound_stages: list[PipelineStage] = []
     for stage_name, stage_fn in STAGES:
-        if active_names is not None and stage_name not in active_names:
-            continue
-        if skip_ingest and stage_name == "ingest":
-            results.append(_result("ingest", "skipped", "skip_ingest flag"))
-            continue
-        if skip_odds and stage_name == "odds":
-            results.append(_result("odds", "skipped", "skip_odds flag"))
-            continue
-
-        logger.info("=== Stage: %s ===", stage_name)
         if stage_name == "value":
-            result = stage_fn(game_date, season, use_monte_carlo=use_monte_carlo, calibrated=calibrated)
+            handler = partial(
+                stage_fn,
+                game_date,
+                season,
+                use_monte_carlo=use_monte_carlo,
+                calibrated=calibrated,
+            )
         else:
-            result = stage_fn(game_date, season)
-        results.append(result)
-        logger.info("Stage %s -> %s", stage_name, result["status"])
-
-        if result["status"] == "error":
-            logger.warning("Stage %s had errors; continuing pipeline", stage_name)
+            handler = partial(stage_fn, game_date, season)
+        bound_stages.append(PipelineStage(stage_name, handler))
+    skipped: dict[str, str] = {}
+    if skip_ingest:
+        skipped["ingest"] = "skip_ingest flag"
+    if skip_odds:
+        skipped["odds"] = "skip_odds flag"
+    results = run_stages(
+        bound_stages,
+        only=set(stages) if stages else None,
+        skip=skipped,
+        stop_on_error=False,
+    )
 
     finished_at = datetime.now(timezone.utc).isoformat()
     _write_run_report(game_date, season, started_at, finished_at, results)
@@ -401,7 +407,9 @@ def main() -> None:
         ),
     )
     parser.add_argument("--date", required=True, metavar="YYYY-MM-DD", help="Game slate date")
-    parser.add_argument("--season", type=int, default=None, help="NBA season year (auto-detected if omitted)")
+    parser.add_argument(
+        "--season", type=int, default=None, help="NBA season year (auto-detected if omitted)"
+    )
     parser.add_argument("--skip-ingest", action="store_true", help="Skip data ingestion stage")
     parser.add_argument("--skip-odds", action="store_true", help="Skip odds scrape stage")
     parser.add_argument(
@@ -435,7 +443,9 @@ def main() -> None:
         stages_list = [s.strip() for s in args.stages.split(",") if s.strip()]
         invalid = [s for s in stages_list if s not in ALL_STAGE_NAMES]
         if invalid:
-            parser.error(f"Unknown stage(s): {', '.join(invalid)}. Valid: {', '.join(ALL_STAGE_NAMES)}")
+            parser.error(
+                f"Unknown stage(s): {', '.join(invalid)}. Valid: {', '.join(ALL_STAGE_NAMES)}"
+            )
 
     season = args.season if args.season is not None else _auto_season(args.date)
     print(f"NBA production pipeline: date={args.date} season={season}")
@@ -453,7 +463,9 @@ def main() -> None:
     success = all(r["status"] != "error" for r in results)
     print(f"\nPipeline {'SUCCEEDED' if success else 'HAD ERRORS'}")
     for r in results:
-        marker = "[OK  ]" if r["status"] == "ok" else "[SKIP]" if r["status"] == "skipped" else "[ERR ]"
+        marker = (
+            "[OK  ]" if r["status"] == "ok" else "[SKIP]" if r["status"] == "skipped" else "[ERR ]"
+        )
         detail = f" — {r['detail']}" if r.get("detail") else ""
         print(f"  {marker} {r['stage']}{detail}")
 

@@ -38,6 +38,7 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, S
 from sklearn.linear_model import Ridge
 from sklearn.model_selection import TimeSeriesSplit
 
+from sports.markets import get_sport
 from utils.db import executemany, read_dataframe
 from utils.nba_sigma import compute_player_sigma
 from utils.nba_usage import compute_usage_features
@@ -51,7 +52,6 @@ log = logging.getLogger(__name__)
 
 MODEL_DIR = Path(__file__).parent
 
-VALID_MARKETS = {"pts", "reb", "ast", "fg3m"}
 ROLLING_WINDOWS = [5, 10]
 MIN_GAMES_FOR_PREDICTION = 5
 
@@ -62,11 +62,33 @@ _MARKET_STATS: dict[str, list[str]] = {
     "ast": ["ast", "min"],
     "fg3m": ["fg3m", "fga"],
 }
+MODELED_MARKETS = tuple(_MARKET_STATS)
+VALID_MARKETS = frozenset(MODELED_MARKETS)
+
+_unregistered_markets = VALID_MARKETS - set(get_sport("nba").markets)
+if _unregistered_markets:
+    raise RuntimeError(
+        f"NBA model markets missing from sport registry: {sorted(_unregistered_markets)}"
+    )
 
 # All stat columns needed across all markets (for DB query)
 _ALL_STAT_COLS = sorted(
-    {"player_id", "player_name", "team_abbreviation", "season", "game_id",
-     "game_date", "matchup", "wl", "min", "pts", "reb", "ast", "fg3m", "fga"}
+    {
+        "player_id",
+        "player_name",
+        "team_abbreviation",
+        "season",
+        "game_id",
+        "game_date",
+        "matchup",
+        "wl",
+        "min",
+        "pts",
+        "reb",
+        "ast",
+        "fg3m",
+        "fga",
+    }
 )
 
 
@@ -88,24 +110,21 @@ def get_feature_cols(market: str) -> list[str]:
 
     if market == "fg3m":
         # fg3m stays count-based with Poisson CDF — keep all features
-        rolling_cols = [
-            f"{stat}_last{w}_avg"
-            for stat in stats
-            for w in ROLLING_WINDOWS
-        ]
+        rolling_cols = [f"{stat}_last{w}_avg" for stat in stats for w in ROLLING_WINDOWS]
     else:
         # pts/reb/ast: predict per-minute rate; exclude min_last*_avg features
         rolling_cols = [
-            f"{stat}_last{w}_avg"
-            for stat in stats
-            for w in ROLLING_WINDOWS
-            if stat != "min"
+            f"{stat}_last{w}_avg" for stat in stats for w in ROLLING_WINDOWS if stat != "min"
         ]
 
     contextual_cols = [
-        "home_game", "b2b", "days_rest",
-        "opp_def_rating_normalized", "opp_pace_normalized",
-        "opp_days_rest", "opp_b2b",
+        "home_game",
+        "b2b",
+        "days_rest",
+        "opp_def_rating_normalized",
+        "opp_pace_normalized",
+        "opp_days_rest",
+        "opp_b2b",
     ]
     usage_cols = ["fga_share", "min_share", "usage_delta"]
     return rolling_cols + contextual_cols + usage_cols
@@ -127,9 +146,7 @@ def _compute_team_rest_schedule(df: pd.DataFrame) -> pd.DataFrame:
     )
     schedule["prev_date"] = schedule.groupby("team_abbreviation")["game_date"].shift(1)
     schedule["team_days_rest"] = (
-        (schedule["game_date"] - schedule["prev_date"]).dt.days
-        .fillna(3)
-        .clip(upper=7)
+        (schedule["game_date"] - schedule["prev_date"]).dt.days.fillna(3).clip(upper=7)
     )
     schedule["team_b2b"] = (schedule["team_days_rest"] <= 1).astype(int)
     return schedule[["team_abbreviation", "game_date", "team_days_rest", "team_b2b"]]
@@ -151,9 +168,8 @@ def _engineer_features(df: pd.DataFrame, market: str) -> pd.DataFrame:
     stats = _MARKET_STATS[market]
     for stat in stats:
         for window in ROLLING_WINDOWS:
-            df[f"{stat}_last{window}_avg"] = (
-                df.groupby("player_id")[stat]
-                .transform(lambda s, w=window: s.shift(1).ewm(span=w, min_periods=1).mean())
+            df[f"{stat}_last{window}_avg"] = df.groupby("player_id")[stat].transform(
+                lambda s, w=window: s.shift(1).ewm(span=w, min_periods=1).mean()
             )
 
     # Home game flag: "TEAM vs. OPP" (home) or "TEAM @ OPP" (away)
@@ -171,11 +187,13 @@ def _engineer_features(df: pd.DataFrame, market: str) -> pd.DataFrame:
     # Opponent rest differential: opponents on B2B allow ~2-3 extra pts.
     # Build team schedule then merge on opponent + game_date.
     team_rest = _compute_team_rest_schedule(df)
-    opp_rest = team_rest.rename(columns={
-        "team_abbreviation": "opponent",
-        "team_days_rest": "opp_days_rest",
-        "team_b2b": "opp_b2b",
-    })
+    opp_rest = team_rest.rename(
+        columns={
+            "team_abbreviation": "opponent",
+            "team_days_rest": "opp_days_rest",
+            "team_b2b": "opp_b2b",
+        }
+    )
     df = df.merge(opp_rest, on=["opponent", "game_date"], how="left")
     df["opp_days_rest"] = df["opp_days_rest"].fillna(3.0)
     df["opp_b2b"] = df["opp_b2b"].fillna(0).astype(int)
@@ -261,7 +279,11 @@ def _lookup_opponent_defense(
         def_stats["opp_def_norm"] = 0.0
 
     # Z-score normalize opp_pace
-    pace_vals = def_stats["opp_pace"].dropna() if "opp_pace" in def_stats.columns else pd.Series([], dtype=float)
+    pace_vals = (
+        def_stats["opp_pace"].dropna()
+        if "opp_pace" in def_stats.columns
+        else pd.Series([], dtype=float)
+    )
     if len(pace_vals) > 1:
         pace_mean = float(pace_vals.mean())
         pace_std = float(pace_vals.std())
@@ -288,10 +310,7 @@ def _lookup_opponent_defense(
     if "season" in df.columns:
         df = df.merge(merge_df, on=["opponent", "season"], how="left")
     else:
-        merge_df_no_season = (
-            merge_df.drop(columns=["season"])
-            .drop_duplicates(subset=["opponent"])
-        )
+        merge_df_no_season = merge_df.drop(columns=["season"]).drop_duplicates(subset=["opponent"])
         df = df.merge(merge_df_no_season, on=["opponent"], how="left")
 
     df["opp_def_rating_normalized"] = df["opp_def_rating_normalized"].fillna(0.0)
@@ -333,6 +352,7 @@ def _build_model(market: str) -> StackingRegressor:
 
     try:
         import xgboost as xgb
+
         xgb_model = xgb.XGBRegressor(
             n_estimators=params.get("xgb_n", 400),
             max_depth=params.get("xgb_depth", depth),
@@ -350,6 +370,7 @@ def _build_model(market: str) -> StackingRegressor:
 
     try:
         import lightgbm as lgb
+
         lgb_model = lgb.LGBMRegressor(
             n_estimators=params.get("lgb_n", 400),
             max_depth=params.get("lgb_depth", depth),
@@ -389,10 +410,10 @@ def train(market: str) -> None:
     stats_needed = _MARKET_STATS[market]
 
     # Build the column list for the query (always include fga for usage features)
-    base_cols = "player_id, player_name, team_abbreviation, season, game_id, game_date, matchup, min, fga"
-    extra_cols = ", ".join(
-        c for c in stats_needed if c not in {"min", "fga"}
+    base_cols = (
+        "player_id, player_name, team_abbreviation, season, game_id, game_date, matchup, min, fga"
     )
+    extra_cols = ", ".join(c for c in stats_needed if c not in {"min", "fga"})
     select_cols = f"{base_cols}, {extra_cols}" if extra_cols else base_cols
 
     log.info("[%s] Loading game logs for training …", market)
@@ -543,16 +564,22 @@ def _load_minutes_predictions(game_date: str) -> dict[str, dict[str, float]]:
             mm.save(str(minutes_model_path))
     else:
         import os
+
         db_path = os.environ.get("SQLITE_DB_PATH", str(MODEL_DIR.parent.parent / "nfl_data.db"))
         log.info("[minutes] No saved model found; training MinutesModel …")
         result = mm.train(db_path)
-        log.info("[minutes] MinutesModel trained: cv_mae=%.3f n_samples=%d", result["cv_mae"], result["n_samples"])
+        log.info(
+            "[minutes] MinutesModel trained: cv_mae=%.3f n_samples=%d",
+            result["cv_mae"],
+            result["n_samples"],
+        )
         try:
             mm.save(str(minutes_model_path))
         except Exception as exc:
             log.warning("[minutes] Could not save minutes model: %s", exc)
 
     import os
+
     db_path = os.environ.get("SQLITE_DB_PATH", str(MODEL_DIR.parent.parent / "nfl_data.db"))
     try:
         predictions = mm.predict(db_path, target_date=game_date)
@@ -591,7 +618,9 @@ def predict(market: str, game_date: str | None = None, _minutes_lookup: dict | N
     if not model_path.exists():
         log.error(
             "[%s] Model not found at %s. Run --train --market %s first.",
-            market, model_path, market,
+            market,
+            model_path,
+            market,
         )
         return
 
@@ -610,7 +639,9 @@ def predict(market: str, game_date: str | None = None, _minutes_lookup: dict | N
     log.info("[%s] Generating projections for %s (%d games) …", market, today, len(games))
 
     # Load minutes predictions once (caller may pass a pre-built lookup for multi-market runs)
-    minutes_lookup = _minutes_lookup if _minutes_lookup is not None else _load_minutes_predictions(today)
+    minutes_lookup = (
+        _minutes_lookup if _minutes_lookup is not None else _load_minutes_predictions(today)
+    )
 
     # Build team -> game context mapping
     team_game: dict[str, dict] = {}
@@ -620,7 +651,9 @@ def predict(market: str, game_date: str | None = None, _minutes_lookup: dict | N
 
     # All stat cols needed for feature engineering for this market (always include fga for usage)
     stats_needed = _MARKET_STATS[market]
-    base_cols = "player_id, player_name, team_abbreviation, season, game_id, game_date, matchup, min, fga"
+    base_cols = (
+        "player_id, player_name, team_abbreviation, season, game_id, game_date, matchup, min, fga"
+    )
     extra_cols = ", ".join(c for c in stats_needed if c not in {"min", "fga"})
     select_cols = f"{base_cols}, {extra_cols}" if extra_cols else base_cols
 
@@ -650,9 +683,7 @@ def predict(market: str, game_date: str | None = None, _minutes_lookup: dict | N
     # Filter to players with enough game history
     game_counts = df_all.groupby("player_id").size().rename("game_count")
     players_today = players_today.join(game_counts, on="player_id")
-    players_today = players_today[
-        players_today["game_count"] >= MIN_GAMES_FOR_PREDICTION
-    ].copy()
+    players_today = players_today[players_today["game_count"] >= MIN_GAMES_FOR_PREDICTION].copy()
 
     log.info("[%s] Projecting %d players …", market, len(players_today))
 
@@ -678,9 +709,7 @@ def predict(market: str, game_date: str | None = None, _minutes_lookup: dict | N
     )
     today_dt = pd.to_datetime(today)
     opp_last_game["opp_days_rest"] = (
-        (today_dt - opp_last_game["opp_last_game_date"]).dt.days
-        .fillna(3)
-        .clip(upper=7)
+        (today_dt - opp_last_game["opp_last_game_date"]).dt.days.fillna(3).clip(upper=7)
     )
     opp_last_game["opp_b2b"] = (opp_last_game["opp_days_rest"] <= 1).astype(int)
     players_today = players_today.merge(
@@ -750,9 +779,7 @@ def predict(market: str, game_date: str | None = None, _minutes_lookup: dict | N
 
         # volatility_score: coefficient of variation (sigma / projection)
         # clamped to [0.0, 2.0] to avoid extreme outliers on tiny projections
-        volatility_score = float(
-            round(min(2.0, sigma / max(adjusted_proj, 0.5)), 4)
-        )
+        volatility_score = float(round(min(2.0, sigma / max(adjusted_proj, 0.5)), 4))
 
         # usage_rate: player's recent minutes share (proxy for volume certainty)
         usage_rate = float(round(float(row.get("min_share", 0.0) or 0.0), 4))

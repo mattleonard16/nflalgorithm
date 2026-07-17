@@ -19,18 +19,14 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from sports.markets import get_sport
 from utils.db import execute, executemany, read_dataframe
 from utils.grading import calculate_profit_units, get_confidence_tier, grade_bet
 
 logger = logging.getLogger(__name__)
 
-# NBA market to game log column mapping (direct 1:1)
-NBA_MARKET_TO_STAT = {
-    "pts": "pts",
-    "reb": "reb",
-    "ast": "ast",
-    "fg3m": "fg3m",
-}
+# Compatibility alias for callers that still import the NBA-specific mapping.
+NBA_MARKET_TO_STAT = {market: spec.stat_column for market, spec in get_sport("nba").markets.items()}
 
 # All NBA value bets target the over side (over_price is used for Kelly/value calc)
 NBA_DEFAULT_SIDE = "over"
@@ -77,7 +73,9 @@ def grade_nba_bets(game_date: str) -> List[Dict]:
     )
 
     if actuals.empty:
-        logger.warning("No actual stats found for %s - all bets will be marked as pushes", game_date)
+        logger.warning(
+            "No actual stats found for %s - all bets will be marked as pushes", game_date
+        )
     else:
         logger.info("Found actual stats for %d players", len(actuals))
 
@@ -188,10 +186,22 @@ def save_nba_outcomes(outcomes: List[Dict]) -> None:
 
     outcome_tuples = [
         (
-            o["bet_id"], o["season"], o["game_date"], o["player_id"],
-            o["player_name"], o["market"], o["sportsbook"], o["side"],
-            o["line"], o.get("placed_at_line"), o["price"], o["actual_result"], o["result"],
-            o["profit_units"], o["confidence_tier"], o["edge_at_placement"],
+            o["bet_id"],
+            o["season"],
+            o["game_date"],
+            o["player_id"],
+            o["player_name"],
+            o["market"],
+            o["sportsbook"],
+            o["side"],
+            o["line"],
+            o.get("placed_at_line"),
+            o["price"],
+            o["actual_result"],
+            o["result"],
+            o["profit_units"],
+            o["confidence_tier"],
+            o["edge_at_placement"],
             o["recorded_at"],
         )
         for o in outcomes
@@ -242,9 +252,17 @@ def save_nba_outcomes(outcomes: List[Dict]) -> None:
     execute(
         perf_sql,
         (
-            season, game_date, total_bets, wins, losses, pushes,
-            profit_units, roi_pct, avg_edge,
-            best_bet, worst_bet,
+            season,
+            game_date,
+            total_bets,
+            wins,
+            losses,
+            pushes,
+            profit_units,
+            roi_pct,
+            avg_edge,
+            best_bet,
+            worst_bet,
             datetime.now(timezone.utc).isoformat(),
         ),
     )
@@ -351,22 +369,26 @@ def compute_and_save_clv(game_date: str) -> int:
     for _, row in merged.iterrows():
         # Use placed_at_line (actual line taken) when available; fall back to open line
         placed = row.get("placed_at_line")
-        open_line = float(placed) if placed is not None and not pd.isna(placed) else float(row["open_line"])
+        open_line = (
+            float(placed) if placed is not None and not pd.isna(placed) else float(row["open_line"])
+        )
         close_line = float(row["close_line"])
         clv_points = open_line - close_line
         clv_pct = (clv_points / open_line * 100) if open_line != 0 else 0.0
 
-        records.append((
-            row["bet_id"],
-            int(row["player_id"]) if row["player_id"] is not None else None,
-            row["market"],
-            row["sportsbook"],
-            game_date,
-            open_line,
-            close_line,
-            round(clv_points, 4),
-            round(clv_pct, 4),
-        ))
+        records.append(
+            (
+                row["bet_id"],
+                int(row["player_id"]) if row["player_id"] is not None else None,
+                row["market"],
+                row["sportsbook"],
+                game_date,
+                open_line,
+                close_line,
+                round(clv_points, 4),
+                round(clv_pct, 4),
+            )
+        )
 
     insert_sql = """
         INSERT OR REPLACE INTO nba_clv (
@@ -445,22 +467,24 @@ def compute_nba_line_accuracy(game_date: str) -> int:
 
         is_over_hit = 1 if actual > line else 0
 
-        records.append((
-            int(row["season"]),
-            row["game_date"],
-            int(row["player_id"]),
-            row["market"],
-            row["sportsbook"],
-            line,
-            actual,
-            mu,
-            sigma,
-            model_abs_error,
-            line_abs_error,
-            model_beats_line,
-            is_over_hit,
-            now,
-        ))
+        records.append(
+            (
+                int(row["season"]),
+                row["game_date"],
+                int(row["player_id"]),
+                row["market"],
+                row["sportsbook"],
+                line,
+                actual,
+                mu,
+                sigma,
+                model_abs_error,
+                line_abs_error,
+                model_beats_line,
+                is_over_hit,
+                now,
+            )
+        )
 
     insert_sql = """
         INSERT OR REPLACE INTO nba_line_accuracy_history (
@@ -506,7 +530,12 @@ def summarize_nba_accuracy(
     )
 
     if df.empty:
-        return {"avg_model_mae": None, "avg_line_mae": None, "model_beats_line_pct": None, "n_bets": 0}
+        return {
+            "avg_model_mae": None,
+            "avg_line_mae": None,
+            "model_beats_line_pct": None,
+            "n_bets": 0,
+        }
 
     return {
         "avg_model_mae": round(float(df["model_abs_error"].mean()), 4),
