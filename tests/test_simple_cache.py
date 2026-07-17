@@ -32,3 +32,15 @@ def test_odds_cache_expiry_uses_odds_specific_ttl(monkeypatch) -> None:
     ).isoformat()
 
     assert client._is_cache_expired(response, "odds") is True
+
+
+def test_cache_without_source_timestamp_is_never_treated_as_fresh() -> None:
+    client = SimpleCachedClient.__new__(SimpleCachedClient)
+    response = requests.Response()
+
+    SimpleCachedClient._annotate_provenance(response, "HIT")
+
+    assert response.headers["X-Cache"] == "HIT"
+    assert "X-Cache-Created-At" not in response.headers
+    assert "X-Cache-Age-Seconds" not in response.headers
+    assert client._is_cache_expired(response, "odds") is True

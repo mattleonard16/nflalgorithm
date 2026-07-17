@@ -181,9 +181,16 @@ class SimpleCachedClient:
                 except ValueError:
                     raw_created = None
         observed_at = datetime.now(timezone.utc)
-        normalized_created = cls._as_utc(raw_created) if raw_created else observed_at
-        age_seconds = max(0.0, (observed_at - normalized_created).total_seconds())
         response.headers["X-Cache"] = status
+        if raw_created is None:
+            # A legacy cache record without its creation time has unknown age.
+            # Never manufacture a current timestamp: downstream odds validation
+            # must see the missing provenance and fail closed.
+            response.headers.pop("X-Cache-Created-At", None)
+            response.headers.pop("X-Cache-Age-Seconds", None)
+            return
+        normalized_created = cls._as_utc(raw_created)
+        age_seconds = max(0.0, (observed_at - normalized_created).total_seconds())
         response.headers["X-Cache-Created-At"] = normalized_created.isoformat()
         response.headers["X-Cache-Age-Seconds"] = f"{age_seconds:.6f}"
 
@@ -193,15 +200,15 @@ class SimpleCachedClient:
             created_header = response.headers.get("X-Cache-Created-At") or response.headers.get(
                 "x-cache-created"
             )
-            if created_header:
-                created_time = self._as_utc(
-                    datetime.fromisoformat(created_header.replace("Z", "+00:00"))
-                )
-                ttl = self._get_ttl_for_api(api_type=api_type)
-                return (datetime.now(timezone.utc) - created_time) > ttl
+            if not created_header:
+                return True
+            created_time = self._as_utc(
+                datetime.fromisoformat(created_header.replace("Z", "+00:00"))
+            )
+            ttl = self._get_ttl_for_api(api_type=api_type)
+            return (datetime.now(timezone.utc) - created_time) > ttl
         except Exception:
-            pass
-        return False
+            return True
 
     def _get_ttl_for_api(self, api_type: str) -> timedelta:
         """Get appropriate TTL based on API type."""
