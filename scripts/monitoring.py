@@ -379,32 +379,6 @@ class SystemMonitor:
             logger.error(f"Error getting betting metrics: {e}")
             return {'active_bets': 0, 'average_edge': 0, 'daily_roi': 0}
     
-    def should_send_alert(self, report: Dict[str, Any]) -> bool:
-        """Determine if alert should be sent based on report content."""
-        return (
-            report['system_status'] in ['CRITICAL', 'WARNING'] or
-            len([alert for component in report['components'].values() 
-                 for alert in component.get('alerts', [])]) > 0
-        )
-    
-    def format_alert_message(self, report: Dict[str, Any]) -> str:
-        """Format alert message for notification."""
-        status_emoji = {'HEALTHY': '✅', 'WARNING': '⚠️', 'CRITICAL': '🚨', 'ERROR': '❌'}
-        
-        message = f"{status_emoji.get(report['system_status'], '❓')} NFL Algorithm Alert\n"
-        message += f"Status: {report['system_status']}\n"
-        message += f"Time: {report['generated_at']}\n\n"
-        
-        for component_name, component_data in report['components'].items():
-            if component_data.get('alerts'):
-                message += f"{component_name.upper()}:\n"
-                for alert in component_data['alerts'][:3]:  # Limit to 3 alerts per component
-                    message += f"  • {alert}\n"
-                message += "\n"
-        
-        message += f"Full details available in monitoring dashboard."
-        return message
-    
     def save_monitoring_report(self, report: Dict[str, Any]) -> str:
         """Save monitoring report to file."""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

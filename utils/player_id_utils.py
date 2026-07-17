@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Optional, Tuple
+from typing import Optional
 
 NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 VALID_NFL_TEAMS = {
@@ -13,8 +13,6 @@ VALID_NFL_TEAMS = {
     'LAC', 'LAR', 'LV', 'MIA', 'MIN', 'NE', 'NO', 'NYG',
     'NYJ', 'PHI', 'PIT', 'SEA', 'SF', 'TB', 'TEN', 'WAS'
 }
-
-VALID_POSITIONS = {'QB', 'RB', 'WR', 'TE', 'FB', 'FLEX'}
 
 TEAM_TYPO_FIXES = {
     'jacson': 'JAX',
@@ -106,39 +104,3 @@ def make_player_id(name: Optional[str], team: Optional[str]) -> str:
     if not team_token:  # Handle invalid/missing teams
         return normalized_name if normalized_name else ""
     return f"{team_token}_{normalized_name}" if normalized_name else team_token
-
-
-def split_player_id(player_id: Optional[str]) -> Tuple[str, str]:
-    if not player_id or not isinstance(player_id, str):
-        return "", ""
-    if "_" not in player_id:
-        return "", player_id
-    team, name = player_id.split("_", 1)
-    return team, name
-
-
-def team_from_player_id(player_id: Optional[str]) -> str:
-    team, _ = split_player_id(player_id)
-    return canonicalize_team(team)
-
-
-def name_from_player_id(player_id: Optional[str]) -> str:
-    _, name = split_player_id(player_id)
-    return name.replace("_", " ")
-
-
-def normalized_name_from_player_id(player_id: Optional[str]) -> str:
-    return normalize_name(name_from_player_id(player_id))
-
-
-def validate_position(position: Optional[str]) -> str:
-    """Validate and normalize position code."""
-    if not position:
-        return "FLEX"
-    pos = str(position).strip().upper()
-    if pos in VALID_POSITIONS:
-        return pos
-    # Check if it's actually a team code
-    if pos in VALID_NFL_TEAMS:
-        return "FLEX"  # Invalid position, default to FLEX
-    return "FLEX"

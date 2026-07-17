@@ -11,7 +11,7 @@ Example:
 
 import logging
 from functools import lru_cache
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 import pandas as pd
 
@@ -36,23 +36,6 @@ def _load_schedule(season: int) -> pd.DataFrame:
     except Exception as e:
         logger.warning(f"Could not load schedule: {e}")
         return pd.DataFrame()
-
-
-def get_opponent(team: str, week: int, season: int) -> Optional[str]:
-    """Get opponent for a team in a specific week."""
-    schedule = _load_schedule(season)
-    if schedule.empty:
-        return None
-    
-    game = schedule[
-        (schedule['week'] == week) & 
-        ((schedule['home_team'] == team) | (schedule['away_team'] == team))
-    ]
-    if game.empty:
-        return None
-    
-    row = game.iloc[0]
-    return row['away_team'] if row['home_team'] == team else row['home_team']
 
 
 def compute_defense_vs_position_multipliers(

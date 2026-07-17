@@ -142,31 +142,3 @@ def compute_nba_defense_multipliers(
     _defense_cache[cache_key] = multipliers
     _cache_timestamps[cache_key] = time.monotonic()
     return multipliers
-
-
-def get_nba_defense_multiplier(
-    opponent: str,
-    market: str,
-    season: int,
-    through_date: str,
-) -> float:
-    """Get the defense adjustment multiplier for a specific NBA matchup.
-
-    Parameters
-    ----------
-    opponent : str
-        Opponent team abbreviation (e.g. 'BOS').
-    market : str
-        Stat market (pts, reb, ast, fg3m).
-    season : int
-        NBA season year.
-    through_date : str
-        Use data through this date.
-
-    Returns
-    -------
-    float
-        Multiplier (1.0 = league average).
-    """
-    multipliers = compute_nba_defense_multipliers(season, through_date)
-    return multipliers.get((opponent, market), 1.0)
