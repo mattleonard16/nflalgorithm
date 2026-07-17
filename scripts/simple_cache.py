@@ -11,7 +11,7 @@ import time
 from typing import Dict, Any, Optional
 import requests
 import requests_cache
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from config import config
 
@@ -83,7 +83,7 @@ class SimpleCachedClient:
             # Try cache only
             cached_response = self._get_from_cache(url, params)
             if cached_response:
-                cached_response.headers['X-Cache'] = 'HIT-OFFLINE'
+                self._annotate_provenance(cached_response, "HIT-OFFLINE")
                 return cached_response
             else:
                 raise requests.ConnectionError("Offline mode: No cached data available")
@@ -101,8 +101,8 @@ class SimpleCachedClient:
             # Check if we have a fresh cached response
             if not force_refresh and not config.api.force_cache_refresh:
                 cached_response = self._get_from_cache(url, params)
-                if cached_response and not self._is_cache_expired(cached_response):
-                    cached_response.headers['X-Cache'] = 'HIT'
+                if cached_response and not self._is_cache_expired(cached_response, api_type):
+                    self._annotate_provenance(cached_response, "HIT")
                     return cached_response
             
             # Make actual API request
@@ -113,7 +113,11 @@ class SimpleCachedClient:
             response_time = (time.time() - start_time) * 1000
             logger.info(f"API call completed in {response_time:.0f}ms: {url}")
             
-            response.headers['X-Cache'] = 'MISS'
+            if getattr(response, "from_cache", False):
+                status = "STALE-ON-ERROR" if getattr(response, "is_expired", False) else "HIT"
+                self._annotate_provenance(response, status)
+            else:
+                self._annotate_provenance(response, "MISS", created_at=datetime.now(timezone.utc))
             return response
             
         except requests.RequestException as e:
@@ -122,7 +126,7 @@ class SimpleCachedClient:
             cached_response = self._get_from_cache(url, params)
             if cached_response:
                 logger.info(f"Serving stale cache for {url}")
-                cached_response.headers['X-Cache'] = 'STALE-ON-ERROR'
+                self._annotate_provenance(cached_response, "STALE-ON-ERROR")
                 return cached_response
             raise
     
@@ -137,19 +141,55 @@ class SimpleCachedClient:
                 response.status_code = cached_response.status_code
                 response.headers = dict(cached_response.headers)
                 response.url = cached_response.url
+                created_at = getattr(cached_response, "created_at", None)
+                if created_at:
+                    response.headers["X-Cache-Created-At"] = self._as_utc(created_at).isoformat()
                 return response
         except Exception:
             pass
         return None
     
-    def _is_cache_expired(self, response: requests.Response) -> bool:
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @classmethod
+    def _annotate_provenance(
+        cls,
+        response: requests.Response,
+        status: str,
+        *,
+        created_at: datetime | None = None,
+    ) -> None:
+        raw_created = created_at or getattr(response, "created_at", None)
+        if raw_created is None:
+            header_created = response.headers.get("X-Cache-Created-At")
+            if header_created:
+                try:
+                    raw_created = datetime.fromisoformat(header_created.replace("Z", "+00:00"))
+                except ValueError:
+                    raw_created = None
+        observed_at = datetime.now(timezone.utc)
+        normalized_created = cls._as_utc(raw_created) if raw_created else observed_at
+        age_seconds = max(0.0, (observed_at - normalized_created).total_seconds())
+        response.headers["X-Cache"] = status
+        response.headers["X-Cache-Created-At"] = normalized_created.isoformat()
+        response.headers["X-Cache-Age-Seconds"] = f"{age_seconds:.6f}"
+
+    def _is_cache_expired(self, response: requests.Response, api_type: str) -> bool:
         """Check if cached response is expired."""
         try:
-            if 'x-cache-created' in response.headers:
-                created_time = datetime.fromisoformat(response.headers['x-cache-created'])
-                ttl = self._get_ttl_for_api(api_type='generic')
-                expired = (datetime.now() - created_time) > ttl
-                return expired
+            created_header = response.headers.get("X-Cache-Created-At") or response.headers.get(
+                "x-cache-created"
+            )
+            if created_header:
+                created_time = self._as_utc(
+                    datetime.fromisoformat(created_header.replace("Z", "+00:00"))
+                )
+                ttl = self._get_ttl_for_api(api_type=api_type)
+                return (datetime.now(timezone.utc) - created_time) > ttl
         except Exception:
             pass
         return False
