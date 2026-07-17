@@ -109,6 +109,8 @@ class PipelineWorker:
                         on_stage_start=on_stage_start,
                         on_stage_result=on_stage_result,
                         cancellation_requested=execution_should_stop,
+                        run_id=job.run_id,
+                        attempt=job.attempts,
                     )
                 )
             except LeaseLostError as exc:

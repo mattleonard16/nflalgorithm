@@ -12,22 +12,39 @@ import numpy as np
 
 from config import config
 from confidence_engine import score_plays
-from utils.db import get_connection, execute, executemany, _get_backend
+from utils.db import _get_backend, execute, executemany, get_connection
 from value_betting_engine import rank_weekly_value
 
 
-def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -> pd.DataFrame:
-    """Persist materialized value view for dashboard consumption."""
+def materialize_week(
+    season: int,
+    week: int,
+    min_edge: Optional[float] = None,
+    *,
+    run_id: str | None = None,
+    attempt: int | None = None,
+) -> pd.DataFrame:
+    """Build a card directly for debug runs or stage it for a durable attempt."""
+    if (run_id is None) != (attempt is None):
+        raise ValueError("run_id and attempt must be provided together")
+    staged = run_id is not None and attempt is not None
 
     threshold = min_edge if min_edge is not None else config.betting.min_edge_threshold
     ranked = rank_weekly_value(season, week, threshold, place=False)
 
     with get_connection() as conn:
-        execute(
-            "DELETE FROM materialized_value_view WHERE season = ? AND week = ?",
-            (season, week),
-            conn=conn,
-        )
+        if staged:
+            execute(
+                "DELETE FROM pipeline_card_staging WHERE run_id = ? AND attempt = ?",
+                (run_id, attempt),
+                conn=conn,
+            )
+        else:
+            execute(
+                "DELETE FROM materialized_value_view WHERE season = ? AND week = ?",
+                (season, week),
+                conn=conn,
+            )
 
         if ranked.empty:
             conn.commit()
@@ -75,6 +92,31 @@ def materialize_week(season: int, week: int, min_edge: Optional[float] = None) -
             payload['implied_prob'] = None
         if 'implied_prob_under' not in payload.columns:
             payload['implied_prob_under'] = None
+
+        if staged:
+            sql = """
+                INSERT INTO pipeline_card_staging (
+                    run_id, attempt, season, week, player_id, event_id, team, team_odds,
+                    market, sportsbook, line, price, side, mu, sigma, p_win,
+                    implied_prob, implied_prob_under, edge_percentage, expected_roi,
+                    kelly_fraction, stake, confidence_score, confidence_tier, generated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            rows = (
+                (run_id, attempt, *row)
+                for row in payload[
+                    [
+                        'season', 'week', 'player_id', 'event_id', 'team', 'team_odds',
+                        'market', 'sportsbook', 'line', 'price', 'side', 'mu', 'sigma',
+                        'p_win', 'implied_prob', 'implied_prob_under', 'edge_percentage',
+                        'expected_roi', 'kelly_fraction', 'stake', 'confidence_score',
+                        'confidence_tier', 'generated_at',
+                    ]
+                ].itertuples(index=False, name=None)
+            )
+            executemany(sql, rows, conn=conn)
+            conn.commit()
+            return ranked
 
         # SQLite uses `ON CONFLICT(...) DO UPDATE SET col=excluded.col`,
         # MySQL uses `ON DUPLICATE KEY UPDATE col=VALUES(col)`. Same primary

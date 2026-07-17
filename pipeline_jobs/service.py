@@ -736,6 +736,7 @@ class JobService:
         data_health: Mapping[str, Any] | None = None,
     ) -> bool:
         now = _iso()
+        report_payload = dict(report)
         with get_connection() as conn:
             try:
                 cancelled = _lock_active_lease(conn, job, allow_cancel=True)
@@ -761,7 +762,7 @@ class JobService:
                     SET status = 'cancelled', finished_at = ?, report_json = ?, updated_at = ?
                     WHERE run_id = ? AND status = 'cancelling'
                     """,
-                    (now, json.dumps(dict(report), default=str), now, job.run_id),
+                    (now, json.dumps(report_payload, default=str), now, job.run_id),
                     conn=conn,
                 )
                 conn.commit()
@@ -779,6 +780,27 @@ class JobService:
             if affected != 1:
                 conn.rollback()
                 return False
+            materialize_result = next(
+                (
+                    stage
+                    for stage in report_payload.get("stages", [])
+                    if isinstance(stage, Mapping)
+                    and stage.get("stage") == "materialize"
+                    and stage.get("status") == "ok"
+                ),
+                None,
+            )
+            if materialize_result and materialize_result.get("publication") == "staged":
+                from pipeline_jobs.cards import promote_staged_card
+
+                published = promote_staged_card(
+                    conn,
+                    run_id=job.run_id,
+                    attempt=job.attempts,
+                    season=int(job.payload["season"]),
+                    week=int(job.payload["week"]),
+                )
+                report_payload["published_card_size"] = published
             execute(
                 """
                 UPDATE pipeline_runs
@@ -788,7 +810,7 @@ class JobService:
                 """,
                 (
                     now,
-                    json.dumps(dict(report), default=str),
+                    json.dumps(report_payload, default=str),
                     json.dumps(dict(data_health), default=str) if data_health is not None else None,
                     now,
                     job.run_id,

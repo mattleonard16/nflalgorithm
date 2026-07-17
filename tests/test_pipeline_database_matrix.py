@@ -147,7 +147,7 @@ def test_inline_and_worker_paths_produce_equivalent_reports(
             ),
             (
                 "materialize",
-                lambda season, week: {
+                lambda season, week, **_kwargs: {
                     "status": "ok",
                     "stage": "materialize",
                     "card_size": 3,

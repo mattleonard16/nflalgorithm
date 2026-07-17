@@ -328,6 +328,94 @@ def test_cancellation_wins_race_with_fail(job_db) -> None:
     assert current.status != "retry_scheduled"
 
 
+def _insert_staged_card(job) -> None:
+    execute(
+        """
+        INSERT INTO pipeline_card_staging (
+            run_id, attempt, season, week, player_id, event_id, team, team_odds,
+            market, sportsbook, line, price, side, mu, sigma, p_win,
+            implied_prob, implied_prob_under, edge_percentage, expected_roi,
+            kelly_fraction, stake, confidence_score, confidence_tier, generated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            job.run_id,
+            job.attempts,
+            2026,
+            1,
+            "player-1",
+            "event-1",
+            "BUF",
+            None,
+            "passing_yards",
+            "book",
+            275.5,
+            -110,
+            "over",
+            290.0,
+            25.0,
+            0.62,
+            0.5238,
+            0.5238,
+            0.0962,
+            0.18,
+            0.02,
+            20.0,
+            0.82,
+            "A",
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+
+
+def _staged_success_report() -> dict[str, object]:
+    return {
+        "success": True,
+        "stages": [
+            {
+                "stage": "materialize",
+                "status": "ok",
+                "publication": "staged",
+                "card_size": 1,
+            }
+        ],
+        "errors": [],
+    }
+
+
+def test_completion_atomically_promotes_staged_card(job_db) -> None:
+    service = JobService()
+    service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    claimed = service.claim_next("worker")
+    assert claimed is not None
+    _insert_staged_card(claimed)
+
+    assert service.complete(claimed, _staged_success_report()) is True
+
+    assert fetchone(
+        """
+        SELECT COUNT(*), MIN(published_run_id) FROM materialized_value_view
+        WHERE season = 2026 AND week = 1
+        """
+    ) == (1, claimed.run_id)
+
+
+def test_cancellation_during_card_materialization_never_publishes(job_db) -> None:
+    service = JobService()
+    queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    claimed = service.claim_next("worker")
+    assert claimed is not None
+    _insert_staged_card(claimed)
+    service.request_cancel(queued.run_id)
+
+    assert service.complete(claimed, _staged_success_report()) is False
+
+    assert fetchone(
+        "SELECT COUNT(*) FROM materialized_value_view WHERE season = 2026 AND week = 1"
+    ) == (0,)
+    assert service.get_job(queued.job_id).status == "cancelled"
+
+
 def test_explicit_retry_preserves_prior_attempt_history(job_db) -> None:
     service = JobService(retry_base_seconds=0)
     queued = service.create_pipeline_job(

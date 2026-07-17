@@ -140,18 +140,38 @@ def stage_agents(season: int, week: int) -> Dict[str, Any]:
         return {"status": "error", "stage": "agents", "error": str(exc)}
 
 
-def stage_materialize(season: int, week: int) -> Dict[str, Any]:
-    """Materialize final card to value view."""
+def stage_materialize(
+    season: int,
+    week: int,
+    *,
+    run_id: str | None = None,
+    attempt: int | None = None,
+) -> Dict[str, Any]:
+    """Stage a durable card, or publish directly for an explicit inline debug run."""
     try:
         from materialized_value_view import materialize_week
 
-        materialize_week(season, week)
-        count_query = (
-            "SELECT COUNT(*) as n FROM materialized_value_view " "WHERE season = ? AND week = ?"
-        )
-        df = read_dataframe(count_query, params=(season, week))
+        materialize_week(season, week, run_id=run_id, attempt=attempt)
+        if run_id is not None and attempt is not None:
+            count_query = (
+                "SELECT COUNT(*) as n FROM pipeline_card_staging "
+                "WHERE run_id = ? AND attempt = ?"
+            )
+            count_params = (run_id, attempt)
+        else:
+            count_query = (
+                "SELECT COUNT(*) as n FROM materialized_value_view "
+                "WHERE season = ? AND week = ?"
+            )
+            count_params = (season, week)
+        df = read_dataframe(count_query, params=count_params)
         n = int(df.iloc[0]["n"]) if not df.empty else 0
-        return {"status": "ok", "stage": "materialize", "card_size": n}
+        return {
+            "status": "ok",
+            "stage": "materialize",
+            "card_size": n,
+            "publication": "staged" if run_id is not None else "active",
+        }
     except Exception as exc:
         logger.error("Materialization failed: %s", exc)
         return {"status": "error", "stage": "materialize", "error": str(exc)}
@@ -178,6 +198,8 @@ def run_production_pipeline(
     on_stage_start: Callable[[str, int], None] | None = None,
     on_stage_result: Callable[[str, int, Mapping[str, Any]], None] | None = None,
     cancellation_requested: Callable[[], bool] | None = None,
+    run_id: str | None = None,
+    attempt: int | None = None,
 ) -> Dict[str, Any]:
     """Execute the full production pipeline for a season/week.
 
@@ -197,7 +219,16 @@ def run_production_pipeline(
         *[
             PipelineStage(
                 stage_name,
-                partial(stage_fn, season, week),
+                partial(
+                    stage_fn,
+                    season,
+                    week,
+                    **(
+                        {"run_id": run_id, "attempt": attempt}
+                        if stage_name == "materialize" and run_id is not None
+                        else {}
+                    ),
+                ),
             )
             for stage_name, stage_fn in POST_PREPARE_STAGES
         ],
