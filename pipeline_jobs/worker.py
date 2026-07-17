@@ -156,7 +156,22 @@ class PipelineWorker:
                 except Exception as exc:
                     mark_lease_lost(f"final heartbeat raised {type(exc).__name__}: {exc}")
                     return
-                if not self.service.complete(job, report, data_health=health):
+                artifact_uri = report.get("artifact_uri")
+                artifact = (
+                    {
+                        "kind": "run_report",
+                        "uri": str(artifact_uri),
+                        "metadata": {"season": payload["season"], "week": payload["week"]},
+                    }
+                    if artifact_uri
+                    else None
+                )
+                if not self.service.complete(
+                    job,
+                    report,
+                    data_health=health,
+                    artifact=artifact,
+                ):
                     logger.warning("Discarding completion from stale worker for %s", job.run_id)
                     return
                 terminal_written.set()
@@ -166,14 +181,6 @@ class PipelineWorker:
                     value_bets_cache.invalidate_all()
                 except Exception as exc:
                     logger.warning("Value cache invalidation failed for %s: %s", job.run_id, exc)
-                artifact_uri = report.get("artifact_uri")
-                if artifact_uri:
-                    self.service.register_artifact(
-                        run_id=job.run_id,
-                        kind="run_report",
-                        uri=str(artifact_uri),
-                        metadata={"season": payload["season"], "week": payload["week"]},
-                    )
                 return
 
             errors = report.get("errors") or []

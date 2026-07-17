@@ -734,6 +734,7 @@ class JobService:
         report: Mapping[str, Any],
         *,
         data_health: Mapping[str, Any] | None = None,
+        artifact: Mapping[str, Any] | None = None,
     ) -> bool:
         now = _iso()
         report_payload = dict(report)
@@ -801,6 +802,20 @@ class JobService:
                     week=int(job.payload["week"]),
                 )
                 report_payload["published_card_size"] = published
+            if artifact:
+                self._insert_artifact(
+                    conn,
+                    run_id=job.run_id,
+                    kind=str(artifact["kind"]),
+                    uri=str(artifact["uri"]),
+                    checksum=(str(artifact["checksum"]) if artifact.get("checksum") else None),
+                    size_bytes=(
+                        int(artifact["size_bytes"])
+                        if artifact.get("size_bytes") is not None
+                        else None
+                    ),
+                    metadata=artifact.get("metadata"),
+                )
             execute(
                 """
                 UPDATE pipeline_runs
@@ -957,6 +972,31 @@ class JobService:
     def register_artifact(
         self,
         *,
+        job: PipelineJob,
+        kind: str,
+        uri: str,
+        checksum: str | None = None,
+        size_bytes: int | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> str:
+        with get_connection() as conn:
+            _lock_active_lease(conn, job)
+            artifact_id = self._insert_artifact(
+                conn,
+                run_id=job.run_id,
+                kind=kind,
+                uri=uri,
+                checksum=checksum,
+                size_bytes=size_bytes,
+                metadata=metadata,
+            )
+            conn.commit()
+        return artifact_id
+
+    @staticmethod
+    def _insert_artifact(
+        conn: Any,
+        *,
         run_id: str,
         kind: str,
         uri: str,
@@ -981,6 +1021,7 @@ class JobService:
                 json.dumps(dict(metadata or {}), default=str),
                 _iso(),
             ),
+            conn=conn,
         )
         return artifact_id
 

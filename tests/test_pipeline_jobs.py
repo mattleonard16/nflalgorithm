@@ -416,6 +416,52 @@ def test_cancellation_during_card_materialization_never_publishes(job_db) -> Non
     assert service.get_job(queued.job_id).status == "cancelled"
 
 
+def test_completion_registers_artifact_in_same_transaction(job_db) -> None:
+    service = JobService()
+    service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    claimed = service.claim_next("worker")
+    assert claimed is not None
+
+    assert service.complete(
+        claimed,
+        {"success": True, "stages": [], "errors": []},
+        artifact={
+            "kind": "run_report",
+            "uri": "reports/run.json",
+            "metadata": {"season": 2026, "week": 1},
+        },
+    )
+
+    row = fetchone(
+        "SELECT kind, uri, metadata_json FROM pipeline_artifacts WHERE run_id = ?",
+        (claimed.run_id,),
+    )
+    assert row is not None and row[0:2] == ("run_report", "reports/run.json")
+    assert json.loads(row[2]) == {"season": 2026, "week": 1}
+
+
+def test_stale_attempt_cannot_register_artifact(job_db) -> None:
+    service = JobService(retry_base_seconds=0, stale_after_seconds=30)
+    service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    stale = service.claim_next("same-worker")
+    assert stale is not None
+    execute(
+        "UPDATE pipeline_jobs SET heartbeat_at = ? WHERE job_id = ?",
+        ((datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(), stale.job_id),
+    )
+    replacement = service.claim_next("same-worker")
+    assert replacement is not None
+
+    with pytest.raises(RuntimeError, match="lease is no longer active"):
+        service.register_artifact(
+            job=stale,
+            kind="run_report",
+            uri="reports/stale.json",
+        )
+
+    assert fetchone("SELECT COUNT(*) FROM pipeline_artifacts") == (0,)
+
+
 def test_explicit_retry_preserves_prior_attempt_history(job_db) -> None:
     service = JobService(retry_base_seconds=0)
     queued = service.create_pipeline_job(
