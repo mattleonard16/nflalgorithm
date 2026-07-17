@@ -35,7 +35,9 @@ def test_job_schema_is_part_of_normal_migrations(job_db) -> None:
     assert table_exists("pipeline_stage_runs")
     assert table_exists("pipeline_artifacts")
     assert table_exists("pipeline_odds_validations")
+    assert table_exists("pipeline_card_staging")
     assert "claim_token" in get_table_columns("pipeline_jobs")
+    assert "published_run_id" in get_table_columns("materialized_value_view")
 
 
 def test_stage_history_primary_key_is_attempt_specific(job_db) -> None:

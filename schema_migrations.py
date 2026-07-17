@@ -205,6 +205,7 @@ class MigrationManager:
                 kelly_fraction REAL NOT NULL,
                 stake REAL NOT NULL,
                 generated_at TEXT NOT NULL,
+                published_run_id VARCHAR(36),
                 PRIMARY KEY (season, week, player_id, market, sportsbook, event_id, side)
             )
             """,
@@ -595,6 +596,40 @@ class MigrationManager:
                 metrics_json TEXT NOT NULL,
                 validated_at VARCHAR(40) NOT NULL,
                 PRIMARY KEY (run_id, attempt),
+                FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS pipeline_card_staging (
+                run_id VARCHAR(36) NOT NULL,
+                attempt INTEGER NOT NULL,
+                season INTEGER NOT NULL,
+                week INTEGER NOT NULL,
+                player_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                team TEXT,
+                team_odds TEXT,
+                market TEXT NOT NULL,
+                sportsbook TEXT NOT NULL,
+                line REAL NOT NULL,
+                price INTEGER NOT NULL,
+                side VARCHAR(8) NOT NULL,
+                mu REAL NOT NULL,
+                sigma REAL NOT NULL,
+                p_win REAL NOT NULL,
+                implied_prob REAL,
+                implied_prob_under REAL,
+                edge_percentage REAL NOT NULL,
+                expected_roi REAL NOT NULL,
+                kelly_fraction REAL NOT NULL,
+                stake REAL NOT NULL,
+                confidence_score REAL,
+                confidence_tier TEXT,
+                generated_at TEXT NOT NULL,
+                PRIMARY KEY (
+                    run_id, attempt, season, week, player_id, market,
+                    sportsbook, event_id, side
+                ),
                 FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
             )
             """,
@@ -1031,6 +1066,12 @@ class MigrationManager:
                 cursor.execute(
                     "ALTER TABLE materialized_value_view ADD COLUMN implied_prob_under REAL"
                 )
+            if not column_exists(
+                "materialized_value_view", "published_run_id", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE materialized_value_view ADD COLUMN published_run_id VARCHAR(36)"
+                )
             # T0 #4 (cont.): widen PRIMARY KEY to include `side`. SQLite ALTER cannot
             # modify PK, so detect old-shape via sqlite_master DDL and rebuild.
             self._rebuild_mvv_pk_if_needed(cursor)
@@ -1419,6 +1460,7 @@ class MigrationManager:
                 generated_at TEXT NOT NULL,
                 confidence_score REAL,
                 confidence_tier TEXT,
+                published_run_id VARCHAR(36),
                 PRIMARY KEY (season, week, player_id, market, sportsbook, event_id, side)
             )
             """)
@@ -1459,6 +1501,11 @@ class MigrationManager:
                     "pipeline_odds_validations",
                     "idx_pipeline_odds_validations_result",
                     "valid, reason_code, validated_at",
+                ),
+                (
+                    "pipeline_card_staging",
+                    "idx_pipeline_card_staging_run",
+                    "run_id, attempt, season, week",
                 ),
             ):
                 cursor.execute(
@@ -1570,6 +1617,10 @@ class MigrationManager:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_pipeline_odds_validations_result "
             "ON pipeline_odds_validations(valid, reason_code, validated_at)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pipeline_card_staging_run "
+            "ON pipeline_card_staging(run_id, attempt, season, week)"
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_nba_game_logs_player ON nba_player_game_logs(player_id, game_date)"
