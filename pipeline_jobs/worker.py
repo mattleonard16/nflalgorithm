@@ -71,15 +71,15 @@ class PipelineWorker:
         lease_lost = threading.Event()
         terminal_written = threading.Event()
         lease_operation_lock = threading.Lock()
+        lease_loss_lock = threading.Lock()
 
         def mark_lease_lost(reason: str) -> None:
-            if terminal_written.is_set():
-                return
-            first_loss = not lease_lost.is_set()
-            if first_loss:
-                logger.error("Pipeline job %s lost its lease: %s", job.job_id, reason)
-            lease_lost.set()
-            if first_loss and self.lease_loss_handler:
+            with lease_loss_lock:
+                if terminal_written.is_set() or lease_lost.is_set():
+                    return
+                lease_lost.set()
+            logger.error("Pipeline job %s lost its lease: %s", job.job_id, reason)
+            if self.lease_loss_handler:
                 self.lease_loss_handler(reason)
 
         def ensure_lease() -> None:
