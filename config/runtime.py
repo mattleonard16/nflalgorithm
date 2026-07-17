@@ -16,6 +16,14 @@ def env_flag(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def env_int(name: str, default: int) -> int:
+    return int(os.getenv(name, str(default)))
+
+
+def env_float(name: str, default: float) -> float:
+    return float(os.getenv(name, str(default)))
+
+
 database = SimpleNamespace(
     backend=os.getenv("DB_BACKEND", "sqlite"),
     path=os.getenv("SQLITE_DB_PATH", str(PROJECT_ROOT / "nfl_data.db")),
@@ -85,6 +93,17 @@ pipeline = SimpleNamespace(
     update_interval_minutes=15,
     weather_update_interval_minutes=60,
     injury_update_interval_minutes=30,
+    odds_max_age_seconds=env_int("NFL_ODDS_MAX_AGE_SECONDS", 300),
+    odds_min_event_coverage=env_float("NFL_ODDS_MIN_EVENT_COVERAGE", 1.0),
+    odds_min_market_coverage=env_float("NFL_ODDS_MIN_MARKET_COVERAGE", 1.0),
+    odds_required_markets=tuple(
+        value.strip()
+        for value in os.getenv(
+            "NFL_ODDS_REQUIRED_MARKETS",
+            "player_pass_yds,player_rush_yds,player_rec_yds",
+        ).split(",")
+        if value.strip()
+    ),
 )
 
 integration = SimpleNamespace(
