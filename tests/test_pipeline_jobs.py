@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
@@ -94,6 +95,56 @@ def test_idempotency_is_principal_scoped_and_payload_bound(job_db) -> None:
             requested_by="operator-a",
             idempotency_key="refresh",
         )
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"priority": 2, "max_attempts": 3},
+        {"priority": 1, "max_attempts": 4},
+    ],
+)
+def test_idempotency_binds_priority_and_retry_budget(job_db, override) -> None:
+    service = JobService()
+    service.create_pipeline_job(
+        season=2026,
+        week=1,
+        source="api",
+        requested_by="operator",
+        priority=1,
+        max_attempts=3,
+        idempotency_key="refresh",
+    )
+
+    with pytest.raises(ValueError, match="different request"):
+        service.create_pipeline_job(
+            season=2026,
+            week=1,
+            source="api",
+            requested_by="operator",
+            idempotency_key="refresh",
+            **override,
+        )
+
+
+def test_concurrent_duplicate_idempotent_creation_returns_one_job(job_db) -> None:
+    def create(_index: int):
+        return JobService().create_pipeline_job(
+            season=2026,
+            week=1,
+            source="api",
+            requested_by="operator",
+            priority=2,
+            max_attempts=4,
+            idempotency_key="same-request",
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        jobs = list(pool.map(create, range(8)))
+
+    assert len({job.job_id for job in jobs}) == 1
+    assert fetchone("SELECT COUNT(*) FROM pipeline_jobs") == (1,)
+    assert fetchone("SELECT COUNT(*) FROM pipeline_runs") == (1,)
 
 
 @pytest.mark.parametrize("season,week", [(1999, 1), (2101, 1), (2026, 0), (2026, 23)])

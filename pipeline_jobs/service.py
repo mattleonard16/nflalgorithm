@@ -143,6 +143,21 @@ class JobService:
         self.retry_base_seconds = max(0, retry_base_seconds)
         self.stale_after_seconds = max(30, stale_after_seconds)
 
+    @staticmethod
+    def _validate_idempotent_match(
+        job: PipelineJob,
+        *,
+        payload: dict[str, Any],
+        priority: int,
+        max_attempts: int,
+    ) -> None:
+        if (
+            job.payload != payload
+            or job.priority != priority
+            or job.max_attempts != max_attempts
+        ):
+            raise ValueError("idempotency key was already used for a different request")
+
     def create_pipeline_job(
         self,
         *,
@@ -166,13 +181,14 @@ class JobService:
         if not 1 <= max_attempts <= 10:
             raise ValueError("max_attempts must be between 1 and 10")
 
+        request_payload = {
+            "season": season,
+            "week": week,
+            "skip_ingest": bool(skip_ingest),
+            "skip_odds": bool(skip_odds),
+        }
         payload = json.dumps(
-            {
-                "season": season,
-                "week": week,
-                "skip_ingest": bool(skip_ingest),
-                "skip_odds": bool(skip_odds),
-            },
+            request_payload,
             separators=(",", ":"),
             sort_keys=True,
         )
@@ -189,8 +205,12 @@ class JobService:
             )
             if existing:
                 job = PipelineJob.from_row(existing)
-                if job.payload != json.loads(payload):
-                    raise ValueError("idempotency key was already used for a different request")
+                self._validate_idempotent_match(
+                    job,
+                    payload=request_payload,
+                    priority=priority,
+                    max_attempts=max_attempts,
+                )
                 return job
 
         job_id = str(uuid.uuid4())
@@ -240,8 +260,12 @@ class JobService:
                 )
                 if existing:
                     job = PipelineJob.from_row(existing)
-                    if job.payload != json.loads(payload):
-                        raise ValueError("idempotency key was already used for a different request")
+                    self._validate_idempotent_match(
+                        job,
+                        payload=request_payload,
+                        priority=priority,
+                        max_attempts=max_attempts,
+                    )
                     return job
             raise
 
