@@ -187,6 +187,7 @@ def stage_materialize(
                     "Final card staging requires a valid odds snapshot for this attempt"
                 )
         materialize_week(season, week, run_id=run_id, attempt=attempt)
+        count_params: tuple[Any, ...]
         if run_id is not None and attempt is not None:
             count_query = (
                 "SELECT COUNT(*) as n FROM pipeline_card_staging "

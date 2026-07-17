@@ -45,7 +45,8 @@ def validate_mysql_server_version(version: str) -> tuple[int, int, int]:
     match = re.match(r"^(\d+)\.(\d+)\.(\d+)", normalized)
     if not match:
         raise RuntimeError(f"Could not parse MySQL server version {normalized!r}")
-    parsed = tuple(int(part) for part in match.groups())
+    major, minor, patch = (int(part) for part in match.groups())
+    parsed = (major, minor, patch)
     if parsed < MIN_MYSQL_VERSION:
         raise RuntimeError(f"MySQL 8.0+ is required; server reported {normalized!r}")
     return parsed
