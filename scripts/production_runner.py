@@ -27,7 +27,7 @@ from typing import Any, Dict
 
 from config import config
 from pipelines.orchestrator import PipelineStage, run_stages
-from utils.db import read_dataframe
+from utils.db import fetchone, read_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +168,18 @@ def stage_materialize(
     try:
         from materialized_value_view import materialize_week
 
+        if run_id is not None and attempt is not None:
+            validation = fetchone(
+                """
+                SELECT valid FROM pipeline_odds_validations
+                WHERE run_id = ? AND attempt = ?
+                """,
+                (run_id, attempt),
+            )
+            if not validation or not bool(validation[0]):
+                raise RuntimeError(
+                    "Final card staging requires a valid odds snapshot for this attempt"
+                )
         materialize_week(season, week, run_id=run_id, attempt=attempt)
         if run_id is not None and attempt is not None:
             count_query = (

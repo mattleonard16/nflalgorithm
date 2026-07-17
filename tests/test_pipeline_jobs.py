@@ -345,6 +345,14 @@ def test_cancellation_wins_race_with_fail(job_db) -> None:
 def _insert_staged_card(job) -> None:
     execute(
         """
+        INSERT INTO pipeline_odds_validations
+            (run_id, attempt, valid, reason_code, reason, metrics_json, validated_at)
+        VALUES (?, ?, 1, 'validated', 'valid', '{}', ?)
+        """,
+        (job.run_id, job.attempts, datetime.now(timezone.utc).isoformat()),
+    )
+    execute(
+        """
         INSERT INTO pipeline_card_staging (
             run_id, attempt, season, week, player_id, event_id, team, team_odds,
             market, sportsbook, line, price, side, mu, sigma, p_win,
@@ -428,6 +436,29 @@ def test_cancellation_during_card_materialization_never_publishes(job_db) -> Non
         "SELECT COUNT(*) FROM materialized_value_view WHERE season = 2026 AND week = 1"
     ) == (0,)
     assert service.get_job(queued.job_id).status == "cancelled"
+
+
+def test_invalid_odds_cannot_be_promoted_even_with_staged_rows(job_db) -> None:
+    service = JobService()
+    queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    claimed = service.claim_next("worker")
+    assert claimed is not None
+    _insert_staged_card(claimed)
+    execute(
+        """
+        UPDATE pipeline_odds_validations
+        SET valid = 0, reason_code = 'stale_cache', reason = 'stale'
+        WHERE run_id = ? AND attempt = ?
+        """,
+        (claimed.run_id, claimed.attempts),
+    )
+
+    assert service.complete(claimed, _staged_success_report()) is False
+
+    assert service.get_job(queued.job_id).status == "failed"
+    assert fetchone(
+        "SELECT COUNT(*) FROM materialized_value_view WHERE season = 2026 AND week = 1"
+    ) == (0,)
 
 
 def test_completion_registers_artifact_in_same_transaction(job_db) -> None:

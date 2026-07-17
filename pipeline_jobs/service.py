@@ -818,6 +818,23 @@ class JobService:
             if materialize_result and materialize_result.get("publication") == "staged":
                 from pipeline_jobs.cards import promote_staged_card
 
+                validation = fetchone(
+                    """
+                    SELECT valid FROM pipeline_odds_validations
+                    WHERE run_id = ? AND attempt = ?
+                    """,
+                    (job.run_id, job.attempts),
+                    conn=conn,
+                )
+                if not validation or not bool(validation[0]):
+                    conn.rollback()
+                    self.fail(
+                        job,
+                        "final card publication rejected: odds validation is missing or invalid",
+                        report_payload,
+                        retryable=False,
+                    )
+                    return False
                 published = promote_staged_card(
                     conn,
                     run_id=job.run_id,
