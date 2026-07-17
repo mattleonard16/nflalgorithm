@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -211,6 +212,65 @@ def test_expired_worker_lease_is_reclaimed_and_fenced(job_db) -> None:
     assert second_claim.worker_id == "replacement-worker"
     assert service.complete(first_claim, {"success": True}) is False
     assert service.get_job(queued.job_id).status == "running"
+
+
+def test_reclaimed_attempt_is_fenced_even_with_same_worker_id(job_db) -> None:
+    service = JobService(retry_base_seconds=0, stale_after_seconds=30)
+    queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    stale = service.claim_next("reused-worker")
+    assert stale is not None
+    execute(
+        "UPDATE pipeline_jobs SET heartbeat_at = ? WHERE job_id = ?",
+        ((datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(), queued.job_id),
+    )
+
+    current = service.claim_next("reused-worker")
+
+    assert current is not None and current.claim_token != stale.claim_token
+    assert service.complete(stale, {"success": True}) is False
+    assert service.get_job(queued.job_id).status == "running"
+
+
+def test_worker_identity_comparison_is_case_sensitive(job_db) -> None:
+    service = JobService()
+    service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    claimed = service.claim_next("Worker-A")
+    assert claimed is not None
+
+    case_equivalent = replace(claimed, worker_id="worker-a")
+
+    assert service.heartbeat(case_equivalent) is False
+    assert service.heartbeat(claimed) is True
+
+
+def test_cancellation_wins_race_with_complete(job_db) -> None:
+    service = JobService()
+    queued = service.create_pipeline_job(season=2026, week=1, source="api")
+    claimed = service.claim_next("worker")
+    assert claimed is not None
+    service.request_cancel(queued.run_id)
+
+    assert service.complete(claimed, {"success": True}) is False
+    current = service.get_job(queued.job_id)
+    assert current is not None and current.status == "cancelled"
+    assert fetchone("SELECT status FROM pipeline_runs WHERE run_id = ?", (queued.run_id,)) == (
+        "cancelled",
+    )
+
+
+def test_cancellation_wins_race_with_fail(job_db) -> None:
+    service = JobService(retry_base_seconds=0)
+    queued = service.create_pipeline_job(
+        season=2026, week=1, source="api", max_attempts=3
+    )
+    claimed = service.claim_next("worker")
+    assert claimed is not None
+    service.request_cancel(queued.run_id)
+
+    assert service.fail(claimed, "provider unavailable", retryable=True) == "cancelled"
+    current = service.get_job(queued.job_id)
+    assert current is not None and current.status == "cancelled"
+    assert current.status != "retry_scheduled"
 
 
 def test_explicit_retry_clears_prior_attempt_read_models(job_db) -> None:

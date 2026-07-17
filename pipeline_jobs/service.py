@@ -355,19 +355,19 @@ class JobService:
                 else:
                     status = run_status = "failed"
                 affected = execute(
-                    """
+                    f"""
                     UPDATE pipeline_jobs
                     SET status = ?, available_at = ?, claimed_at = NULL, heartbeat_at = NULL,
                         worker_id = NULL, claim_token = NULL, updated_at = ?, last_error = ?
-                    WHERE job_id = ? AND status = 'running' AND worker_id = ?
+                    WHERE {_lease_clause(conn)} AND heartbeat_at < ?
                     """,
                     (
                         status,
                         now,
                         now,
                         "worker heartbeat lease expired",
-                        job.job_id,
-                        job.worker_id,
+                        *_lease_values(job),
+                        cutoff,
                     ),
                     conn=conn,
                 )
@@ -672,13 +672,43 @@ class JobService:
     ) -> bool:
         now = _iso()
         with get_connection() as conn:
+            try:
+                cancelled = _lock_active_lease(conn, job, allow_cancel=True)
+            except LeaseLostError:
+                return False
+            if cancelled:
+                affected = execute(
+                    f"""
+                    UPDATE pipeline_jobs
+                    SET status = 'cancelled', heartbeat_at = NULL, claim_token = NULL,
+                        updated_at = ?
+                    WHERE {_lease_clause(conn)} AND cancel_requested = 1
+                    """,
+                    (now, *_lease_values(job)),
+                    conn=conn,
+                )
+                if affected != 1:
+                    conn.rollback()
+                    return False
+                execute(
+                    """
+                    UPDATE pipeline_runs
+                    SET status = 'cancelled', finished_at = ?, report_json = ?, updated_at = ?
+                    WHERE run_id = ? AND status = 'cancelling'
+                    """,
+                    (now, json.dumps(dict(report), default=str), now, job.run_id),
+                    conn=conn,
+                )
+                conn.commit()
+                return False
             affected = execute(
-                """
+                f"""
                 UPDATE pipeline_jobs
-                SET status = 'completed', heartbeat_at = ?, updated_at = ?, last_error = NULL
-                WHERE job_id = ? AND worker_id = ? AND status = 'running'
+                SET status = 'completed', heartbeat_at = ?, claim_token = NULL,
+                    updated_at = ?, last_error = NULL
+                WHERE {_lease_clause(conn)} AND cancel_requested = 0
                 """,
-                (now, now, job.job_id, job.worker_id),
+                (now, now, *_lease_values(job)),
                 conn=conn,
             )
             if affected != 1:
@@ -706,12 +736,17 @@ class JobService:
     def cancel_running(self, job: PipelineJob, report: Mapping[str, Any] | None = None) -> bool:
         now = _iso()
         with get_connection() as conn:
+            try:
+                _lock_active_lease(conn, job, allow_cancel=True)
+            except LeaseLostError:
+                return False
             affected = execute(
-                """
-                UPDATE pipeline_jobs SET status = 'cancelled', updated_at = ?
-                WHERE job_id = ? AND worker_id = ? AND status = 'running'
+                f"""
+                UPDATE pipeline_jobs
+                SET status = 'cancelled', heartbeat_at = NULL, claim_token = NULL, updated_at = ?
+                WHERE {_lease_clause(conn)}
                 """,
-                (now, job.job_id, job.worker_id),
+                (now, *_lease_values(job)),
                 conn=conn,
             )
             if affected != 1:
@@ -737,38 +772,79 @@ class JobService:
         retryable: bool = True,
     ) -> str:
         now = _utcnow()
-        current = self.get_job(job.job_id) or job
-        retrying = (
-            retryable and current.attempts < current.max_attempts and not current.cancel_requested
-        )
-        status = "retry_scheduled" if retrying else "failed"
-        delay = self.retry_base_seconds * (2 ** max(0, current.attempts - 1))
-        available_at = _iso(now + timedelta(seconds=delay))
-        run_status = "queued" if retrying else "failed"
         with get_connection() as conn:
+            cancelled = _lock_active_lease(conn, job, allow_cancel=True)
+            budget_row = fetchone(
+                "SELECT max_attempts FROM pipeline_jobs WHERE job_id = ?",
+                (job.job_id,),
+                conn=conn,
+            )
+            if not budget_row:
+                conn.rollback()
+                raise LeaseLostError("worker attempt lease is no longer active")
+            max_attempts = int(budget_row[0])
+            if cancelled:
+                affected = execute(
+                    f"""
+                    UPDATE pipeline_jobs
+                    SET status = 'cancelled', heartbeat_at = NULL, claim_token = NULL,
+                        updated_at = ?, last_error = ?
+                    WHERE {_lease_clause(conn)} AND cancel_requested = 1
+                    """,
+                    (_iso(now), error[:2000], *_lease_values(job)),
+                    conn=conn,
+                )
+                if affected != 1:
+                    conn.rollback()
+                    raise LeaseLostError("worker attempt lease was lost during cancellation")
+                execute(
+                    """
+                    UPDATE pipeline_runs
+                    SET status = 'cancelled', error_message = ?, finished_at = ?,
+                        report_json = ?, updated_at = ? WHERE run_id = ?
+                    """,
+                    (
+                        error[:2000],
+                        _iso(now),
+                        json.dumps(dict(report or {}), default=str),
+                        _iso(now),
+                        job.run_id,
+                    ),
+                    conn=conn,
+                )
+                conn.commit()
+                return "cancelled"
+
+            retrying = retryable and job.attempts < max_attempts
+            status = "retry_scheduled" if retrying else "failed"
+            delay = self.retry_base_seconds * (2 ** max(0, job.attempts - 1))
+            available_at = _iso(now + timedelta(seconds=delay))
+            run_status = "queued" if retrying else "failed"
             affected = execute(
-                """
+                f"""
                 UPDATE pipeline_jobs
                 SET status = ?, available_at = ?, claimed_at = NULL, heartbeat_at = NULL,
                     worker_id = NULL, claim_token = NULL, updated_at = ?, last_error = ?
-                WHERE job_id = ? AND worker_id = ? AND status = 'running'
+                WHERE {_lease_clause(conn)} AND cancel_requested = 0
                 """,
                 (
                     status,
                     available_at,
                     _iso(now),
                     error[:2000],
-                    job.job_id,
-                    job.worker_id,
+                    *_lease_values(job),
                 ),
                 conn=conn,
             )
             if affected != 1:
                 conn.rollback()
-                return current.status
+                raise LeaseLostError("worker attempt lease was lost during failure")
             completed = fetchone(
-                "SELECT COUNT(*) FROM pipeline_stage_runs WHERE run_id = ? AND status = 'completed'",
-                (job.run_id,),
+                """
+                SELECT COUNT(*) FROM pipeline_stage_runs
+                WHERE run_id = ? AND attempt = ? AND status = 'completed'
+                """,
+                (job.run_id, job.attempts),
                 conn=conn,
             )
             execute(
