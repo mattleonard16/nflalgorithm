@@ -363,6 +363,16 @@ class NFLPropScraper:
         response_ages: List[float] = []
         response_timestamps: List[str] = []
         covered_pairs: set[tuple[str, str]] = set()
+        self.last_weekly_audit = {
+            "source_statuses": source_statuses,
+            "response_ages_seconds": response_ages,
+            "response_timestamps": response_timestamps,
+            "snapshot_at": datetime.now(timezone.utc).isoformat(),
+            "scheduled_events": 0,
+            "covered_events": 0,
+            "covered_event_markets": 0,
+            "odds_rows": 0,
+        }
         fallback_snapshot = self._load_snapshot(load_json_path)
         if not self.odds_api_key:
             if not allow_synthetic:
@@ -470,6 +480,7 @@ class NFLPropScraper:
             """,
             params=(season, week),
         )
+        self.last_weekly_audit["scheduled_events"] = len(schedule)
         events = self._select_scheduled_events(events, schedule)
 
         stat_mapping = {
@@ -632,6 +643,11 @@ class NFLPropScraper:
 
                 if len(results) > rows_before_market:
                     covered_pairs.add((str(event_id), market))
+                    self.last_weekly_audit["covered_events"] = len(
+                        {covered_event for covered_event, _market in covered_pairs}
+                    )
+                    self.last_weekly_audit["covered_event_markets"] = len(covered_pairs)
+                    self.last_weekly_audit["odds_rows"] = len(results)
 
                 time.sleep(0.2)
         if save_json_path:
