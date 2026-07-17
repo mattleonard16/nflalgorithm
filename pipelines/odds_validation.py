@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 from config import config
 
@@ -51,6 +52,8 @@ def validate_odds_snapshot(
     required_event_markets = scheduled_events * len(required.required_markets)
     odds_rows = int(observed.get("odds_rows", 0))
     response_ages = [float(value) for value in observed.get("response_ages_seconds", [])]
+    responses_observed = int(observed.get("responses_observed", len(response_ages)))
+    responses_with_age = len(response_ages)
     max_response_age = max(response_ages) if response_ages else None
     event_coverage = covered_events / scheduled_events if scheduled_events else 0.0
     market_coverage = (
@@ -59,18 +62,29 @@ def validate_odds_snapshot(
 
     reason_code = "validated"
     reason = "Odds snapshot meets freshness and coverage requirements"
-    if not source_statuses or not response_ages:
+    if not source_statuses or responses_observed <= 0 or not response_ages:
         reason_code = "provenance_missing"
         reason = "Odds response provenance or age is missing"
+    elif responses_with_age != responses_observed:
+        reason_code = "provenance_incomplete"
+        reason = (
+            f"Only {responses_with_age}/{responses_observed} odds responses have freshness metadata"
+        )
+    elif any(not math.isfinite(age) or age < 0 for age in response_ages):
+        reason_code = "invalid_response_age"
+        reason = "Odds response age metadata is invalid"
     elif any(status in {"HIT-OFFLINE", "FALLBACK-SNAPSHOT"} for status in source_statuses):
         reason_code = "offline_cache"
         reason = "Offline cache cannot authorize a production betting card"
     elif any("STALE" in status for status in source_statuses):
         reason_code = "stale_cache"
         reason = "Stale-on-error cache cannot authorize a production betting card"
+    elif any(status not in {"HIT", "MISS"} for status in source_statuses):
+        reason_code = "untrusted_source"
+        reason = f"Untrusted odds response provenance: {', '.join(source_statuses)}"
     elif max_response_age is None or max_response_age > required.max_age_seconds:
         reason_code = "stale_snapshot"
-        reason = f"Odds response age {max_response_age!r}s exceeds " f"{required.max_age_seconds}s"
+        reason = f"Odds response age {max_response_age!r}s exceeds {required.max_age_seconds}s"
     elif scheduled_events <= 0:
         reason_code = "schedule_missing"
         reason = "No scheduled events were available for odds coverage validation"
@@ -94,6 +108,8 @@ def validate_odds_snapshot(
         "source_statuses": source_statuses,
         "snapshot_at": observed.get("snapshot_at"),
         "max_response_age_seconds": max_response_age,
+        "responses_observed": responses_observed,
+        "responses_with_age": responses_with_age,
         "scheduled_events": scheduled_events,
         "covered_events": covered_events,
         "event_coverage": event_coverage,

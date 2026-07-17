@@ -15,6 +15,7 @@ def valid_odds_audit() -> dict[str, object]:
     return {
         "source_statuses": ["MISS"],
         "response_ages_seconds": [1.0],
+        "responses_observed": 1,
         "snapshot_at": "2026-09-01T12:00:00+00:00",
         "scheduled_events": 1,
         "covered_events": 1,
@@ -221,8 +222,26 @@ def test_odds_provider_failure_still_records_validation_reason(monkeypatch) -> N
     result = production_runner.stage_odds(2026, 1)
 
     assert result["status"] == "error"
-    assert result["odds_validation"]["reason_code"] == "stale_cache"
+    assert result["odds_validation"]["reason_code"] == "provider_error"
+    assert result["odds_validation"]["snapshot_reason_code"] == "stale_cache"
     assert result["odds_validation"]["provider_error"] == "provider unavailable"
+
+
+def test_odds_scraper_initialization_failure_is_fail_closed(monkeypatch) -> None:
+    from scripts import prop_line_scraper
+
+    class FailingScraper:
+        def __init__(self):
+            raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(prop_line_scraper, "NFLPropScraper", FailingScraper)
+
+    result = production_runner.stage_odds(2026, 1)
+
+    assert result["status"] == "error"
+    assert result["odds_validation"]["valid"] is False
+    assert result["odds_validation"]["reason_code"] == "provider_error"
+    assert result["odds_validation"]["snapshot_reason_code"] == "provenance_missing"
 
 
 def test_weekly_report_refresh_uses_prepare_then_live_odds(monkeypatch) -> None:

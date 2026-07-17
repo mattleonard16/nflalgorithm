@@ -362,12 +362,14 @@ class NFLPropScraper:
         source_statuses: set[str] = set()
         response_ages: List[float] = []
         response_timestamps: List[str] = []
+        responses_observed = 0
         covered_pairs: set[tuple[str, str]] = set()
         self.last_weekly_audit = {
             "source_statuses": source_statuses,
             "response_ages_seconds": response_ages,
             "response_timestamps": response_timestamps,
             "snapshot_at": datetime.now(timezone.utc).isoformat(),
+            "responses_observed": 0,
             "scheduled_events": 0,
             "covered_events": 0,
             "covered_event_markets": 0,
@@ -452,6 +454,8 @@ class NFLPropScraper:
             events_response = self.client.get(events_url, params=events_params, api_type="odds")
             events_response.raise_for_status()
             status, age, created_at = self._response_provenance(events_response)
+            responses_observed += 1
+            self.last_weekly_audit["responses_observed"] = responses_observed
             source_statuses.add(status)
             if age is not None:
                 response_ages.append(age)
@@ -511,6 +515,8 @@ class NFLPropScraper:
                         response = self.client.get(url, params=params, api_type="odds")
                         response.raise_for_status()
                         status, age, created_at = self._response_provenance(response)
+                        responses_observed += 1
+                        self.last_weekly_audit["responses_observed"] = responses_observed
                         source_statuses.add(status)
                         if age is not None:
                             response_ages.append(age)
@@ -657,6 +663,7 @@ class NFLPropScraper:
             "response_ages_seconds": response_ages,
             "response_timestamps": response_timestamps,
             "snapshot_at": datetime.now(timezone.utc).isoformat(),
+            "responses_observed": responses_observed,
             "scheduled_events": len(schedule),
             "covered_events": len({event_id for event_id, _market in covered_pairs}),
             "covered_event_markets": len(covered_pairs),

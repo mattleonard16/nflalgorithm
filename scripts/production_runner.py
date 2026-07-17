@@ -54,8 +54,9 @@ def stage_odds(season: int, week: int) -> Dict[str, Any]:
     from pipelines.odds_validation import validate_odds_snapshot
     from scripts.prop_line_scraper import NFLPropScraper
 
-    scraper = NFLPropScraper()
+    scraper = None
     try:
+        scraper = NFLPropScraper()
         odds = scraper.run_weekly_update(
             week,
             season,
@@ -65,6 +66,11 @@ def stage_odds(season: int, week: int) -> Dict[str, Any]:
         observed = dict(getattr(scraper, "last_weekly_audit", {}) or {})
         observed.setdefault("odds_rows", 0)
         validation = validate_odds_snapshot(observed)
+        validation["snapshot_reason_code"] = validation["reason_code"]
+        validation["snapshot_reason"] = validation["reason"]
+        validation["valid"] = False
+        validation["reason_code"] = "provider_error"
+        validation["reason"] = f"Live odds refresh failed: {exc}"
         validation["provider_error"] = str(exc)
         logger.error("Odds refresh failed: %s", exc)
         return {
