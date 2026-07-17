@@ -273,7 +273,7 @@ def test_cancellation_wins_race_with_fail(job_db) -> None:
     assert current.status != "retry_scheduled"
 
 
-def test_explicit_retry_clears_prior_attempt_read_models(job_db) -> None:
+def test_explicit_retry_preserves_prior_attempt_history(job_db) -> None:
     service = JobService(retry_base_seconds=0)
     queued = service.create_pipeline_job(
         season=2026,
@@ -294,11 +294,73 @@ def test_explicit_retry_clears_prior_attempt_read_models(job_db) -> None:
 
     service.retry(queued.run_id)
 
-    assert fetchone(
-        "SELECT status, result_json FROM pipeline_stage_runs WHERE run_id = ?",
+    stage = fetchone(
+        """
+        SELECT attempt, status, result_json, finished_at
+        FROM pipeline_stage_runs WHERE run_id = ?
+        """,
         (queued.run_id,),
-    ) == ("queued", None)
+    )
+    assert stage is not None
+    assert stage[0:2] == (1, "completed")
+    assert json.loads(stage[2])["status"] == "ok"
+    assert stage[3] is not None
     assert fetchone(
         "SELECT stages_completed, report_json, data_health_json FROM pipeline_runs WHERE run_id = ?",
         (queued.run_id,),
     ) == (0, None, None)
+
+
+def test_retry_records_a_new_stage_attempt_without_overwriting_history(job_db) -> None:
+    service = JobService(retry_base_seconds=0)
+    service.create_pipeline_job(
+        season=2026, week=1, source="api", max_attempts=2
+    )
+    first = service.claim_next("worker")
+    assert first is not None
+    service.record_stage_started(first, "odds", 1)
+    service.record_stage_result(
+        first, "odds", 1, {"status": "error", "stage": "odds", "error": "down"}
+    )
+    service.fail(first, "down")
+    second = service.claim_next("worker")
+    assert second is not None
+    service.record_stage_started(second, "odds", 1)
+
+    rows = fetchall(
+        """
+        SELECT attempt, status, finished_at FROM pipeline_stage_runs
+        WHERE run_id = ? AND stage_name = 'odds' ORDER BY attempt
+        """,
+        (first.run_id,),
+    )
+    assert rows[0][0:2] == (1, "failed")
+    assert rows[0][2] is not None
+    assert rows[1][0:2] == (2, "running")
+
+
+def test_terminal_stale_recovery_closes_running_stage(job_db) -> None:
+    service = JobService(retry_base_seconds=0, stale_after_seconds=30)
+    service.create_pipeline_job(
+        season=2026, week=1, source="scheduler", max_attempts=1
+    )
+    claimed = service.claim_next("dead-worker")
+    assert claimed is not None
+    service.record_stage_started(claimed, "materialize", 5)
+    execute(
+        "UPDATE pipeline_jobs SET heartbeat_at = ? WHERE job_id = ?",
+        ((datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(), claimed.job_id),
+    )
+
+    assert service.recover_stale_jobs() == 1
+    stage = fetchone(
+        """
+        SELECT status, finished_at, error_message FROM pipeline_stage_runs
+        WHERE run_id = ? AND attempt = ? AND stage_name = 'materialize'
+        """,
+        (claimed.run_id, claimed.attempts),
+    )
+    assert stage is not None
+    assert stage[0] == "failed"
+    assert stage[1] is not None
+    assert stage[2] == "worker heartbeat lease expired"

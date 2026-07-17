@@ -373,14 +373,39 @@ class JobService:
                 )
                 if affected != 1:
                     continue
+                stage_status = "cancelled" if status == "cancelled" else "failed"
+                execute(
+                    """
+                    UPDATE pipeline_stage_runs
+                    SET status = ?, finished_at = ?, error_message = ?
+                    WHERE run_id = ? AND attempt = ? AND status = 'running'
+                    """,
+                    (
+                        stage_status,
+                        now,
+                        "worker heartbeat lease expired",
+                        job.run_id,
+                        job.attempts,
+                    ),
+                    conn=conn,
+                )
+                completed = fetchone(
+                    """
+                    SELECT COUNT(*) FROM pipeline_stage_runs
+                    WHERE run_id = ? AND attempt = ? AND status = 'completed'
+                    """,
+                    (job.run_id, job.attempts),
+                    conn=conn,
+                )
                 execute(
                     """
                     UPDATE pipeline_runs
-                    SET status = ?, stages_completed = 0, error_message = ?,
+                    SET status = ?, stages_completed = ?, error_message = ?,
                         finished_at = ?, updated_at = ? WHERE run_id = ?
                     """,
                     (
                         run_status,
+                        0 if status == "retry_scheduled" else int(completed[0]) if completed else 0,
                         "worker heartbeat lease expired",
                         now if run_status in TERMINAL_STATUSES else None,
                         now,
@@ -388,16 +413,6 @@ class JobService:
                     ),
                     conn=conn,
                 )
-                if status == "retry_scheduled":
-                    execute(
-                        """
-                        UPDATE pipeline_stage_runs
-                        SET status = 'queued', finished_at = NULL, result_json = NULL,
-                            error_message = NULL WHERE run_id = ?
-                        """,
-                        (job.run_id,),
-                        conn=conn,
-                    )
                 recovered += 1
             conn.commit()
         return recovered
@@ -521,16 +536,6 @@ class JobService:
                 WHERE run_id = ?
                 """,
                 (now, run_id),
-                conn=conn,
-            )
-            execute(
-                """
-                UPDATE pipeline_stage_runs
-                SET status = 'queued', finished_at = NULL, result_json = NULL,
-                    error_message = NULL
-                WHERE run_id = ?
-                """,
-                (run_id,),
                 conn=conn,
             )
             conn.commit()
@@ -864,16 +869,6 @@ class JobService:
                 ),
                 conn=conn,
             )
-            if retrying:
-                execute(
-                    """
-                    UPDATE pipeline_stage_runs
-                    SET status = 'queued', finished_at = NULL, result_json = NULL,
-                        error_message = NULL WHERE run_id = ?
-                    """,
-                    (job.run_id,),
-                    conn=conn,
-                )
             conn.commit()
         return status
 
