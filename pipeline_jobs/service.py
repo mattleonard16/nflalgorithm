@@ -536,7 +536,12 @@ class JobService:
             execute(
                 """
                 UPDATE pipeline_jobs
-                SET status = 'queued', attempts = 0, available_at = ?, claimed_at = NULL,
+                SET status = 'queued',
+                    max_attempts = CASE
+                        WHEN max_attempts <= attempts THEN attempts + 1
+                        ELSE max_attempts
+                    END,
+                    available_at = ?, claimed_at = NULL,
                     heartbeat_at = NULL, worker_id = NULL, claim_token = NULL, cancel_requested = 0,
                     last_error = NULL, updated_at = ?
                 WHERE job_id = ? AND status = 'failed'

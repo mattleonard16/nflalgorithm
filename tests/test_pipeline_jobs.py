@@ -500,6 +500,32 @@ def test_explicit_retry_preserves_prior_attempt_history(job_db) -> None:
     ) == (0, None, None)
 
 
+def test_explicit_retry_uses_new_attempt_and_publication_is_idempotent(job_db) -> None:
+    service = JobService(retry_base_seconds=0)
+    queued = service.create_pipeline_job(
+        season=2026, week=1, source="api", max_attempts=1
+    )
+    first = service.claim_next("worker")
+    assert first is not None
+    _insert_staged_card(first)
+    assert service.fail(first, "manual retry required", retryable=False) == "failed"
+
+    service.retry(queued.run_id)
+    second = service.claim_next("worker")
+    assert second is not None and second.attempts == 2
+    _insert_staged_card(second)
+
+    assert service.complete(second, _staged_success_report()) is True
+    assert service.complete(second, _staged_success_report()) is False
+    assert fetchone(
+        "SELECT COUNT(*) FROM materialized_value_view WHERE season = 2026 AND week = 1"
+    ) == (1,)
+    assert fetchone(
+        "SELECT COUNT(*) FROM pipeline_card_staging WHERE run_id = ?",
+        (queued.run_id,),
+    ) == (2,)
+
+
 def test_retry_records_a_new_stage_attempt_without_overwriting_history(job_db) -> None:
     service = JobService(retry_base_seconds=0)
     service.create_pipeline_job(
