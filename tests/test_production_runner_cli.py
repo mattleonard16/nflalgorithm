@@ -244,6 +244,27 @@ def test_odds_scraper_initialization_failure_is_fail_closed(monkeypatch) -> None
     assert result["odds_validation"]["snapshot_reason_code"] == "provenance_missing"
 
 
+def test_malformed_odds_audit_is_persistable_fail_closed_evidence(monkeypatch) -> None:
+    from scripts import prop_line_scraper
+
+    class MalformedAuditScraper:
+        def run_weekly_update(self, week, season, allow_synthetic=True):
+            odds = pd.DataFrame({"line": [55.5]})
+            audit = valid_odds_audit()
+            audit["responses_observed"] = "not-an-integer"
+            odds.attrs["odds_audit"] = audit
+            return odds
+
+    monkeypatch.setattr(prop_line_scraper, "NFLPropScraper", MalformedAuditScraper)
+
+    result = production_runner.stage_odds(2026, 1)
+
+    assert result["status"] == "error"
+    assert result["odds_validation"]["valid"] is False
+    assert result["odds_validation"]["reason_code"] == "validation_error"
+    assert "not-an-integer" in result["odds_validation"]["validation_error"]
+
+
 def test_weekly_report_refresh_uses_prepare_then_live_odds(monkeypatch) -> None:
     from scripts import run_prop_update
 

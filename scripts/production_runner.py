@@ -32,6 +32,24 @@ from utils.db import fetchone, read_dataframe
 logger = logging.getLogger(__name__)
 
 
+def _validate_odds_observation(observed: Mapping[str, Any]) -> Dict[str, Any]:
+    """Turn malformed observation metrics into persisted fail-closed evidence."""
+    from pipelines.odds_validation import validate_odds_snapshot
+
+    try:
+        return validate_odds_snapshot(observed)
+    except Exception as exc:
+        logger.error("Odds validation failed: %s", exc)
+        return {
+            "valid": False,
+            "reason_code": "validation_error",
+            "reason": f"Odds validation could not evaluate snapshot metrics: {exc}",
+            "validation_error": str(exc),
+            "snapshot_at": observed.get("snapshot_at"),
+            "odds_rows": observed.get("odds_rows", 0),
+        }
+
+
 # ── Stage functions ──────────────────────────────────────────────────
 
 
@@ -51,7 +69,6 @@ def stage_prepare_week(
 
 def stage_odds(season: int, week: int) -> Dict[str, Any]:
     """Refresh live odds; synthetic/demo lines are forbidden here."""
-    from pipelines.odds_validation import validate_odds_snapshot
     from scripts.prop_line_scraper import NFLPropScraper
 
     scraper = None
@@ -65,7 +82,7 @@ def stage_odds(season: int, week: int) -> Dict[str, Any]:
     except Exception as exc:
         observed = dict(getattr(scraper, "last_weekly_audit", {}) or {})
         observed.setdefault("odds_rows", 0)
-        validation = validate_odds_snapshot(observed)
+        validation = _validate_odds_observation(observed)
         validation["snapshot_reason_code"] = validation["reason_code"]
         validation["snapshot_reason"] = validation["reason"]
         validation["valid"] = False
@@ -83,7 +100,7 @@ def stage_odds(season: int, week: int) -> Dict[str, Any]:
 
     observed = dict(odds.attrs.get("odds_audit", {}))
     observed["odds_rows"] = len(odds)
-    validation = validate_odds_snapshot(observed)
+    validation = _validate_odds_observation(observed)
     if odds.empty and validation["valid"]:
         validation["valid"] = False
         validation["reason_code"] = "empty_snapshot"
