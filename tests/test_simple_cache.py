@@ -44,3 +44,14 @@ def test_cache_without_source_timestamp_is_never_treated_as_fresh() -> None:
     assert "X-Cache-Created-At" not in response.headers
     assert "X-Cache-Age-Seconds" not in response.headers
     assert client._is_cache_expired(response, "odds") is True
+
+
+def test_future_dated_cache_timestamp_is_never_treated_as_fresh() -> None:
+    client = SimpleCachedClient.__new__(SimpleCachedClient)
+    response = requests.Response()
+    created_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+    SimpleCachedClient._annotate_provenance(response, "HIT", created_at=created_at)
+
+    assert float(response.headers["X-Cache-Age-Seconds"]) < 0
+    assert client._is_cache_expired(response, "odds") is True

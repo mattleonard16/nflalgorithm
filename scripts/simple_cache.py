@@ -190,7 +190,7 @@ class SimpleCachedClient:
             response.headers.pop("X-Cache-Age-Seconds", None)
             return
         normalized_created = cls._as_utc(raw_created)
-        age_seconds = max(0.0, (observed_at - normalized_created).total_seconds())
+        age_seconds = (observed_at - normalized_created).total_seconds()
         response.headers["X-Cache-Created-At"] = normalized_created.isoformat()
         response.headers["X-Cache-Age-Seconds"] = f"{age_seconds:.6f}"
 
@@ -205,8 +205,9 @@ class SimpleCachedClient:
             created_time = self._as_utc(
                 datetime.fromisoformat(created_header.replace("Z", "+00:00"))
             )
+            age = datetime.now(timezone.utc) - created_time
             ttl = self._get_ttl_for_api(api_type=api_type)
-            return (datetime.now(timezone.utc) - created_time) > ttl
+            return age.total_seconds() < 0 or age > ttl
         except Exception:
             return True
 
