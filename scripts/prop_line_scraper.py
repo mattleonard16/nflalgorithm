@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, cast
 import pandas as pd
 
 from config import config
-from scripts.data_validation import api_error_handler, data_validator
+from scripts.api_error_handler import api_error_handler
 
 # Import simplified caching system and validation
 from scripts.simple_cache import simple_cached_client
@@ -222,14 +222,7 @@ class NFLPropScraper:
 
                 data = response.json()
 
-                # Validate API response
-                is_valid, errors = data_validator.validate_apis_response(data, "odds")
-                if not is_valid:
-                    logger.warning(f"Invalid odds API response: {errors}")
-                    # Try to recover by parsing partial data
-                    prop_lines.extend(self._parse_odds_api_response(data, market))
-                else:
-                    prop_lines.extend(self._parse_odds_api_response(data, market))
+                prop_lines.extend(self._parse_odds_api_response(data, market))
 
                 # Minimal delay between requests
                 time.sleep(0.1)
