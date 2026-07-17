@@ -96,6 +96,9 @@ pipeline = SimpleNamespace(
     odds_max_age_seconds=env_int("NFL_ODDS_MAX_AGE_SECONDS", 300),
     odds_min_event_coverage=env_float("NFL_ODDS_MIN_EVENT_COVERAGE", 1.0),
     odds_min_market_coverage=env_float("NFL_ODDS_MIN_MARKET_COVERAGE", 1.0),
+    odds_min_sportsbooks_per_event_market=env_int(
+        "NFL_ODDS_MIN_SPORTSBOOKS_PER_EVENT_MARKET", 2
+    ),
     odds_required_markets=tuple(
         value.strip()
         for value in os.getenv(

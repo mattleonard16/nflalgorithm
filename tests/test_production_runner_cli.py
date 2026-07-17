@@ -20,6 +20,11 @@ def valid_odds_audit() -> dict[str, object]:
         "scheduled_events": 1,
         "covered_events": 1,
         "covered_event_markets": 3,
+        "sportsbooks_per_event_market": {
+            "event-1:player_pass_yds": 2,
+            "event-1:player_rush_yds": 2,
+            "event-1:player_rec_yds": 2,
+        },
         "odds_rows": 1,
     }
 

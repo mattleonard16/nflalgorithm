@@ -8,6 +8,7 @@ REQUIREMENTS = OddsRequirements(
     max_age_seconds=300,
     min_event_coverage=1.0,
     min_market_coverage=1.0,
+    min_sportsbooks_per_event_market=2,
     required_markets=("pass", "rush", "receive"),
 )
 
@@ -21,6 +22,14 @@ def complete_observation() -> dict[str, object]:
         "scheduled_events": 2,
         "covered_events": 2,
         "covered_event_markets": 6,
+        "sportsbooks_per_event_market": {
+            "event-1:pass": 2,
+            "event-1:rush": 3,
+            "event-1:receive": 2,
+            "event-2:pass": 2,
+            "event-2:rush": 2,
+            "event-2:receive": 4,
+        },
         "odds_rows": 24,
     }
 
@@ -82,3 +91,18 @@ def test_partial_odds_coverage_is_rejected() -> None:
     assert result["valid"] is False
     assert result["reason_code"] == "market_coverage"
     assert result["market_coverage"] == 5 / 6
+
+
+def test_insufficient_sportsbook_breadth_is_rejected() -> None:
+    observed = complete_observation()
+    observed["sportsbooks_per_event_market"] = {
+        **observed["sportsbooks_per_event_market"],
+        "event-2:receive": 1,
+    }
+
+    result = validate_odds_snapshot(observed, requirements=REQUIREMENTS)
+
+    assert result["valid"] is False
+    assert result["reason_code"] == "sportsbook_coverage"
+    assert result["sportsbook_qualified_event_markets"] == 5
+    assert result["sportsbook_coverage"] == 5 / 6

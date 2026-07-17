@@ -14,6 +14,7 @@ class OddsRequirements:
     max_age_seconds: int
     min_event_coverage: float
     min_market_coverage: float
+    min_sportsbooks_per_event_market: int
     required_markets: tuple[str, ...]
 
     @classmethod
@@ -22,6 +23,9 @@ class OddsRequirements:
             max_age_seconds=int(config.pipeline.odds_max_age_seconds),
             min_event_coverage=float(config.pipeline.odds_min_event_coverage),
             min_market_coverage=float(config.pipeline.odds_min_market_coverage),
+            min_sportsbooks_per_event_market=int(
+                config.pipeline.odds_min_sportsbooks_per_event_market
+            ),
             required_markets=tuple(config.pipeline.odds_required_markets),
         )
 
@@ -32,6 +36,8 @@ class OddsRequirements:
             raise ValueError("minimum event coverage must be in (0, 1]")
         if not 0 < self.min_market_coverage <= 1:
             raise ValueError("minimum market coverage must be in (0, 1]")
+        if self.min_sportsbooks_per_event_market <= 0:
+            raise ValueError("minimum sportsbooks per event-market must be positive")
         if not self.required_markets:
             raise ValueError("at least one required odds market must be configured")
 
@@ -59,6 +65,25 @@ def validate_odds_snapshot(
     market_coverage = (
         covered_event_markets / required_event_markets if required_event_markets else 0.0
     )
+    raw_sportsbook_counts = observed.get("sportsbooks_per_event_market", {})
+    if not isinstance(raw_sportsbook_counts, Mapping):
+        raise ValueError("sportsbooks_per_event_market must be a mapping")
+    sportsbook_counts = {
+        str(pair): int(count) for pair, count in raw_sportsbook_counts.items()
+    }
+    if any(count < 0 for count in sportsbook_counts.values()):
+        raise ValueError("sportsbook counts cannot be negative")
+    sportsbook_pairs_reported = len(sportsbook_counts)
+    sportsbook_qualified_event_markets = sum(
+        count >= required.min_sportsbooks_per_event_market
+        for count in sportsbook_counts.values()
+    )
+    sportsbook_coverage = (
+        sportsbook_qualified_event_markets / required_event_markets
+        if required_event_markets
+        else 0.0
+    )
+    min_sportsbooks_observed = min(sportsbook_counts.values()) if sportsbook_counts else 0
 
     reason_code = "validated"
     reason = "Odds snapshot meets freshness and coverage requirements"
@@ -97,6 +122,19 @@ def validate_odds_snapshot(
             f"Odds cover {covered_event_markets}/{required_event_markets} "
             f"required event-market pairs ({market_coverage:.1%})"
         )
+    elif sportsbook_pairs_reported != covered_event_markets:
+        reason_code = "sportsbook_provenance_incomplete"
+        reason = (
+            f"Sportsbook breadth is present for {sportsbook_pairs_reported}/"
+            f"{covered_event_markets} covered event-market pairs"
+        )
+    elif sportsbook_coverage < required.min_market_coverage:
+        reason_code = "sportsbook_coverage"
+        reason = (
+            f"Only {sportsbook_qualified_event_markets}/{required_event_markets} "
+            "required event-market pairs meet the sportsbook breadth requirement "
+            f"of {required.min_sportsbooks_per_event_market} ({sportsbook_coverage:.1%})"
+        )
     elif odds_rows <= 0:
         reason_code = "empty_snapshot"
         reason = "Validated odds snapshot contains no complete two-sided rows"
@@ -117,6 +155,10 @@ def validate_odds_snapshot(
         "required_event_markets": required_event_markets,
         "covered_event_markets": covered_event_markets,
         "market_coverage": market_coverage,
+        "sportsbook_pairs_reported": sportsbook_pairs_reported,
+        "sportsbook_qualified_event_markets": sportsbook_qualified_event_markets,
+        "sportsbook_coverage": sportsbook_coverage,
+        "min_sportsbooks_observed": min_sportsbooks_observed,
         "odds_rows": odds_rows,
         "requirements": asdict(required),
     }

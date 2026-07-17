@@ -357,6 +357,7 @@ class NFLPropScraper:
         response_timestamps: List[str] = []
         responses_observed = 0
         covered_pairs: set[tuple[str, str]] = set()
+        sportsbooks_by_pair: Dict[tuple[str, str], set[str]] = {}
         self.last_weekly_audit = {
             "source_statuses": source_statuses,
             "response_ages_seconds": response_ages,
@@ -366,6 +367,7 @@ class NFLPropScraper:
             "scheduled_events": 0,
             "covered_events": 0,
             "covered_event_markets": 0,
+            "sportsbooks_per_event_market": {},
             "odds_rows": 0,
         }
         fallback_snapshot = self._load_snapshot(load_json_path)
@@ -639,6 +641,10 @@ class NFLPropScraper:
                                     "away_team": away,
                                 }
                             )
+                            if book_name and book_name != "Unknown":
+                                sportsbooks_by_pair.setdefault(
+                                    (str(event_id), market), set()
+                                ).add(str(book_name))
 
                 if len(results) > rows_before_market:
                     covered_pairs.add((str(event_id), market))
@@ -646,6 +652,10 @@ class NFLPropScraper:
                         {covered_event for covered_event, _market in covered_pairs}
                     )
                     self.last_weekly_audit["covered_event_markets"] = len(covered_pairs)
+                    self.last_weekly_audit["sportsbooks_per_event_market"] = {
+                        f"{pair_event}:{pair_market}": len(books)
+                        for (pair_event, pair_market), books in sportsbooks_by_pair.items()
+                    }
                     self.last_weekly_audit["odds_rows"] = len(results)
 
                 time.sleep(0.2)
@@ -660,6 +670,10 @@ class NFLPropScraper:
             "scheduled_events": len(schedule),
             "covered_events": len({event_id for event_id, _market in covered_pairs}),
             "covered_event_markets": len(covered_pairs),
+            "sportsbooks_per_event_market": {
+                f"{event_id}:{market}": len(books)
+                for (event_id, market), books in sportsbooks_by_pair.items()
+            },
             "odds_rows": len(results),
         }
         return results
