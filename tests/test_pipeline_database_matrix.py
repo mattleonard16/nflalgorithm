@@ -37,6 +37,7 @@ def runtime_database(tmp_path, monkeypatch) -> str:
     with get_connection() as conn:
         for table in (
             "pipeline_artifacts",
+            "pipeline_odds_validations",
             "pipeline_stage_runs",
             "pipeline_jobs",
             "pipeline_runs",

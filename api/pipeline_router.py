@@ -37,6 +37,7 @@ class PipelineRunResponse(BaseModel):
     cancel_requested: bool = False
     available_at: Optional[str] = None
     stages: List[Dict[str, Any]] = Field(default_factory=list)
+    odds_validation: Optional[Dict[str, Any]] = None
 
 
 def _pipeline_principal(request: Request, *, operator_only: bool) -> str:
@@ -126,6 +127,19 @@ def _parse_pipeline_run_row(
                 "error_message": stage_row[7],
             }
         )
+    validation_row = fetchone(
+        """
+        SELECT metrics_json FROM pipeline_odds_validations
+        WHERE run_id = ? ORDER BY attempt DESC LIMIT 1
+        """,
+        (row[0],),
+    )
+    odds_validation = None
+    if validation_row and validation_row[0]:
+        try:
+            odds_validation = json.loads(validation_row[0])
+        except (json.JSONDecodeError, TypeError):
+            odds_validation = None
 
     return PipelineRunResponse(
         run_id=row[0],
@@ -147,6 +161,7 @@ def _parse_pipeline_run_row(
         cancel_requested=job.cancel_requested if job else False,
         available_at=job.available_at if job else None,
         stages=stages,
+        odds_validation=odds_validation,
     )
 
 

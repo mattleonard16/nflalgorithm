@@ -34,6 +34,7 @@ def test_job_schema_is_part_of_normal_migrations(job_db) -> None:
     assert table_exists("pipeline_jobs")
     assert table_exists("pipeline_stage_runs")
     assert table_exists("pipeline_artifacts")
+    assert table_exists("pipeline_odds_validations")
     assert "claim_token" in get_table_columns("pipeline_jobs")
 
 
@@ -389,6 +390,48 @@ def test_retry_records_a_new_stage_attempt_without_overwriting_history(job_db) -
     assert rows[0][0:2] == (1, "failed")
     assert rows[0][2] is not None
     assert rows[1][0:2] == (2, "running")
+
+
+def test_odds_validation_reason_and_metrics_are_persisted(job_db) -> None:
+    service = JobService()
+    service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    claimed = service.claim_next("worker")
+    assert claimed is not None
+    validation = {
+        "valid": False,
+        "reason_code": "market_coverage",
+        "reason": "Odds cover 2/3 required event-market pairs",
+        "market_coverage": 2 / 3,
+        "odds_rows": 18,
+    }
+
+    service.record_stage_result(
+        claimed,
+        "odds",
+        1,
+        {
+            "status": "error",
+            "stage": "odds",
+            "error": validation["reason"],
+            "odds_validation": validation,
+        },
+    )
+
+    row = fetchone(
+        """
+        SELECT attempt, valid, reason_code, reason, metrics_json
+        FROM pipeline_odds_validations WHERE run_id = ?
+        """,
+        (claimed.run_id,),
+    )
+    assert row is not None
+    assert row[0:4] == (
+        1,
+        0,
+        "market_coverage",
+        "Odds cover 2/3 required event-market pairs",
+    )
+    assert json.loads(row[4])["odds_rows"] == 18
 
 
 def test_terminal_stale_recovery_closes_running_stage(job_db) -> None:

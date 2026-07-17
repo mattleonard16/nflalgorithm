@@ -14,14 +14,6 @@ from utils.db import execute, fetchall, fetchone, get_connection, is_sqlite_conn
 
 QUEUED_STATUSES = ("queued", "retry_scheduled")
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
-LEGAL_TRANSITIONS = {
-    "queued": frozenset({"running", "cancelled"}),
-    "retry_scheduled": frozenset({"running", "cancelled"}),
-    "running": frozenset({"completed", "failed", "retry_scheduled", "cancelled"}),
-    "failed": frozenset({"queued"}),
-    "completed": frozenset(),
-    "cancelled": frozenset(),
-}
 _JOB_COLUMNS = (
     "job_id, run_id, job_type, payload_json, status, priority, attempts, max_attempts, "
     "available_at, claimed_at, heartbeat_at, worker_id, claim_token, cancel_requested, "
@@ -666,6 +658,50 @@ class JobService:
                 ),
                 conn=conn,
             )
+            odds_validation = result.get("odds_validation")
+            if stage_name == "odds" and isinstance(odds_validation, Mapping):
+                validation_payload = json.dumps(
+                    dict(odds_validation), default=str, separators=(",", ":")
+                )
+                if is_sqlite_connection(conn):
+                    validation_sql = """
+                        INSERT INTO pipeline_odds_validations
+                            (run_id, attempt, valid, reason_code, reason, metrics_json,
+                             validated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(run_id, attempt) DO UPDATE SET
+                            valid=excluded.valid,
+                            reason_code=excluded.reason_code,
+                            reason=excluded.reason,
+                            metrics_json=excluded.metrics_json,
+                            validated_at=excluded.validated_at
+                    """
+                else:
+                    validation_sql = """
+                        INSERT INTO pipeline_odds_validations
+                            (run_id, attempt, valid, reason_code, reason, metrics_json,
+                             validated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON DUPLICATE KEY UPDATE
+                            valid=VALUES(valid),
+                            reason_code=VALUES(reason_code),
+                            reason=VALUES(reason),
+                            metrics_json=VALUES(metrics_json),
+                            validated_at=VALUES(validated_at)
+                    """
+                execute(
+                    validation_sql,
+                    (
+                        job.run_id,
+                        job.attempts,
+                        int(bool(odds_validation.get("valid"))),
+                        str(odds_validation.get("reason_code", "unknown"))[:64],
+                        str(odds_validation.get("reason", "Odds validation result")),
+                        validation_payload,
+                        now,
+                    ),
+                    conn=conn,
+                )
             completed = fetchone(
                 """
                 SELECT COUNT(*) FROM pipeline_stage_runs

@@ -586,6 +586,19 @@ class MigrationManager:
             )
             """,
             """
+            CREATE TABLE IF NOT EXISTS pipeline_odds_validations (
+                run_id VARCHAR(36) NOT NULL,
+                attempt INTEGER NOT NULL,
+                valid INTEGER NOT NULL,
+                reason_code VARCHAR(64) NOT NULL,
+                reason TEXT NOT NULL,
+                metrics_json TEXT NOT NULL,
+                validated_at VARCHAR(40) NOT NULL,
+                PRIMARY KEY (run_id, attempt),
+                FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+            )
+            """,
+            """
             CREATE TABLE IF NOT EXISTS agent_performance (
                 season INTEGER NOT NULL,
                 week INTEGER NOT NULL,
@@ -1442,6 +1455,11 @@ class MigrationManager:
                     "run_id, ordinal",
                 ),
                 ("pipeline_artifacts", "idx_pipeline_artifacts_run", "run_id, created_at"),
+                (
+                    "pipeline_odds_validations",
+                    "idx_pipeline_odds_validations_result",
+                    "valid, reason_code, validated_at",
+                ),
             ):
                 cursor.execute(
                     """
@@ -1548,6 +1566,10 @@ class MigrationManager:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_pipeline_artifacts_run "
             "ON pipeline_artifacts(run_id, created_at)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pipeline_odds_validations_result "
+            "ON pipeline_odds_validations(valid, reason_code, validated_at)"
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_nba_game_logs_player ON nba_player_game_logs(player_id, game_date)"
