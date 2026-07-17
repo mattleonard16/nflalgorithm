@@ -72,6 +72,21 @@ def _lease_values(job: "PipelineJob") -> tuple[Any, ...]:
     return (job.job_id, job.worker_id, job.attempts, job.claim_token.encode("ascii"))
 
 
+def _stale_recovery_lease(conn: Any, job: "PipelineJob") -> tuple[str, tuple[Any, ...]]:
+    """Return conditional ownership matching for token and mixed-version leases."""
+    if job.claim_token:
+        # Stale recovery already holds/serializes the selected row. The normal
+        # lease clause still gives token-era attempts full fencing semantics.
+        return _lease_clause(conn), _lease_values(job)
+    # A pre-token worker can claim after migrations during a rolling deploy.
+    # Match the exact attempt and NULL token so the row can be fenced without
+    # treating an absent credential as a valid modern lease.
+    return (
+        "job_id = ? AND attempts = ? AND claim_token IS NULL AND status = 'running'",
+        (job.job_id, job.attempts),
+    )
+
+
 def _lock_active_lease(conn: Any, job: "PipelineJob", *, allow_cancel: bool = False) -> bool:
     if is_sqlite_connection(conn):
         conn.execute("BEGIN IMMEDIATE")
@@ -375,6 +390,7 @@ class JobService:
             )
             for row in rows:
                 job = PipelineJob.from_row(row)
+                recovery_clause, recovery_values = _stale_recovery_lease(conn, job)
                 if job.cancel_requested:
                     status = run_status = "cancelled"
                 elif job.attempts < job.max_attempts:
@@ -387,14 +403,14 @@ class JobService:
                     UPDATE pipeline_jobs
                     SET status = ?, available_at = ?, claimed_at = NULL, heartbeat_at = NULL,
                         worker_id = NULL, claim_token = NULL, updated_at = ?, last_error = ?
-                    WHERE {_lease_clause(conn)} AND heartbeat_at < ?
+                    WHERE {recovery_clause} AND heartbeat_at < ?
                     """,
                     (
                         status,
                         now,
                         now,
                         "worker heartbeat lease expired",
-                        *_lease_values(job),
+                        *recovery_values,
                         cutoff,
                     ),
                     conn=conn,

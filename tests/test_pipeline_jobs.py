@@ -282,6 +282,35 @@ def test_expired_worker_lease_is_reclaimed_and_fenced(job_db) -> None:
     assert service.get_job(queued.job_id).status == "running"
 
 
+def test_runtime_recovery_fences_mixed_version_tokenless_claim(job_db) -> None:
+    service = JobService(retry_base_seconds=0, stale_after_seconds=30)
+    queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    claimed = service.claim_next("legacy-worker")
+    assert claimed is not None
+    service.record_stage_started(claimed, "odds", 1)
+    expired = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    execute(
+        "UPDATE pipeline_jobs SET claim_token = NULL, heartbeat_at = ? WHERE job_id = ?",
+        (expired, queued.job_id),
+    )
+
+    assert service.recover_stale_jobs() == 1
+
+    recovered = service.get_job(queued.job_id)
+    assert recovered is not None
+    assert recovered.status == "retry_scheduled"
+    assert recovered.worker_id is None
+    assert recovered.claim_token is None
+    stage = fetchone(
+        """
+        SELECT status, error_message FROM pipeline_stage_runs
+        WHERE run_id = ? AND attempt = ? AND stage_name = 'odds'
+        """,
+        (claimed.run_id, claimed.attempts),
+    )
+    assert stage == ("failed", "worker heartbeat lease expired")
+
+
 def test_reclaimed_attempt_is_fenced_even_with_same_worker_id(job_db) -> None:
     service = JobService(retry_base_seconds=0, stale_after_seconds=30)
     queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
