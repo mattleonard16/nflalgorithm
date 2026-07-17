@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from scripts import activate_betting, production_runner, run_prop_update
+from scripts import production_runner
 
 
 def test_pipeline_always_runs_canonical_prepare_even_when_reusing_history(monkeypatch) -> None:
@@ -100,6 +100,8 @@ def test_odds_stage_uses_live_only_weekly_scraper(monkeypatch) -> None:
 
 
 def test_weekly_report_refresh_uses_prepare_then_live_odds(monkeypatch) -> None:
+    from scripts import run_prop_update
+
     calls: list[tuple[str, object]] = []
 
     monkeypatch.setattr(
@@ -123,6 +125,13 @@ def test_weekly_report_refresh_uses_prepare_then_live_odds(monkeypatch) -> None:
 
 
 def test_activation_routes_through_canonical_pregame_refresh(monkeypatch, tmp_path) -> None:
+    try:
+        from scripts import activate_betting
+    except ModuleNotFoundError as exc:
+        if exc.name not in {"prop_integration", "value_betting_engine"}:
+            raise
+        pytest.skip(f"private algorithm module is unavailable: {exc}")
+
     calls: list[tuple[int, int]] = []
 
     monkeypatch.setattr(

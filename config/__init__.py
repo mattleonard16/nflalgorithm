@@ -1,34 +1,47 @@
-"""Compatibility shim: re-export symbols from the sibling ``config.py`` module.
+"""Application configuration with an optional local override.
 
-The repo has both this ``config/`` package (holding example config + JSON
-side-files) and a top-level ``config.py`` (the runtime config, gitignored as
-proprietary). Python's import resolution gives precedence to the package,
-so ``from config import config`` fails because this ``__init__.py`` does not
-define ``config``. To preserve every existing ``from config import config``
-callsite without restructuring the repo, we load the sibling ``config.py``
-file by absolute path and re-export its public attributes here.
+Tracked, environment-driven defaults live in :mod:`config.runtime` so a fresh
+checkout is runnable.  A gitignored top-level ``config.py`` may still override
+those defaults for local deployments that need private settings.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
+from typing import TypeVar
 
-_CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.py"
+from .runtime import PROJECT_ROOT as _PROJECT_ROOT
+from .runtime import config
 
-if not _CONFIG_FILE.exists():
-    raise ImportError(
-        f"Expected runtime config at {_CONFIG_FILE}. "
-        "Copy config/config.example.py to ./config.py and adjust values."
+_CONFIG_FILE = Path(os.getenv("NFL_CONFIG_PATH", _PROJECT_ROOT / "config.py"))
+_ConfigT = TypeVar("_ConfigT")
+
+
+def _fill_missing_settings(target: _ConfigT, defaults: object) -> _ConfigT:
+    """Recursively preserve private overrides while adding tracked defaults."""
+    for name, default_value in vars(defaults).items():
+        if not hasattr(target, name):
+            setattr(target, name, default_value)
+            continue
+        target_value = getattr(target, name)
+        if hasattr(default_value, "__dict__") and hasattr(target_value, "__dict__"):
+            _fill_missing_settings(target_value, default_value)
+    return target
+
+
+if _CONFIG_FILE.is_file():
+    _spec = importlib.util.spec_from_file_location(
+        "_nflalgorithm_runtime_config",
+        _CONFIG_FILE,
     )
+    if _spec is None or _spec.loader is None:
+        raise ImportError(f"Unable to load runtime config from {_CONFIG_FILE}")
+    _module = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_module)
+    if not hasattr(_module, "config"):
+        raise ImportError(f"Runtime config {_CONFIG_FILE} must define 'config'")
+    config = _fill_missing_settings(_module.config, config)
 
-_spec = importlib.util.spec_from_file_location("_nflalgorithm_runtime_config", _CONFIG_FILE)
-_module = importlib.util.module_from_spec(_spec)
-assert _spec.loader is not None
-_spec.loader.exec_module(_module)
-
-for _name in dir(_module):
-    if not _name.startswith("_"):
-        globals()[_name] = getattr(_module, _name)
-
-del _name, _spec, _module, _CONFIG_FILE
+__all__ = ["config"]
