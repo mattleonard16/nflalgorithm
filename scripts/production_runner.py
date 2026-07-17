@@ -267,6 +267,7 @@ def run_production_pipeline(
                 week,
                 refresh_history=False if skip_ingest else None,
             ),
+            retry_safe=True,
         ),
         *[
             PipelineStage(
@@ -281,6 +282,7 @@ def run_production_pipeline(
                         else {}
                     ),
                 ),
+                retry_safe=True,
             )
             for stage_name, stage_fn in POST_PREPARE_STAGES
         ],

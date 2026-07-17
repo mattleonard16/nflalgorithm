@@ -151,7 +151,12 @@ def test_live_odds_failure_never_reaches_card_materialization(monkeypatch) -> No
     assert materialize_calls == []
     assert report["success"] is False
     assert report["errors"] == [
-        {"status": "error", "stage": "odds", "error": "live provider unavailable"}
+        {
+            "status": "error",
+            "stage": "odds",
+            "error": "live provider unavailable",
+            "retry_safe": True,
+        }
     ]
 
 

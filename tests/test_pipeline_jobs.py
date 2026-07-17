@@ -243,7 +243,14 @@ def test_failed_job_is_retried_then_terminal(job_db) -> None:
     def failing_runner(*args, **kwargs):
         return {
             "success": False,
-            "stages": [{"stage": "odds", "status": "error", "error": "provider down"}],
+            "stages": [
+                {
+                    "stage": "odds",
+                    "status": "error",
+                    "error": "provider down",
+                    "retry_safe": True,
+                }
+            ],
             "errors": [{"stage": "odds", "error": "provider down"}],
         }
 
@@ -260,6 +267,43 @@ def test_failed_job_is_retried_then_terminal(job_db) -> None:
     assert fetchone("SELECT status FROM pipeline_runs WHERE run_id = ?", (job.run_id,)) == (
         "failed",
     )
+
+
+def test_automatic_retry_is_blocked_for_unproven_side_effect(job_db) -> None:
+    service = JobService(retry_base_seconds=0)
+    job = service.create_pipeline_job(
+        season=2026,
+        week=1,
+        source="api",
+        max_attempts=3,
+    )
+    side_effects: list[str] = []
+
+    def unsafe_runner(*args, **kwargs):
+        side_effects.append("published")
+        return {
+            "success": False,
+            "stages": [
+                {
+                    "stage": "external_publish",
+                    "status": "error",
+                    "error": "response lost after publish",
+                }
+            ],
+            "errors": [
+                {"stage": "external_publish", "error": "response lost after publish"}
+            ],
+        }
+
+    worker = PipelineWorker(worker_id="retry-safety-worker", service=service, runner=unsafe_runner)
+
+    assert worker.process_once() is True
+    assert worker.process_once() is False
+    assert side_effects == ["published"]
+    current = service.get_job(job.job_id)
+    assert current is not None
+    assert current.status == "failed"
+    assert current.attempts == 1
 
 
 def test_expired_worker_lease_is_reclaimed_and_fenced(job_db) -> None:

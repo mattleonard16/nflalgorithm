@@ -18,6 +18,7 @@ class PipelineStage:
 
     name: str
     handler: Callable[[], Mapping[str, Any]]
+    retry_safe: bool = False
 
 
 def _validate_names(stages: Sequence[PipelineStage]) -> set[str]:
@@ -28,14 +29,16 @@ def _validate_names(stages: Sequence[PipelineStage]) -> set[str]:
     return name_set
 
 
-def _normalize_result(stage_name: str, result: Mapping[str, Any]) -> dict[str, Any]:
+def _normalize_result(stage: PipelineStage, result: Mapping[str, Any]) -> dict[str, Any]:
     normalized = dict(result)
-    reported_stage = normalized.setdefault("stage", stage_name)
-    if reported_stage != stage_name:
-        raise ValueError(f"Pipeline stage '{stage_name}' returned result for '{reported_stage}'")
+    reported_stage = normalized.setdefault("stage", stage.name)
+    if reported_stage != stage.name:
+        raise ValueError(f"Pipeline stage '{stage.name}' returned result for '{reported_stage}'")
     status = normalized.get("status")
     if status not in VALID_STATUSES:
-        raise ValueError(f"Pipeline stage '{stage_name}' returned invalid status '{status}'")
+        raise ValueError(f"Pipeline stage '{stage.name}' returned invalid status '{status}'")
+    if stage.retry_safe:
+        normalized["retry_safe"] = True
     return normalized
 
 
@@ -94,8 +97,10 @@ def run_stages(
                 "error": message,
                 "detail": message,
             }
+            if stage.retry_safe:
+                result["retry_safe"] = True
         else:
-            result = _normalize_result(stage.name, raw_result)
+            result = _normalize_result(stage, raw_result)
         results.append(result)
         if on_stage_result:
             on_stage_result(stage.name, ordinal, result)

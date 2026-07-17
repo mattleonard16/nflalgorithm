@@ -27,6 +27,19 @@ def _terminate_process_for_lease_loss(reason: str) -> None:
     os._exit(LEASE_LOST_EXIT_CODE)
 
 
+def _automatic_retry_is_safe(report: Mapping[str, Any]) -> bool:
+    """Require every executed stage to declare retry-idempotent side effects."""
+    stages = report.get("stages")
+    if not isinstance(stages, list):
+        return False
+    executed = [
+        stage
+        for stage in stages
+        if isinstance(stage, Mapping) and stage.get("status") in {"ok", "error"}
+    ]
+    return bool(executed) and all(stage.get("retry_safe") is True for stage in executed)
+
+
 class PipelineWorker:
     """Claim one durable job at a time and execute it outside the API process."""
 
@@ -155,7 +168,10 @@ class PipelineWorker:
                 if lease_lost.is_set():
                     return
                 try:
-                    write_terminal(lambda: self.service.fail(job, str(exc)))
+                    # An unhandled runner exception may follow an external side
+                    # effect whose acknowledgement was lost. Without an explicit
+                    # stage result proving retry safety, fail closed.
+                    write_terminal(lambda: self.service.fail(job, str(exc), retryable=False))
                 except LeaseLostError as lease_exc:
                     mark_lease_lost(str(lease_exc))
                 return
@@ -220,6 +236,8 @@ class PipelineWorker:
 
             errors = report.get("errors") or []
             detail = "; ".join(str(item.get("error", "pipeline failed")) for item in errors)
+            automatic_retry_safe = _automatic_retry_is_safe(report)
+            report["automatic_retry_safe"] = automatic_retry_safe
             try:
                 write_terminal(
                     lambda: self.service.fail(
@@ -231,7 +249,8 @@ class PipelineWorker:
                             else "pipeline failed"
                         ),
                         report,
-                        retryable=not bool(report.get("incomplete")),
+                        retryable=not bool(report.get("incomplete"))
+                        and automatic_retry_safe,
                     )
                 )
             except LeaseLostError as exc:
