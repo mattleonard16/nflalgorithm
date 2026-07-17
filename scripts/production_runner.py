@@ -51,35 +51,52 @@ def stage_prepare_week(
 
 def stage_odds(season: int, week: int) -> Dict[str, Any]:
     """Refresh live odds; synthetic/demo lines are forbidden here."""
-    try:
-        from scripts.prop_line_scraper import NFLPropScraper
-        from pipelines.odds_validation import validate_odds_snapshot
+    from pipelines.odds_validation import validate_odds_snapshot
+    from scripts.prop_line_scraper import NFLPropScraper
 
-        odds = NFLPropScraper().run_weekly_update(
+    scraper = NFLPropScraper()
+    try:
+        odds = scraper.run_weekly_update(
             week,
             season,
             allow_synthetic=False,
         )
-        if odds.empty:
-            raise RuntimeError("Live odds refresh returned no rows")
-        validation = validate_odds_snapshot(odds.attrs.get("odds_audit", {}))
-        if not validation["valid"]:
-            return {
-                "status": "error",
-                "stage": "odds",
-                "error": validation["reason"],
-                "odds_count": len(odds),
-                "odds_validation": validation,
-            }
+    except Exception as exc:
+        observed = dict(getattr(scraper, "last_weekly_audit", {}) or {})
+        observed.setdefault("odds_rows", 0)
+        validation = validate_odds_snapshot(observed)
+        validation["provider_error"] = str(exc)
+        logger.error("Odds refresh failed: %s", exc)
         return {
-            "status": "ok",
+            "status": "error",
             "stage": "odds",
+            "error": str(exc),
+            "odds_count": 0,
+            "odds_validation": validation,
+        }
+
+    observed = dict(odds.attrs.get("odds_audit", {}))
+    observed["odds_rows"] = len(odds)
+    validation = validate_odds_snapshot(observed)
+    if odds.empty and validation["valid"]:
+        validation["valid"] = False
+        validation["reason_code"] = "empty_snapshot"
+        validation["reason"] = "Live odds refresh returned no rows"
+    if not validation["valid"]:
+        logger.error("Odds snapshot rejected: %s", validation["reason"])
+        return {
+            "status": "error",
+            "stage": "odds",
+            "error": validation["reason"],
             "odds_count": len(odds),
             "odds_validation": validation,
         }
-    except Exception as exc:
-        logger.error("Odds refresh failed: %s", exc)
-        return {"status": "error", "stage": "odds", "error": str(exc)}
+    return {
+        "status": "ok",
+        "stage": "odds",
+        "odds_count": len(odds),
+        "odds_validation": validation,
+    }
 
 
 def stage_value_ranking(season: int, week: int) -> Dict[str, Any]:

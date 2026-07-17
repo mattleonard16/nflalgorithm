@@ -200,6 +200,31 @@ def test_odds_stage_rejects_stale_or_partial_snapshots(
     assert result["odds_validation"]["reason_code"] == reason_code
 
 
+def test_odds_provider_failure_still_records_validation_reason(monkeypatch) -> None:
+    from scripts import prop_line_scraper
+
+    class FailingScraper:
+        last_weekly_audit = {
+            "source_statuses": ["STALE-ON-ERROR"],
+            "response_ages_seconds": [900],
+            "scheduled_events": 16,
+            "covered_events": 0,
+            "covered_event_markets": 0,
+            "odds_rows": 0,
+        }
+
+        def run_weekly_update(self, week, season, allow_synthetic=True):
+            raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(prop_line_scraper, "NFLPropScraper", FailingScraper)
+
+    result = production_runner.stage_odds(2026, 1)
+
+    assert result["status"] == "error"
+    assert result["odds_validation"]["reason_code"] == "stale_cache"
+    assert result["odds_validation"]["provider_error"] == "provider unavailable"
+
+
 def test_weekly_report_refresh_uses_prepare_then_live_odds(monkeypatch) -> None:
     from scripts import run_prop_update
 
