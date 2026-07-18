@@ -477,6 +477,7 @@ def main() -> None:
     compare = subparsers.add_parser("compare")
     compare.add_argument("baseline", type=Path)
     compare.add_argument("candidate", type=Path)
+    compare.add_argument("--output", type=Path)
     args = parser.parse_args()
 
     if args.command == "capture":
@@ -498,7 +499,10 @@ def main() -> None:
     baseline = json.loads(args.baseline.read_text())
     candidate = json.loads(args.candidate.read_text())
     result = compare_snapshots(baseline, candidate)
-    print(json.dumps(result, indent=2))
+    rendered = json.dumps(result, indent=2) + "\n"
+    if args.output:
+        args.output.write_text(rendered)
+    print(rendered, end="")
     if not result["passed"]:
         raise SystemExit(1)
 
