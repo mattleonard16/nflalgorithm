@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from scripts.preflight import Diagnostic
-from scripts.queue_monitor import alert_reasons, emit_once
+from scripts.queue_monitor import alert_reasons, confirm_delivery, emit_once
 from scripts.run_services import service_commands
 
 
@@ -57,6 +57,25 @@ def test_queue_monitor_emits_a_synthetic_routing_probe() -> None:
 
     assert payload["synthetic"] is True
     assert payload["alerts"] == ["synthetic pipeline alert routing probe"]
+
+
+def test_queue_monitor_binds_delivery_confirmation_to_probe_sha() -> None:
+    confirmation = confirm_delivery(
+        {
+            "candidate_sha": "a" * 40,
+            "synthetic": True,
+            "alerts": ["synthetic pipeline alert routing probe"],
+        },
+        delivery_id="incident-123",
+    )
+
+    assert confirmation == {
+        "candidate_sha": "a" * 40,
+        "passed": True,
+        "synthetic_alert_emitted": True,
+        "delivery_confirmed": True,
+        "delivery_id": "incident-123",
+    }
 
 
 def test_supervisor_stops_before_children_when_preflight_fails(monkeypatch) -> None:

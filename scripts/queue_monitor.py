@@ -47,13 +47,42 @@ def emit_once(
     return payload
 
 
+def confirm_delivery(probe: Mapping[str, Any], *, delivery_id: str) -> dict[str, Any]:
+    """Bind an observed platform alert to the exact synthetic probe and SHA."""
+    emitted = bool(
+        probe.get("synthetic") is True
+        and "synthetic pipeline alert routing probe" in probe.get("alerts", [])
+    )
+    delivered = bool(delivery_id.strip())
+    return {
+        "candidate_sha": probe.get("candidate_sha"),
+        "passed": emitted and delivered,
+        "synthetic_alert_emitted": emitted,
+        "delivery_confirmed": delivered,
+        "delivery_id": delivery_id,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--synthetic-alert", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--candidate-sha")
+    parser.add_argument("--confirm-probe", type=Path)
+    parser.add_argument("--delivery-id")
     args = parser.parse_args()
+    if args.confirm_probe:
+        if not args.delivery_id or not args.output:
+            parser.error("--confirm-probe requires --delivery-id and --output")
+        probe = json.loads(args.confirm_probe.read_text())
+        confirmation = confirm_delivery(probe, delivery_id=args.delivery_id)
+        rendered = json.dumps(confirmation, indent=2, default=str) + "\n"
+        args.output.write_text(rendered)
+        print(rendered, end="")
+        if not confirmation["passed"]:
+            raise SystemExit(1)
+        return
     if args.synthetic_alert and not args.once:
         parser.error("--synthetic-alert requires --once to prevent repeated test alerts")
     logging.basicConfig(level=logging.INFO)
