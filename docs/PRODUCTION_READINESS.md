@@ -15,9 +15,9 @@ addition to local tests.
 | Live-odds fail closed | Offline/stale cache, absent cache timestamps, missing provenance, excessive age, partial event coverage, partial market coverage, insufficient sportsbook breadth, and empty snapshots stop before value/risk/agents/card; reason and metrics persist per attempt | Capture provider/cache evidence from a staging run and verify the deployed read API cannot publish a rejected snapshot |
 | Private-server authorization | Black-box probe exists at `scripts/validate_deployed_pipeline_auth.py` | Run with real reader and operator identities against staging |
 | Staging soak | Harness exists at `scripts/pipeline_soak.py` | Complete a bounded soak with no stuck, failed, or duplicated jobs |
-| Migration/application rollback | Migrations are idempotent on fresh SQLite and MySQL databases; legacy tokenless running jobs are fenced and requeued or terminated consistently | Rehearse database backup, deploy, application rollback, and post-rollback reads in staging |
+| Migration/application rollback | A disposable rehearsal now proves candidate migration, predeploy-code compatibility, and byte-identical SQLite restore without touching the configured database | Run the same probe from the staging image with the deployed private API module, then rehearse the production database backup/restore procedure |
 | Shadow weekly run | A same-database 2026 Week 1 attempt exercised both paths, but both stopped in `prepare_week`: the installed ingestion dependency supports seasons only through 2025 and no live-odds credential was available. Matching empty-set hashes are explicitly not equivalence evidence | Rerun on a supported pre-kickoff week with a frozen point-in-time database and live-odds credential; compare every behavior-bearing output |
-| Runtime monitoring | Authenticated metrics expose queue, lease, retry, failure, and stage-duration data; the supervised runtime emits structured monitoring logs | Confirm staging ingestion, alert routing, and a synthetic alert notification |
+| Runtime monitoring | Authenticated metrics expose queue, lease, retry, failure, and stage-duration data; the monitor emits a one-shot SHA-bound synthetic probe and can bind provider delivery confirmation | Retain the real staging delivery identifier in the release manifest |
 
 ## Authoritative local database matrix
 
@@ -65,7 +65,9 @@ python -m scripts.validate_deployed_pipeline_auth \
   --base-url https://staging-api.example.com \
   --reader-token "$STAGING_READER_TOKEN" \
   --operator-token "$STAGING_OPERATOR_TOKEN" \
-  --season 2026 --week 1
+  --candidate-sha "$CANDIDATE_SHA" \
+  --season "$SEASON" --week "$WEEK" \
+  --output evidence/authorization.json
 ```
 
 ## Shadow output comparison
@@ -75,10 +77,21 @@ input snapshot, then compare behavior-bearing rows. Timestamps are excluded; val
 risk results, and cards must match.
 
 ```bash
-python -m scripts.shadow_weekly_outputs capture --season 2026 --week 1 --output legacy.json
-python -m scripts.shadow_weekly_outputs capture --season 2026 --week 1 --output queued.json
-python -m scripts.shadow_weekly_outputs compare legacy.json queued.json
+python -m scripts.shadow_weekly_outputs capture \
+  --season "$SEASON" --week "$WEEK" --commit-sha "$LEGACY_SHA" \
+  --run-report legacy-run.json --api-state legacy-api.json \
+  --output evidence/legacy-shadow.json
+python -m scripts.shadow_weekly_outputs capture \
+  --season "$SEASON" --week "$WEEK" --commit-sha "$CANDIDATE_SHA" \
+  --run-id "$QUEUED_RUN_ID" --output evidence/queued-shadow.json
+python -m scripts.shadow_weekly_outputs compare \
+  evidence/legacy-shadow.json evidence/queued-shadow.json \
+  --output evidence/shadow-weekly-run.json
 ```
+
+Comparison fails when either capture is empty or lacks freshness, projections, odds, candidates,
+stage timing, checksummed artifacts, or API-visible state. Exact values and timestamps must match;
+timing deltas are reported without requiring identical wall-clock duration.
 
 ## Staging soak
 
@@ -86,8 +99,54 @@ python -m scripts.shadow_weekly_outputs compare legacy.json queued.json
 python -m scripts.pipeline_soak \
   --base-url https://staging-api.example.com \
   --operator-token "$STAGING_OPERATOR_TOKEN" \
-  --season 2026 --week 1 --jobs 10 --timeout-seconds 3600
+  --candidate-sha "$CANDIDATE_SHA" \
+  --season "$SEASON" --week "$WEEK" --jobs 10 --timeout-seconds 3600 \
+  --output evidence/staging-soak.json
 ```
 
 Preserve the command output, service logs, metrics snapshot, database duplicate checks, and alert
 delivery evidence with the release record. A local pass cannot substitute for this staging gate.
+
+## Rollback rehearsal
+
+The local rehearsal uses only disposable files. In staging, keep the default `api.application:app`
+probe so the predeploy code must load the real private integration on the candidate schema.
+
+```bash
+python -m scripts.rehearse_pipeline_rollback \
+  --predeploy-ref "$PREDEPLOY_SHA" \
+  --candidate-sha "$CANDIDATE_SHA" \
+  --output evidence/rollback-rehearsal.json
+```
+
+## Monitoring delivery proof
+
+Emit exactly one synthetic warning, verify it arrived in the configured alert destination, then
+bind that provider incident or notification identifier to the probe.
+
+```bash
+python -m scripts.queue_monitor --once --synthetic-alert \
+  --candidate-sha "$CANDIDATE_SHA" --output evidence/monitor-probe.json
+python -m scripts.queue_monitor \
+  --confirm-probe evidence/monitor-probe.json \
+  --delivery-id "$ALERT_DELIVERY_ID" \
+  --output evidence/monitoring-delivery.json
+```
+
+## Final promotion manifest
+
+Every evidence document must contain `passed: true` and the exact candidate SHA. The manifest also
+verifies that the current `origin/main` commit is an ancestor of that candidate.
+
+```bash
+python -m scripts.pipeline_release_evidence \
+  --candidate-sha "$CANDIDATE_SHA" \
+  --database-matrix evidence/database-matrix.json \
+  --staging-failure-safety evidence/staging-failure-safety.json \
+  --authorization evidence/authorization.json \
+  --staging-soak evidence/staging-soak.json \
+  --rollback-rehearsal evidence/rollback-rehearsal.json \
+  --shadow-weekly-run evidence/shadow-weekly-run.json \
+  --monitoring-delivery evidence/monitoring-delivery.json \
+  --output evidence/promotion-manifest.json
+```
