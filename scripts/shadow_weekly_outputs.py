@@ -275,6 +275,7 @@ def capture_snapshot(
     season: int,
     week: int,
     *,
+    commit_sha: str | None = None,
     run_id: str | None = None,
     run_report: Mapping[str, Any] | None = None,
     report_path: Path | None = None,
@@ -306,6 +307,7 @@ def capture_snapshot(
     )
     return {
         "schema_version": SCHEMA_VERSION,
+        "commit_sha": commit_sha,
         "season": season,
         "week": week,
         "sections": sections,
@@ -452,6 +454,8 @@ def compare_snapshots(baseline: dict[str, Any], candidate: dict[str, Any]) -> di
     )
     return {
         "passed": passed,
+        "baseline_sha": baseline.get("commit_sha"),
+        "candidate_sha": candidate.get("commit_sha"),
         "same_week": same_week,
         "blockers": blockers,
         "sections": comparisons,
@@ -466,6 +470,7 @@ def main() -> None:
     capture.add_argument("--season", required=True, type=int)
     capture.add_argument("--week", required=True, type=int)
     capture.add_argument("--output", required=True, type=Path)
+    capture.add_argument("--commit-sha", required=True)
     capture.add_argument("--run-id")
     capture.add_argument("--run-report", type=Path)
     capture.add_argument("--api-state", type=Path)
@@ -480,6 +485,7 @@ def main() -> None:
         snapshot = capture_snapshot(
             args.season,
             args.week,
+            commit_sha=args.commit_sha,
             run_id=args.run_id,
             run_report=report,
             report_path=args.run_report,

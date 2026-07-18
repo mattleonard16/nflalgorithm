@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import uuid
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 import requests
 
@@ -74,6 +74,8 @@ def main() -> None:
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--reader-token", required=True)
     parser.add_argument("--operator-token", required=True)
+    parser.add_argument("--candidate-sha", required=True)
+    parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--season", required=True, type=int)
     parser.add_argument("--week", required=True, type=int)
     args = parser.parse_args()
@@ -85,8 +87,16 @@ def main() -> None:
         season=args.season,
         week=args.week,
     )
-    print(json.dumps([asdict(check) | {"passed": check.passed} for check in checks], indent=2))
-    if not all(check.passed for check in checks):
+    passed = all(check.passed for check in checks)
+    result = {
+        "candidate_sha": args.candidate_sha,
+        "passed": passed,
+        "checks": [asdict(check) | {"passed": check.passed} for check in checks],
+    }
+    rendered = json.dumps(result, indent=2) + "\n"
+    args.output.write_text(rendered)
+    print(rendered, end="")
+    if not passed:
         raise SystemExit(1)
 
 
