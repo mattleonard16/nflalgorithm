@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from scripts.preflight import Diagnostic
-from scripts.queue_monitor import alert_reasons
+from scripts.queue_monitor import alert_reasons, emit_once
 from scripts.run_services import service_commands
 
 
@@ -42,6 +42,21 @@ def test_queue_monitor_alerts_on_stale_or_old_work(monkeypatch) -> None:
         "stale worker lease detected",
         "oldest queued job exceeded threshold",
     ]
+
+
+def test_queue_monitor_emits_a_synthetic_routing_probe() -> None:
+    class Service:
+        def operational_metrics(self):
+            return {
+                "queue": {"queued": 0, "running": 0},
+                "stale_running": 0,
+                "oldest_queued_seconds": 0,
+            }
+
+    payload = emit_once(Service(), synthetic_alert=True)
+
+    assert payload["synthetic"] is True
+    assert payload["alerts"] == ["synthetic pipeline alert routing probe"]
 
 
 def test_supervisor_stops_before_children_when_preflight_fails(monkeypatch) -> None:
