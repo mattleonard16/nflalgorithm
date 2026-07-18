@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -202,6 +203,33 @@ def test_worker_claims_fifo_and_records_stage_timeline(job_db) -> None:
     assert json.loads(stage[3])["players"] == 42
     queued = fetchall("SELECT status FROM pipeline_jobs ORDER BY created_at, job_id")
     assert queued == [("completed",), ("queued",)]
+
+
+def test_worker_registers_verifiable_run_report_artifact(job_db, tmp_path) -> None:
+    service = JobService()
+    queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    artifact_path = tmp_path / "run-report.json"
+    artifact_path.write_text('{"success":true}\n')
+
+    def runner(*args, **kwargs):
+        return {
+            "success": True,
+            "stages": [{"stage": "prepare_week", "status": "ok"}],
+            "errors": [],
+            "artifact_uri": str(artifact_path),
+        }
+
+    worker = PipelineWorker(worker_id="artifact-worker", service=service, runner=runner)
+
+    assert worker.process_once() is True
+    row = fetchone(
+        "SELECT checksum, size_bytes FROM pipeline_artifacts WHERE run_id = ?",
+        (queued.run_id,),
+    )
+    assert row == (
+        hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
+        len(artifact_path.read_bytes()),
+    )
 
 
 def test_every_claim_receives_a_unique_attempt_token(job_db) -> None:

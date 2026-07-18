@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import os
 import socket
 import threading
 import time
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 from pipeline_jobs.service import JobService, LeaseLostError, PipelineJob
@@ -25,6 +27,24 @@ def _terminate_process_for_lease_loss(reason: str) -> None:
     """Hard-stop production execution when cooperative cancellation is impossible."""
     logger.critical("Terminating worker after lease loss: %s", reason)
     os._exit(LEASE_LOST_EXIT_CODE)
+
+
+def _local_artifact_integrity(uri: str) -> dict[str, Any]:
+    """Return content evidence for a local artifact without trusting its filename."""
+    if "://" in uri and not uri.startswith("file://"):
+        return {}
+    path = Path(uri.removeprefix("file://"))
+    digest = hashlib.sha256()
+    size_bytes = 0
+    try:
+        with path.open("rb") as artifact_file:
+            while chunk := artifact_file.read(1024 * 1024):
+                digest.update(chunk)
+                size_bytes += len(chunk)
+    except OSError as exc:
+        logger.warning("Could not hash run artifact %s: %s", uri, exc)
+        return {}
+    return {"checksum": digest.hexdigest(), "size_bytes": size_bytes}
 
 
 def _automatic_retry_is_safe(report: Mapping[str, Any]) -> bool:
@@ -207,6 +227,7 @@ class PipelineWorker:
                             "kind": "run_report",
                             "uri": str(artifact_uri),
                             "metadata": {"season": payload["season"], "week": payload["week"]},
+                            **_local_artifact_integrity(str(artifact_uri)),
                         }
                         if artifact_uri
                         else None
