@@ -233,6 +233,222 @@ def check_private_modules(root: Path = PROJECT_ROOT, *, required: bool) -> Diagn
     )
 
 
+def evaluate_nfl_week_readiness(
+    season: int,
+    week: int,
+    *,
+    phase: str,
+    counts: dict[str, int],
+) -> list[Diagnostic]:
+    """Evaluate the database evidence required before or after a weekly run."""
+    if phase not in {"pre-run", "post-run"}:
+        raise ValueError("phase must be `pre-run` or `post-run`")
+
+    scope = f"season {season}, week {week}"
+    diagnostics: list[Diagnostic] = []
+
+    games = counts.get("games", 0)
+    games_with_kickoff = counts.get("games_with_kickoff", 0)
+    if games <= 0:
+        diagnostics.append(
+            _result(
+                "nfl_schedule",
+                "fail",
+                f"No scheduled games are loaded for {scope}.",
+                f"Run `make week-refresh SEASON={season} WEEK={week}` and verify the schedule source.",
+            )
+        )
+    elif games_with_kickoff != games:
+        diagnostics.append(
+            _result(
+                "nfl_schedule",
+                "fail",
+                f"Only {games_with_kickoff}/{games} games have kickoff timestamps for {scope}.",
+                "Refresh the schedule; point-in-time validation requires every kickoff timestamp.",
+            )
+        )
+    else:
+        diagnostics.append(
+            _result(
+                "nfl_schedule",
+                "pass",
+                f"{games} scheduled games have kickoff timestamps for {scope}.",
+            )
+        )
+
+    requirements = (
+        (
+            "nfl_roster",
+            "roster_players",
+            "roster players",
+            f"Run `make week-refresh SEASON={season} WEEK={week}` to refresh the roster.",
+        ),
+        (
+            "nfl_history",
+            "history_rows",
+            "historical player-stat rows",
+            "Ingest prior completed weeks before generating projections.",
+        ),
+    )
+    for name, key, label, action in requirements:
+        count = counts.get(key, 0)
+        diagnostics.append(
+            _result(
+                name,
+                "pass" if count > 0 else "fail",
+                f"{count} {label} are available for {scope}.",
+                None if count > 0 else action,
+            )
+        )
+
+    if phase == "pre-run":
+        return diagnostics
+
+    post_run_requirements = (
+        ("nfl_context", "context_rows", "point-in-time player context rows"),
+        ("nfl_projections", "projection_rows", "persisted projections"),
+        ("nfl_live_odds", "odds_rows", "persisted live-odds rows"),
+        ("nfl_worker_run", "completed_runs", "completed worker runs"),
+        ("nfl_odds_validation", "valid_odds_runs", "valid odds-validation records"),
+        ("nfl_artifacts", "artifact_rows", "registered run artifacts"),
+    )
+    for name, key, label in post_run_requirements:
+        count = counts.get(key, 0)
+        diagnostics.append(
+            _result(
+                name,
+                "pass" if count > 0 else "fail",
+                f"{count} {label} are available for {scope}.",
+                None if count > 0 else "Inspect the failed pipeline run before publishing results.",
+            )
+        )
+
+    decision_rows = counts.get("decision_rows", 0)
+    diagnostics.append(
+        _result(
+            "nfl_decisions",
+            "pass" if decision_rows > 0 else "warn",
+            f"{decision_rows} agent decisions are persisted for {scope}.",
+            (
+                None
+                if decision_rows > 0
+                else "Confirm the run report records that no candidates reached agent review."
+            ),
+        )
+    )
+
+    card_rows = counts.get("card_rows", 0)
+    if card_rows > 0:
+        diagnostics.append(
+            _result(
+                "nfl_card", "pass", f"{card_rows} approved card rows are published for {scope}."
+            )
+        )
+    else:
+        diagnostics.append(
+            _result(
+                "nfl_card",
+                "warn",
+                f"No plays are published for {scope}; this can be a valid zero-play card.",
+                "Confirm that rejection decisions and the run report were persisted.",
+            )
+        )
+    return diagnostics
+
+
+def collect_nfl_week_counts(season: int, week: int) -> dict[str, int]:
+    """Collect portable SQLite/MySQL evidence for one NFL week."""
+    from utils.db import fetchone
+
+    def scalar(sql: str, params: tuple[Any, ...]) -> int:
+        row = fetchone(sql, params=params)
+        return int(row[0] or 0) if row else 0
+
+    counts = {
+        "games": scalar("SELECT COUNT(*) FROM games WHERE season = ? AND week = ?", (season, week)),
+        "games_with_kickoff": scalar(
+            """
+            SELECT COUNT(*) FROM games
+            WHERE season = ? AND week = ?
+              AND kickoff_utc IS NOT NULL AND kickoff_utc <> ''
+            """,
+            (season, week),
+        ),
+        "roster_players": scalar(
+            "SELECT COUNT(*) FROM nfl_roster_players WHERE season = ? AND roster_week = ?",
+            (season, week),
+        ),
+        "history_rows": scalar(
+            """
+            SELECT COUNT(*) FROM player_stats_enhanced
+            WHERE season < ? OR (season = ? AND week < ?)
+            """,
+            (season, season, week),
+        ),
+        "context_rows": scalar(
+            "SELECT COUNT(*) FROM nfl_player_context_snapshots WHERE season = ? AND week = ?",
+            (season, week),
+        ),
+        "projection_rows": scalar(
+            "SELECT COUNT(*) FROM weekly_projections WHERE season = ? AND week = ?",
+            (season, week),
+        ),
+        "odds_rows": scalar(
+            "SELECT COUNT(*) FROM weekly_odds WHERE season = ? AND week = ?",
+            (season, week),
+        ),
+        "decision_rows": scalar(
+            "SELECT COUNT(*) FROM agent_decisions WHERE season = ? AND week = ?",
+            (season, week),
+        ),
+        "completed_runs": scalar(
+            """
+            SELECT COUNT(*) FROM pipeline_runs
+            WHERE season = ? AND week = ? AND status = 'completed'
+            """,
+            (season, week),
+        ),
+        "valid_odds_runs": scalar(
+            """
+            SELECT COUNT(*) FROM pipeline_odds_validations validations
+            JOIN pipeline_runs runs ON runs.run_id = validations.run_id
+            WHERE runs.season = ? AND runs.week = ?
+              AND runs.status = 'completed' AND validations.valid = 1
+            """,
+            (season, week),
+        ),
+        "artifact_rows": scalar(
+            """
+            SELECT COUNT(*) FROM pipeline_artifacts artifacts
+            JOIN pipeline_runs runs ON runs.run_id = artifacts.run_id
+            WHERE runs.season = ? AND runs.week = ? AND runs.status = 'completed'
+            """,
+            (season, week),
+        ),
+        "card_rows": scalar(
+            "SELECT COUNT(*) FROM materialized_value_view WHERE season = ? AND week = ?",
+            (season, week),
+        ),
+    }
+    return counts
+
+
+def check_nfl_week_readiness(season: int, week: int, *, phase: str) -> list[Diagnostic]:
+    """Load and evaluate weekly evidence without hiding schema/query failures."""
+    try:
+        counts = collect_nfl_week_counts(season, week)
+    except Exception as exc:
+        return [
+            _result(
+                "nfl_week_data",
+                "fail",
+                f"NFL week evidence could not be read: {type(exc).__name__}: {exc}",
+                "Run migrations, then refresh the requested NFL week.",
+            )
+        ]
+    return evaluate_nfl_week_readiness(season, week, phase=phase, counts=counts)
+
+
 def _node_version() -> tuple[int, int, int] | None:
     node = shutil.which("node")
     if not node:
@@ -299,13 +515,23 @@ def collect_diagnostics(
     check_frontend_dependencies: bool = False,
     require_live_odds: bool = False,
     require_private_modules: bool = False,
+    season: int | None = None,
+    week: int | None = None,
+    season_phase: str = "pre-run",
 ) -> list[Diagnostic]:
     diagnostics = [check_python()]
     config, config_diagnostics = check_runtime_config()
     diagnostics.extend(config_diagnostics)
     if config is not None and not any(item.failed for item in config_diagnostics):
-        diagnostics.extend(check_database(config, check_schema=check_schema))
+        database_diagnostics = check_database(config, check_schema=check_schema)
+        diagnostics.extend(database_diagnostics)
         diagnostics.append(check_odds_key(config, required=require_live_odds))
+        if (
+            season is not None
+            and week is not None
+            and not any(item.failed for item in database_diagnostics)
+        ):
+            diagnostics.extend(check_nfl_week_readiness(season, week, phase=season_phase))
     diagnostics.append(check_private_api())
     diagnostics.append(check_private_modules(required=require_private_modules))
     if check_frontend_dependencies:
@@ -339,6 +565,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--check-frontend", action="store_true", help="Check Node/npm/frontend install"
     )
+    parser.add_argument("--season", type=int, help="NFL season for weekly readiness checks")
+    parser.add_argument("--week", type=int, help="NFL week for weekly readiness checks")
+    parser.add_argument(
+        "--season-phase",
+        choices=("pre-run", "post-run"),
+        default="pre-run",
+        help="Require inputs before a run or persisted evidence after a run",
+    )
     parser.add_argument(
         "--require-live-odds", action="store_true", help="Fail if ODDS_API_KEY is empty"
     )
@@ -353,12 +587,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    if (args.season is None) != (args.week is None):
+        raise SystemExit("--season and --week must be supplied together")
     configure_logging("preflight")
     diagnostics = collect_diagnostics(
         check_schema=args.check_schema,
         check_frontend_dependencies=args.check_frontend,
         require_live_odds=args.require_live_odds,
         require_private_modules=args.require_private_modules,
+        season=args.season,
+        week=args.week,
+        season_phase=args.season_phase,
     )
     print_diagnostics(diagnostics, as_json=args.json)
     return 1 if any(item.failed for item in diagnostics) else 0

@@ -31,21 +31,22 @@ the reason on the job, run, and interrupted stage.
    ```
 2. Update a specific NFL week (idempotent upserts):
    ```bash
-   make week-update SEASON=2023 WEEK=12
+   make week-refresh SEASON=2026 WEEK=1
+   make doctor-season SEASON=2026 WEEK=1
    ```
 3. Train or refresh rolling models if needed:
    ```bash
    python -c "from models.position_specific import train_weekly_models; train_weekly_models([(2023, 10), (2023, 11), (2023, 12)])"
    ```
-4. Generate projections and materialize dashboard view:
+4. Queue the durable production run and let the worker execute it:
    ```bash
-   make week-predict SEASON=2023 WEEK=12
-   make week-materialize SEASON=2023 WEEK=12
+   make production-run SEASON=2026 WEEK=1
+   make pipeline-worker-once
    ```
-5. Execute sanity checks before publishing:
+5. Verify persisted worker evidence and execute sanity checks:
    ```bash
-   make mini-backtest SEASON=2023 WEEK=12
-   make health SEASON=2023 WEEK=12
+   make doctor-season SEASON=2026 WEEK=1 SEASON_PHASE=post-run
+   make health SEASON=2026 WEEK=1
    ```
 6. Launch dashboard and monitor feeds:
    ```bash

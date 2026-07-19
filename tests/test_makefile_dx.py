@@ -77,3 +77,18 @@ def test_validate_requires_explicit_season_and_weeks() -> None:
     ).stdout
     assert "scripts.evaluate_nfl_projections evaluate" in command
     assert "--season 2025 --weeks 1 2" in command
+
+
+def test_doctor_season_checks_explicit_week_and_phase() -> None:
+    command = run_make(
+        "-n",
+        "doctor-season",
+        "ENV_FILE=/dev/null",
+        "SEASON=2026",
+        "WEEK=1",
+        "SEASON_PHASE=post-run",
+    ).stdout
+
+    assert "scripts.preflight" in command
+    assert "--season 2026 --week 1 --season-phase post-run" in command
+    assert "--require-live-odds --require-private-modules" in command

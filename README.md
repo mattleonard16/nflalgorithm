@@ -293,6 +293,21 @@ LOG_LEVEL=INFO
 
 The UI and read-only API can start without `ODDS_API_KEY`, but live-odds NFL runs fail closed. `make doctor-production` also requires deployment-supplied private NFL modules.
 
+Before queueing a weekly run, verify that the requested season/week has a complete schedule,
+kickoff timestamps, a roster, and prior history:
+
+```bash
+make doctor-season SEASON=2026 WEEK=1
+```
+
+After the worker finishes, require persisted projections, validated live odds, decisions, artifacts,
+and a completed run. A zero-play card is reported as a warning because rejecting every candidate can
+be a correct outcome.
+
+```bash
+make doctor-season SEASON=2026 WEEK=1 SEASON_PHASE=post-run
+```
+
 > **Security**: Never commit `.env`, database credentials, or API keys to version control.
 
 ---
@@ -316,6 +331,7 @@ make validate SEASON=2025 WEEKS="1 2 3"  # Score persisted pre-kickoff projectio
 | `make frontend-install` | Install locked frontend dependencies with `npm ci` |
 | `make migrate` | Back up and migrate local SQLite |
 | `make doctor` | Validate local tools, configuration, DB, schema, keys, and modules |
+| `make doctor-season SEASON=2026 WEEK=1` | Validate in-season inputs or post-run evidence |
 | `make fullstack` | Supervise worker, API, readiness, and frontend |
 | `make ingest-nfl` | Fetch real NFL data |
 | `make week-predict` | Generate week projections |

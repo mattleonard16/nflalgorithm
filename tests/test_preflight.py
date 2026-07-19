@@ -10,6 +10,7 @@ from scripts.preflight import (
     check_private_api,
     check_private_modules,
     check_runtime_config,
+    evaluate_nfl_week_readiness,
 )
 
 
@@ -65,3 +66,77 @@ def test_missing_private_modules_explain_read_only_mode(tmp_path) -> None:
     assert diagnostic.status == "warn"
     assert "Private NFL execution modules are unavailable" in diagnostic.message
     assert "API read-only features" in (diagnostic.action or "")
+
+
+def test_pregame_readiness_requires_schedule_roster_and_history() -> None:
+    diagnostics = evaluate_nfl_week_readiness(
+        2026,
+        1,
+        phase="pre-run",
+        counts={
+            "games": 16,
+            "games_with_kickoff": 16,
+            "roster_players": 1800,
+            "history_rows": 10000,
+        },
+    )
+
+    assert all(item.status == "pass" for item in diagnostics)
+
+    missing = evaluate_nfl_week_readiness(
+        2026,
+        1,
+        phase="pre-run",
+        counts={"games": 0, "games_with_kickoff": 0, "roster_players": 0, "history_rows": 0},
+    )
+    assert {item.name for item in missing if item.status == "fail"} == {
+        "nfl_schedule",
+        "nfl_roster",
+        "nfl_history",
+    }
+
+
+def test_postrun_readiness_requires_persisted_worker_evidence() -> None:
+    diagnostics = evaluate_nfl_week_readiness(
+        2026,
+        1,
+        phase="post-run",
+        counts={
+            "games": 16,
+            "games_with_kickoff": 16,
+            "roster_players": 1800,
+            "history_rows": 10000,
+            "context_rows": 500,
+            "projection_rows": 300,
+            "odds_rows": 1200,
+            "decision_rows": 40,
+            "completed_runs": 1,
+            "valid_odds_runs": 1,
+            "artifact_rows": 1,
+            "card_rows": 0,
+        },
+    )
+
+    assert not any(item.status == "fail" for item in diagnostics)
+    card = next(item for item in diagnostics if item.name == "nfl_card")
+    assert card.status == "warn"
+    assert "valid zero-play card" in card.message
+
+    no_odds = dict(
+        games=16,
+        games_with_kickoff=16,
+        roster_players=1800,
+        history_rows=10000,
+        context_rows=500,
+        projection_rows=300,
+        odds_rows=0,
+        decision_rows=0,
+        completed_runs=0,
+        valid_odds_runs=0,
+        artifact_rows=0,
+        card_rows=0,
+    )
+    failed = evaluate_nfl_week_readiness(2026, 1, phase="post-run", counts=no_odds)
+
+    assert "nfl_live_odds" in {item.name for item in failed if item.status == "fail"}
+    assert "nfl_worker_run" in {item.name for item in failed if item.status == "fail"}
