@@ -8,7 +8,6 @@ import tempfile
 from contextlib import contextmanager
 from unittest.mock import Mock, patch
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -160,21 +159,6 @@ class TestConfiguration:
         assert config.betting.min_edge_threshold == 0.08
         assert config.betting.min_confidence == 0.75
 
-class TestCrossSeasonValidation:
-    """Test cross-season validation components."""
-    
-    def test_feature_columns(self):
-        """Test that feature columns are properly defined."""
-        from cross_season_validation import EnhancedCrossSeasonValidator
-        
-        validator = EnhancedCrossSeasonValidator()
-        features = validator.get_enhanced_feature_columns()
-        
-        assert isinstance(features, list)
-        assert len(features) > 10  # Should have substantial feature set
-        assert 'age' in features
-        assert 'position_encoded' in features
-
 # Integration tests
 class TestIntegration:
     """Integration tests for complete workflows."""
@@ -194,42 +178,5 @@ class TestIntegration:
             except Exception as e:
                 pytest.fail(f"Pipeline integration failed: {e}")
 
-# Performance tests
-class TestPerformance:
-    """Performance and benchmark tests."""
-    
-    def test_feature_engineering_speed(self):
-        """Test that feature engineering completes in reasonable time."""
-        import time
-        
-        # Create larger dataset
-        n_samples = 1000
-        data = {
-            'player_id': [f'P{i}' for i in range(n_samples)],
-            'season': [2023] * n_samples,
-            'week': [1] * n_samples,
-            'position': ['RB'] * n_samples,
-            'age': np.random.randint(22, 35, n_samples),
-            'games_played': [16] * n_samples,
-            'rushing_yards': np.random.randint(0, 200, n_samples),
-            'rushing_attempts': np.random.randint(0, 30, n_samples),
-            'receiving_yards': np.random.randint(0, 100, n_samples),
-            'receptions': np.random.randint(0, 10, n_samples),
-            'targets': np.random.randint(0, 15, n_samples)
-        }
-        
-        df = pd.DataFrame(data)
-        
-        from cross_season_validation import EnhancedCrossSeasonValidator
-        validator = EnhancedCrossSeasonValidator()
-        
-        start_time = time.time()
-        result = validator.engineer_enhanced_features(df)
-        elapsed = time.time() - start_time
-        
-        # Should complete within 5 seconds for 1000 samples
-        assert elapsed < 5.0, f"Feature engineering too slow: {elapsed:.2f}s"
-        assert len(result) == n_samples, "Data loss during feature engineering"
-
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"]) 
+    pytest.main([__file__, "-v"])

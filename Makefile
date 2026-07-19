@@ -19,6 +19,7 @@ ENV_TYPE ?= $(shell command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ] && 
 # Example: make week SEASON=2026 WEEK=1
 SEASON ?=
 WEEK ?=
+WEEKS ?=
 NFL_SEASONS ?=
 HISTORY_SEASONS ?=
 REFRESH_HISTORY ?= 0
@@ -37,6 +38,14 @@ endef
 define require_season
 	@if [ -z "$(SEASON)" ]; then \
 		echo "ERROR: SEASON is required. Example: make $@ SEASON=2026" >&2; \
+		exit 2; \
+	fi
+endef
+
+# Guard used by historical evaluation targets. WEEKS is a space-separated list.
+define require_season_weeks
+	@if [ -z "$(SEASON)" ] || [ -z "$(WEEKS)" ]; then \
+		echo "ERROR: SEASON and WEEKS are required. Example: make $@ SEASON=2025 WEEKS='1 2 3'" >&2; \
 		exit 2; \
 	fi
 endef
@@ -87,7 +96,8 @@ help:
 	@echo "  make pipeline-worker-once"
 	@echo "  make health SEASON=2026 WEEK=1"
 	@echo ""
-	@echo "Quality: make test | make lint | make format | make validate"
+	@echo "Quality: make test | make lint | make format"
+	@echo "Evaluation: make validate SEASON=2025 WEEKS='1 2 3'"
 	@echo "All target names: make list-targets"
 
 list-targets:
@@ -177,14 +187,17 @@ format:
 	$(PYTHON) -m isort . --profile black
 	@echo "Formatting complete!"
 
-# Cross-season validation with timing
+# Evaluate persisted production projections against point-in-time outcomes.
 validate:
-	@echo "Running enhanced cross-season validation with $(ENV_TYPE)..."
+	$(call require_season_weeks)
+	@echo "Evaluating persisted NFL projections with $(ENV_TYPE)..."
 	@start_time=$$(date +%s); \
-	$(PYTHON) cross_season_validation.py; \
+	$(DB_ENV) $(PYTHON) -m scripts.evaluate_nfl_projections evaluate \
+		--season $(SEASON) --weeks $(WEEKS) \
+		--output logs/metrics/nfl-projection-evaluation-$(SEASON).json; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
-	echo "Validation complete in $${duration}s! Check logs/validation_leaderboard.md"
+	echo "Evaluation complete in $${duration}s."
 
 # Hyperparameter optimization with environment detection
 optimize:
@@ -528,10 +541,9 @@ demo:
 
 # Validation report
 validate-report:
-	@echo "Running enhanced cross-season validation and printing leaderboard..."
-	$(PYTHON) cross_season_validation.py | cat
-	@echo "---"
-	@echo "Saved markdown: logs/validation_leaderboard.md"
+	$(call require_season_weeks)
+	@$(MAKE) validate SEASON=$(SEASON) WEEKS="$(WEEKS)"
+	@echo "Saved JSON: logs/metrics/nfl-projection-evaluation-$(SEASON).json"
 
 # Clean temporary files
 clean:

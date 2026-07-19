@@ -303,7 +303,7 @@ The UI and read-only API can start without `ODDS_API_KEY`, but live-odds NFL run
 make test          # Run all tests
 make lint          # Run mypy
 make format        # Format with black + isort
-make validate      # Cross-season validation
+make validate SEASON=2025 WEEKS="1 2 3"  # Score persisted pre-kickoff projections
 ```
 
 ---

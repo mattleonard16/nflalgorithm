@@ -54,3 +54,26 @@ def test_make_compatible_env_file_configures_api_port(tmp_path) -> None:
 
     assert "--host 127.0.0.1 --port 8123" in output
     assert "api.application:app" in output
+
+
+def test_validate_requires_explicit_season_and_weeks() -> None:
+    missing = subprocess.run(
+        ["make", "--no-print-directory", "validate", "ENV_FILE=/dev/null"],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert missing.returncode != 0
+    assert "SEASON and WEEKS are required" in missing.stderr
+
+    command = run_make(
+        "-n",
+        "validate",
+        "ENV_FILE=/dev/null",
+        "SEASON=2025",
+        "WEEKS=1 2",
+    ).stdout
+    assert "scripts.evaluate_nfl_projections evaluate" in command
+    assert "--season 2025 --weeks 1 2" in command
