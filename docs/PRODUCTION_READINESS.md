@@ -90,8 +90,9 @@ python -m scripts.shadow_weekly_outputs compare \
 ```
 
 Comparison fails when either capture is empty or lacks freshness, projections, odds, candidates,
-stage timing, checksummed artifacts, or API-visible state. Exact values and timestamps must match;
-timing deltas are reported without requiring identical wall-clock duration.
+stage timing, checksummed artifacts, semantic artifact content, or API-visible state. Exact input
+and decision timestamps must match. Run-report timestamps and durations are normalized for semantic
+comparison, while their original file checksums remain recorded as integrity evidence.
 
 ## Staging soak
 
@@ -141,6 +142,7 @@ verifies that the current `origin/main` commit is an ancestor of that candidate.
 ```bash
 python -m scripts.pipeline_release_evidence \
   --candidate-sha "$CANDIDATE_SHA" \
+  --baseline-sha "$LEGACY_SHA" \
   --database-matrix evidence/database-matrix.json \
   --staging-failure-safety evidence/staging-failure-safety.json \
   --authorization evidence/authorization.json \

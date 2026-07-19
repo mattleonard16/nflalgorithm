@@ -30,6 +30,7 @@ def _valid_sha(value: str) -> bool:
 def build_manifest(
     *,
     candidate_sha: str,
+    baseline_sha: str,
     origin_main_sha: str,
     origin_main_is_ancestor: bool,
     evidence: Mapping[str, Mapping[str, Any]],
@@ -37,10 +38,14 @@ def build_manifest(
     """Require every release proof to pass and belong to the exact candidate."""
     blockers: list[str] = []
     candidate_sha = candidate_sha.lower()
+    baseline_sha = baseline_sha.lower()
     origin_main_sha = origin_main_sha.lower()
     known_commit = _valid_sha(candidate_sha)
     if not known_commit:
         blockers.append("candidate SHA is not a full 40-character Git SHA")
+    known_baseline = _valid_sha(baseline_sha)
+    if not known_baseline:
+        blockers.append("baseline SHA is not a full 40-character Git SHA")
     integrated = _valid_sha(origin_main_sha) and origin_main_is_ancestor
     if not _valid_sha(origin_main_sha):
         blockers.append("origin/main SHA is not a full 40-character Git SHA")
@@ -49,6 +54,7 @@ def build_manifest(
 
     gates: dict[str, Any] = {
         "known_commit_sha": {"passed": known_commit, "candidate_sha": candidate_sha},
+        "known_baseline_sha": {"passed": known_baseline, "baseline_sha": baseline_sha},
         "integrated_with_origin_main": {
             "passed": integrated,
             "origin_main_sha": origin_main_sha,
@@ -67,9 +73,15 @@ def build_manifest(
             blockers.append(f"{name} evidence belongs to a different candidate SHA")
         if not proof_passed:
             blockers.append(f"{name} evidence did not pass")
+        baseline_bound = True
+        if name == "shadow_weekly_run":
+            item_baseline_sha = str(item.get("baseline_sha", "")).lower()
+            baseline_bound = known_baseline and item_baseline_sha == baseline_sha
+            if not baseline_bound:
+                blockers.append("shadow_weekly_run evidence belongs to a different baseline SHA")
         gates[name] = {
             **dict(item),
-            "passed": sha_bound and proof_passed,
+            "passed": sha_bound and baseline_bound and proof_passed,
             "candidate_sha": item_sha,
         }
 
@@ -77,6 +89,7 @@ def build_manifest(
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "candidate_sha": candidate_sha,
+        "baseline_sha": baseline_sha,
         "origin_main_sha": origin_main_sha,
         "passed": not blockers,
         "blockers": blockers,
@@ -109,6 +122,7 @@ def _load_evidence(path: Path) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate-sha")
+    parser.add_argument("--baseline-sha", required=True)
     parser.add_argument("--origin-main", default="origin/main")
     parser.add_argument("--database-matrix", required=True, type=Path)
     parser.add_argument("--staging-failure-safety", required=True, type=Path)
@@ -141,6 +155,7 @@ def main() -> None:
     evidence = {name: _load_evidence(path) for name, path in paths.items()}
     manifest = build_manifest(
         candidate_sha=candidate_sha,
+        baseline_sha=args.baseline_sha,
         origin_main_sha=origin_main_sha,
         origin_main_is_ancestor=ancestor,
         evidence=evidence,

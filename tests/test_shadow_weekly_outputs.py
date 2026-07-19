@@ -8,7 +8,11 @@ import json
 import pytest
 
 from schema_migrations import MigrationManager
-from scripts.shadow_weekly_outputs import capture_snapshot, compare_snapshots
+from scripts.shadow_weekly_outputs import (
+    _semantic_artifact_hash,
+    capture_snapshot,
+    compare_snapshots,
+)
 from utils.db import execute
 
 
@@ -35,9 +39,10 @@ def _section(records):
     }
 
 
-def _complete_snapshot(*, odds_timestamp: str, duration: float) -> dict:
+def _complete_snapshot(*, odds_timestamp: str, duration: float, commit_sha: str = "a" * 40) -> dict:
     return {
         "schema_version": 2,
+        "commit_sha": commit_sha,
         "season": 2025,
         "week": 8,
         "sections": {
@@ -69,6 +74,7 @@ def _complete_snapshot(*, odds_timestamp: str, duration: float) -> dict:
                         "kind": "run_report",
                         "checksum": "a" * 64,
                         "size_bytes": 100,
+                        "semantic_sha256": "c" * 64,
                     }
                 ]
             ),
@@ -145,13 +151,76 @@ def test_shadow_comparison_requires_artifact_checksums() -> None:
     baseline = _complete_snapshot(odds_timestamp="2025-10-26T16:00:00+00:00", duration=100.0)
     candidate = _complete_snapshot(odds_timestamp="2025-10-26T16:00:00+00:00", duration=100.0)
     candidate["sections"]["artifacts"] = _section(
-        [{"kind": "run_report", "checksum": None, "size_bytes": 100}]
+        [
+            {
+                "kind": "run_report",
+                "checksum": None,
+                "size_bytes": 100,
+                "semantic_sha256": "c" * 64,
+            }
+        ]
     )
 
     result = compare_snapshots(baseline, candidate)
 
     assert result["passed"] is False
     assert "candidate artifacts are missing checksums" in result["blockers"]
+
+
+def test_shadow_comparison_uses_semantic_artifact_content() -> None:
+    baseline = _complete_snapshot(odds_timestamp="2025-10-26T16:00:00+00:00", duration=100.0)
+    candidate = _complete_snapshot(
+        odds_timestamp="2025-10-26T16:00:00+00:00",
+        duration=100.0,
+        commit_sha="b" * 40,
+    )
+    candidate["sections"]["artifacts"]["records"][0]["checksum"] = "b" * 64
+    candidate["sections"]["artifacts"]["records"][0]["size_bytes"] = 120
+    candidate["sections"]["artifacts"] = _section(candidate["sections"]["artifacts"]["records"])
+
+    result = compare_snapshots(baseline, candidate)
+
+    assert result["passed"] is True
+    assert result["sections"]["artifacts"]["matched"] is True
+
+
+def test_run_report_semantic_hash_excludes_execution_timing(tmp_path) -> None:
+    baseline = tmp_path / "baseline.json"
+    candidate = tmp_path / "candidate.json"
+    baseline.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "started_at": "2025-10-26T16:00:00Z",
+                "finished_at": "2025-10-26T16:02:00Z",
+                "stages": [{"stage": "prepare", "status": "ok", "duration_seconds": 120}],
+            }
+        )
+    )
+    candidate.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "started_at": "2025-10-26T16:05:00Z",
+                "finished_at": "2025-10-26T16:06:00Z",
+                "stages": [{"stage": "prepare", "status": "ok", "duration_seconds": 60}],
+            }
+        )
+    )
+
+    assert baseline.read_bytes() != candidate.read_bytes()
+    assert _semantic_artifact_hash(baseline) == _semantic_artifact_hash(candidate)
+
+
+def test_shadow_comparison_requires_commit_identity() -> None:
+    baseline = _complete_snapshot(odds_timestamp="2025-10-26T16:00:00+00:00", duration=100.0)
+    candidate = _complete_snapshot(odds_timestamp="2025-10-26T16:00:00+00:00", duration=100.0)
+    baseline["commit_sha"] = None
+
+    result = compare_snapshots(baseline, candidate)
+
+    assert result["passed"] is False
+    assert "baseline commit_sha is not a full 40-character Git SHA" in result["blockers"]
 
 
 def test_capture_collects_every_weekly_evidence_dimension(shadow_db) -> None:

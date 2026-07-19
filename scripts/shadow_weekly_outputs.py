@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Any, Mapping, Sequence
 from utils.db import fetchall, fetchone, get_table_columns
 
 SCHEMA_VERSION = 2
+SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 CONTENT_SECTIONS = (
     "input_freshness",
     "projections",
@@ -47,6 +49,9 @@ VOLATILE_API_KEYS = frozenset(
         "available_at",
         "artifact_uri",
     }
+)
+VOLATILE_ARTIFACT_KEYS = VOLATILE_API_KEYS | frozenset(
+    {"duration_seconds", "generated_at", "assessed_at", "decided_at"}
 )
 
 
@@ -177,17 +182,41 @@ def _stage_timing_from_report(report: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_artifact_content(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _normalize_artifact_content(item)
+            for key, item in value.items()
+            if str(key) not in VOLATILE_ARTIFACT_KEYS
+        }
+    if isinstance(value, list):
+        return [_normalize_artifact_content(item) for item in value]
+    return _json_value(value)
+
+
+def _semantic_artifact_hash(uri: str | Path) -> str | None:
+    path = Path(uri)
+    if not path.is_file() or path.suffix.lower() != ".json":
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    canonical = _canonical_json(_normalize_artifact_content(payload))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
 def _capture_artifacts(run_id: str | None, report_path: Path | None) -> dict[str, Any]:
     records: list[dict[str, Any]] = []
     if run_id:
         rows = fetchall(
             """
-            SELECT kind, checksum, size_bytes, metadata_json
+            SELECT kind, uri, checksum, size_bytes, metadata_json
             FROM pipeline_artifacts WHERE run_id = ?
             """,
             (run_id,),
         )
-        for kind, checksum, size_bytes, metadata_json in rows:
+        for kind, uri, checksum, size_bytes, metadata_json in rows:
             try:
                 metadata = json.loads(metadata_json) if metadata_json else None
             except (json.JSONDecodeError, TypeError):
@@ -197,6 +226,7 @@ def _capture_artifacts(run_id: str | None, report_path: Path | None) -> dict[str
                     "kind": str(kind),
                     "checksum": str(checksum) if checksum else None,
                     "size_bytes": int(size_bytes) if size_bytes is not None else None,
+                    "semantic_sha256": _semantic_artifact_hash(str(uri)),
                     "metadata": metadata,
                 }
             )
@@ -207,6 +237,7 @@ def _capture_artifacts(run_id: str | None, report_path: Path | None) -> dict[str
                 "kind": "run_report",
                 "checksum": hashlib.sha256(payload).hexdigest(),
                 "size_bytes": len(payload),
+                "semantic_sha256": _semantic_artifact_hash(report_path),
                 "metadata": None,
             }
         )
@@ -319,6 +350,9 @@ def _snapshot_blockers(label: str, snapshot: Mapping[str, Any]) -> list[str]:
     blockers: list[str] = []
     if snapshot.get("schema_version") != SCHEMA_VERSION:
         return [f"{label} schema_version is not {SCHEMA_VERSION}"]
+    commit_sha = str(snapshot.get("commit_sha") or "").lower()
+    if not SHA_PATTERN.fullmatch(commit_sha):
+        blockers.append(f"{label} commit_sha is not a full 40-character Git SHA")
     sections = snapshot.get("sections")
     if not isinstance(sections, Mapping):
         return [f"{label} sections are missing"]
@@ -342,6 +376,11 @@ def _snapshot_blockers(label: str, snapshot: Mapping[str, Any]) -> list[str]:
         not isinstance(record, Mapping) or not record.get("checksum") for record in artifact_records
     ):
         blockers.append(f"{label} artifacts are missing checksums")
+    if artifact_records and any(
+        not isinstance(record, Mapping) or not record.get("semantic_sha256")
+        for record in artifact_records
+    ):
+        blockers.append(f"{label} artifacts are missing semantic content hashes")
 
     timing = snapshot.get("stage_timing")
     if not isinstance(timing, Mapping) or timing.get("total_duration_seconds") is None:
@@ -423,6 +462,19 @@ def _compare_stage_timing(
     }
 
 
+def _artifact_semantic_section(section: Mapping[str, Any]) -> dict[str, Any]:
+    records = section.get("records", [])
+    signatures = [
+        {
+            "kind": record.get("kind"),
+            "semantic_sha256": record.get("semantic_sha256"),
+        }
+        for record in records
+        if isinstance(record, Mapping)
+    ]
+    return _section(signatures)
+
+
 def compare_snapshots(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
     """Compare complete evidence and fail closed when either capture is incomplete."""
     blockers = _snapshot_blockers("baseline", baseline) + _snapshot_blockers("candidate", candidate)
@@ -432,13 +484,21 @@ def compare_snapshots(baseline: dict[str, Any], candidate: dict[str, Any]) -> di
     for name in CONTENT_SECTIONS:
         before = baseline_sections.get(name, {}) if isinstance(baseline_sections, Mapping) else {}
         after = candidate_sections.get(name, {}) if isinstance(candidate_sections, Mapping) else {}
-        matched = bool(before.get("sha256")) and before.get("sha256") == after.get("sha256")
+        if name == "artifacts" and isinstance(before, Mapping) and isinstance(after, Mapping):
+            before_comparable = _artifact_semantic_section(before)
+            after_comparable = _artifact_semantic_section(after)
+        else:
+            before_comparable = before
+            after_comparable = after
+        matched = bool(before_comparable.get("sha256")) and before_comparable.get(
+            "sha256"
+        ) == after_comparable.get("sha256")
         comparisons[name] = {
             "matched": matched,
             "baseline_rows": before.get("row_count"),
             "candidate_rows": after.get("row_count"),
-            "baseline_sha256": before.get("sha256"),
-            "candidate_sha256": after.get("sha256"),
+            "baseline_sha256": before_comparable.get("sha256"),
+            "candidate_sha256": after_comparable.get("sha256"),
         }
     stage_timing = _compare_stage_timing(
         baseline.get("stage_timing", {}), candidate.get("stage_timing", {})
