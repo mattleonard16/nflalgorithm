@@ -19,6 +19,7 @@ def _complete_evidence() -> dict:
         for name in REQUIRED_EVIDENCE
     }
     evidence["shadow_weekly_run"]["baseline_sha"] = BASELINE_SHA
+    evidence["algorithm_evaluation"]["baseline_sha"] = BASELINE_SHA
     return evidence
 
 
@@ -103,3 +104,21 @@ def test_release_manifest_rejects_shadow_from_another_baseline() -> None:
 
     assert manifest["passed"] is False
     assert "shadow_weekly_run evidence belongs to a different baseline SHA" in manifest["blockers"]
+
+
+def test_release_manifest_requires_algorithm_evaluation_from_same_baseline() -> None:
+    evidence = _complete_evidence()
+    evidence["algorithm_evaluation"]["baseline_sha"] = "d" * 40
+
+    manifest = build_manifest(
+        candidate_sha=CANDIDATE_SHA,
+        baseline_sha=BASELINE_SHA,
+        origin_main_sha=MAIN_SHA,
+        origin_main_is_ancestor=True,
+        evidence=evidence,
+    )
+
+    assert manifest["passed"] is False
+    assert (
+        "algorithm_evaluation evidence belongs to a different baseline SHA" in manifest["blockers"]
+    )

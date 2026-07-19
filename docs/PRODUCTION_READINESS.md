@@ -8,6 +8,7 @@ addition to local tests.
 |---|---|---|
 | Known commit SHA | Satisfied for the local candidate; the final SHA is recorded in the handoff | Use that exact SHA for staging and retain it with the release evidence |
 | Integrated with `origin/main` | Satisfied locally after rebasing onto the fetched `origin/main`; the fetched main commit is an ancestor of the candidate | Recheck ancestry after the final fetch before staging promotion |
+| Algorithm improvement | Production projections are scored only when persisted before kickoff and are bound to an exact SHA and season/week scope | Compare the legacy and candidate SHAs over the same completed weeks; require the chosen overall MAE improvement and cap every market regression |
 | Old/new output equivalence | Deterministic inline-versus-worker report matrix passes on SQLite and MySQL | Run one real weekly legacy capture and queued shadow capture; require matching hashes |
 | SQLite/MySQL matrices | Real SQLite and temporary MySQL 9.5 migration, concurrency, recovery, and equivalence checks pass locally; MySQL 8.4 CI service is configured | Require green remote CI for the committed SHA |
 | No double claims | Eight concurrent claimers produce one winner on both databases | Repeat under staging worker concurrency and retain logs |
@@ -94,6 +95,28 @@ stage timing, checksummed artifacts, semantic artifact content, or API-visible s
 and decision timestamps must match. Run-report timestamps and durations are normalized for semantic
 comparison, while their original file checksums remain recorded as integrity evidence.
 
+## Algorithm improvement proof
+
+Evaluate persisted pre-kickoff projections from the baseline and candidate on identical completed
+season/week inputs, then compare the reports. The comparison fails if scope differs, coverage falls,
+the required overall MAE improvement is missed, or any market regresses beyond the configured cap.
+
+```bash
+python -m scripts.evaluate_nfl_projections evaluate \
+  --season 2025 --weeks 1 2 3 --candidate-sha "$LEGACY_SHA" \
+  --output evidence/algorithm-baseline.json
+python -m scripts.evaluate_nfl_projections evaluate \
+  --season 2025 --weeks 1 2 3 --candidate-sha "$CANDIDATE_SHA" \
+  --output evidence/algorithm-candidate.json
+python -m scripts.evaluate_nfl_projections compare \
+  evidence/algorithm-baseline.json evidence/algorithm-candidate.json \
+  --min-improvement-pct 1 --max-market-regression-pct 5 \
+  --output evidence/algorithm-evaluation.json
+```
+
+This gate measures persisted production outputs. It does not train a surrogate model from the same
+week's outcomes and does not accept projections created at or after kickoff.
+
 ## Staging soak
 
 ```bash
@@ -143,6 +166,7 @@ verifies that the current `origin/main` commit is an ancestor of that candidate.
 python -m scripts.pipeline_release_evidence \
   --candidate-sha "$CANDIDATE_SHA" \
   --baseline-sha "$LEGACY_SHA" \
+  --algorithm-evaluation evidence/algorithm-evaluation.json \
   --database-matrix evidence/database-matrix.json \
   --staging-failure-safety evidence/staging-failure-safety.json \
   --authorization evidence/authorization.json \

@@ -72,6 +72,7 @@ def test_evaluation_scores_only_pregame_production_outputs() -> None:
 
     assert report["passed"] is True
     assert report["candidate_sha"] == "a" * 40
+    assert report["scope"] == {"season_weeks": [{"season": 2025, "week": 1}]}
     assert report["metrics"]["projection_count"] == 2
     assert report["metrics"]["mae"] == pytest.approx(7.5)
     assert report["metrics"]["mean_bias"] == pytest.approx(-2.5)
@@ -132,3 +133,22 @@ def test_candidate_comparison_rejects_market_regression() -> None:
 
     assert comparison["passed"] is False
     assert any("receiving_yards MAE regressed" in item for item in comparison["blockers"])
+
+
+def test_candidate_comparison_rejects_different_evaluation_scope() -> None:
+    baseline = evaluate_projections(*_inputs(), candidate_sha="a" * 40)
+    projections, actuals, games = _inputs()
+    projections["week"] = 2
+    actuals["week"] = 2
+    games["week"] = 2
+    candidate = evaluate_projections(projections, actuals, games, candidate_sha="b" * 40)
+
+    comparison = compare_reports(
+        baseline,
+        candidate,
+        min_improvement_pct=0.0,
+        max_market_regression_pct=5.0,
+    )
+
+    assert comparison["passed"] is False
+    assert "evaluation scope differs between baseline and candidate" in comparison["blockers"]

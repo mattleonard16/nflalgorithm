@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 REQUIRED_EVIDENCE = (
+    "algorithm_evaluation",
     "database_matrix",
     "staging_failure_safety",
     "authorization",
@@ -74,11 +75,11 @@ def build_manifest(
         if not proof_passed:
             blockers.append(f"{name} evidence did not pass")
         baseline_bound = True
-        if name == "shadow_weekly_run":
+        if name in {"algorithm_evaluation", "shadow_weekly_run"}:
             item_baseline_sha = str(item.get("baseline_sha", "")).lower()
             baseline_bound = known_baseline and item_baseline_sha == baseline_sha
             if not baseline_bound:
-                blockers.append("shadow_weekly_run evidence belongs to a different baseline SHA")
+                blockers.append(f"{name} evidence belongs to a different baseline SHA")
         gates[name] = {
             **dict(item),
             "passed": sha_bound and baseline_bound and proof_passed,
@@ -124,6 +125,7 @@ def main() -> None:
     parser.add_argument("--candidate-sha")
     parser.add_argument("--baseline-sha", required=True)
     parser.add_argument("--origin-main", default="origin/main")
+    parser.add_argument("--algorithm-evaluation", required=True, type=Path)
     parser.add_argument("--database-matrix", required=True, type=Path)
     parser.add_argument("--staging-failure-safety", required=True, type=Path)
     parser.add_argument("--authorization", required=True, type=Path)
@@ -144,6 +146,7 @@ def main() -> None:
         == 0
     )
     paths = {
+        "algorithm_evaluation": args.algorithm_evaluation,
         "database_matrix": args.database_matrix,
         "staging_failure_safety": args.staging_failure_safety,
         "authorization": args.authorization,

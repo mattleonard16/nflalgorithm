@@ -65,6 +65,18 @@ def _metric_group(rows: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def _evaluation_scope(*frames: pd.DataFrame) -> dict[str, Any]:
+    season_weeks: set[tuple[int, int]] = set()
+    for frame in frames:
+        if frame.empty or not {"season", "week"}.issubset(frame.columns):
+            continue
+        for season, week in frame[["season", "week"]].dropna().itertuples(index=False):
+            season_weeks.add((int(season), int(week)))
+    return {
+        "season_weeks": [{"season": season, "week": week} for season, week in sorted(season_weeks)]
+    }
+
+
 def evaluate_projections(
     projections: pd.DataFrame,
     actuals: pd.DataFrame,
@@ -74,6 +86,7 @@ def evaluate_projections(
 ) -> dict[str, Any]:
     """Score production projection rows without training a surrogate model."""
     candidate_sha = candidate_sha.lower()
+    scope = _evaluation_scope(projections, actuals, games)
     blockers: list[str] = []
     if not SHA_PATTERN.fullmatch(candidate_sha):
         blockers.append("candidate SHA is not a full 40-character Git SHA")
@@ -81,6 +94,10 @@ def evaluate_projections(
         blockers.append("no persisted projections were found")
         eligible = pd.DataFrame()
         failures: Counter[str] = Counter()
+    elif not scope["season_weeks"]:
+        blockers.append("evaluation scope is empty")
+        eligible = pd.DataFrame()
+        failures = Counter()
     else:
         frame = projections.copy()
         frame["generated_at"] = _timestamps(frame["generated_at"])
@@ -120,6 +137,7 @@ def evaluate_projections(
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "candidate_sha": candidate_sha,
+        "scope": scope,
         "passed": not blockers,
         "blockers": blockers,
         "freshness_failures": dict(sorted(failures.items())),
@@ -150,6 +168,20 @@ def compare_reports(
         blockers.append("baseline evaluation did not pass")
     if candidate.get("passed") is not True:
         blockers.append("candidate evaluation did not pass")
+    baseline_sha = str(baseline.get("candidate_sha", "")).lower()
+    candidate_sha = str(candidate.get("candidate_sha", "")).lower()
+    if not SHA_PATTERN.fullmatch(baseline_sha):
+        blockers.append("baseline evaluation is not bound to a full Git SHA")
+    if not SHA_PATTERN.fullmatch(candidate_sha):
+        blockers.append("candidate evaluation is not bound to a full Git SHA")
+    if baseline_sha == candidate_sha and SHA_PATTERN.fullmatch(baseline_sha):
+        blockers.append("baseline and candidate SHAs are identical")
+    baseline_scope = baseline.get("scope")
+    candidate_scope = candidate.get("scope")
+    if baseline_scope != candidate_scope:
+        blockers.append("evaluation scope differs between baseline and candidate")
+    elif not isinstance(baseline_scope, Mapping) or not baseline_scope.get("season_weeks"):
+        blockers.append("evaluation scope is empty")
     baseline_metrics = baseline.get("metrics", {})
     candidate_metrics = candidate.get("metrics", {})
     baseline_mae = baseline_metrics.get("mae")
@@ -199,8 +231,9 @@ def compare_reports(
     return {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "baseline_sha": baseline.get("candidate_sha"),
-        "candidate_sha": candidate.get("candidate_sha"),
+        "baseline_sha": baseline_sha,
+        "candidate_sha": candidate_sha,
+        "scope": candidate_scope,
         "passed": not blockers,
         "blockers": blockers,
         "overall": {
