@@ -193,18 +193,21 @@ treated as production readiness.
 ```
 nflalgorithm/
 ├── models/              # Position-specific ML models
-├── data/                # CSVs, projections, odds cache
+├── data/                # Local runtime imports and provider payloads (not tracked)
 ├── docs/                # Documentation
 ├── scripts/             # Utility scripts and tools
 ├── tests/               # Comprehensive test suite
 ├── utils/               # Helpers (player_id, defense_adjustments)
 ├── dashboard/           # Streamlit monitoring UI
-├── logs/                # Performance tracking
+├── logs/                # Local runtime logs and evidence (not tracked)
 ├── data_pipeline.py     # Data ingestion + feature engineering
 ├── value_betting_engine.py  # Value detection & CLV
 ├── prop_integration.py  # Player matching system
 └── materialized_value_view.py  # Dashboard data layer
 ```
+
+See [the data retention policy](docs/DATA_RETENTION.md) before importing historical data or
+retaining provider payloads. Hand-authored projection CSVs are not valid training evidence.
 
 ### Data Sources
 

@@ -31,6 +31,10 @@ validate_migration.py
 *.sqlite
 *.sqlite3
 
+# Runtime datasets and generated evaluation evidence
+data/
+logs/
+
 # Large debug files
 debug_page.html
 *.png
@@ -68,8 +72,6 @@ cache/
 
 # Logs
 *.log
-logs/*.log
-logs/production_runs/
 prop_update.log
 
 # Build artifacts
