@@ -358,10 +358,17 @@ def evaluate_nfl_week_readiness(
 
 def collect_nfl_week_counts(season: int, week: int) -> dict[str, int]:
     """Collect portable SQLite/MySQL evidence for one NFL week."""
+    from utils.db import get_connection
+
+    with get_connection() as connection:
+        return _collect_nfl_week_counts(connection, season, week)
+
+
+def _collect_nfl_week_counts(connection: Any, season: int, week: int) -> dict[str, int]:
     from utils.db import fetchone
 
     def scalar(sql: str, params: tuple[Any, ...]) -> int:
-        row = fetchone(sql, params=params)
+        row = fetchone(sql, params=params, conn=connection)
         return int(row[0] or 0) if row else 0
 
     counts = {
