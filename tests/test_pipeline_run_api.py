@@ -33,8 +33,8 @@ def client(db):
     """FastAPI TestClient."""
     from fastapi.testclient import TestClient
 
+    from api.application import app
     from api.pipeline_router import require_pipeline_operator, require_pipeline_reader
-    from api.server import app
 
     app.dependency_overrides[require_pipeline_operator] = lambda: "test-operator"
     app.dependency_overrides[require_pipeline_reader] = lambda: "test-reader"
@@ -100,7 +100,7 @@ class TestPipelineRunAPI:
     def test_mutation_requires_operator_auth(self, db):
         from fastapi.testclient import TestClient
 
-        from api.server import app
+        from api.application import app
 
         app.dependency_overrides.clear()
         response = TestClient(app).post("/api/run?season=2025&week=22")
@@ -109,7 +109,7 @@ class TestPipelineRunAPI:
     def test_architecture_read_requires_auth(self, db):
         from fastapi.testclient import TestClient
 
-        from api.server import app
+        from api.application import app
 
         app.dependency_overrides.clear()
         response = TestClient(app).get("/api/system/architecture")
@@ -142,7 +142,7 @@ def test_free_account_is_not_pipeline_operator(monkeypatch) -> None:
 def test_private_server_uses_real_session_auth_for_pipeline_routes(db) -> None:
     from fastapi.testclient import TestClient
 
-    from api.server import app
+    from api.application import app
 
     now = datetime.now(timezone.utc)
     expires = (now + timedelta(hours=1)).isoformat()

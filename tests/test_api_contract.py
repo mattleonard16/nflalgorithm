@@ -30,8 +30,8 @@ def db(tmp_path, monkeypatch):
 def client(db):
     from fastapi.testclient import TestClient
 
+    from api.application import app
     from api.pipeline_router import require_pipeline_operator
-    from api.server import app
 
     app.dependency_overrides[require_pipeline_operator] = lambda: "test-operator"
     with TestClient(app) as test_client:
