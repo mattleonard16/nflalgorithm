@@ -6,6 +6,7 @@ import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
+
 from config import config
 from data_pipeline import compute_week_features, update_week
 from materialized_value_view import materialize_week
@@ -46,22 +47,25 @@ def test_weekly_roundtrip_pipeline():
     config.database.path = tmp_db
     try:
         MigrationManager(tmp_db).run()
-        update_week(2023, 1)
-        features = compute_week_features(2023, 1)
+        # The causal model needs prior weeks to derive pregame role estimates;
+        # a single realized week is intentionally insufficient for training.
+        for week in range(1, 14):
+            update_week(2023, week)
+
+        features = compute_week_features(2023, 13)
         assert not features.empty
 
-        train_weekly_models([(2023, 1)])
-        predictions = predict_week(2023, 1)
+        train_weekly_models([(2023, week) for week in range(2, 13)])
+        predictions = predict_week(2023, 13)
         assert not predictions.empty
 
-        ranked = rank_weekly_value(2023, 1, min_edge=0.0, place=False)
+        ranked = rank_weekly_value(2023, 13, min_edge=0.0, place=False)
         assert not ranked.empty
 
-        materialize_week(2023, 1)
+        materialize_week(2023, 13)
         with sqlite3.connect(tmp_db) as conn:
             count = conn.execute(
-                "SELECT COUNT(*) FROM materialized_value_view WHERE season=? AND week=?",
-                (2023, 1)
+                "SELECT COUNT(*) FROM materialized_value_view WHERE season=? AND week=?", (2023, 13)
             ).fetchone()[0]
         assert count > 0
     finally:

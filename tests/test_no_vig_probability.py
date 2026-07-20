@@ -81,8 +81,19 @@ def temp_db_two_sided():
              model_version, featureset_hash, generated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (2024, 1, "p1", "MIA", "NE", "rushing_yards", 95.0, 10.0,
-             "v1", "hash1", "2024-09-01T00:00:00"),
+            (
+                2024,
+                1,
+                "p1",
+                "MIA",
+                "NE",
+                "rushing_yards",
+                95.0,
+                10.0,
+                "v1",
+                "hash1",
+                "2024-09-01T00:00:00",
+            ),
         )
         conn.execute(
             """
@@ -90,8 +101,18 @@ def temp_db_two_sided():
             (event_id, season, week, player_id, market, sportsbook, line, price, under_price, as_of)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("evt1", 2024, 1, "p1", "rushing_yards", "BookA", 70.5, -110, -110,
-             "2024-09-01T00:00:00"),
+            (
+                "evt1",
+                2024,
+                1,
+                "p1",
+                "rushing_yards",
+                "BookA",
+                70.5,
+                -110,
+                -110,
+                "2024-09-01T00:00:00",
+            ),
         )
         conn.commit()
 
@@ -138,9 +159,7 @@ def test_no_vig_flag_on_lifts_edge_when_under_present(temp_db_two_sided, monkeyp
     edge_novig = df_novig.iloc[0]["edge_percentage"]
     # No-vig fair prob = 0.5 < 0.5238 raw → edge increases by ~2.38 pp
     assert edge_novig > edge_raw
-    assert edge_novig - edge_raw == pytest.approx(
-        _implied_probability(-110) - 0.5, abs=1e-9
-    )
+    assert edge_novig - edge_raw == pytest.approx(_implied_probability(-110) - 0.5, abs=1e-9)
 
 
 @pytest.fixture
@@ -166,8 +185,19 @@ def temp_db_no_under():
              model_version, featureset_hash, generated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (2024, 1, "p1", "MIA", "NE", "rushing_yards", 95.0, 10.0,
-             "v1", "hash1", "2024-09-01T00:00:00"),
+            (
+                2024,
+                1,
+                "p1",
+                "MIA",
+                "NE",
+                "rushing_yards",
+                95.0,
+                10.0,
+                "v1",
+                "hash1",
+                "2024-09-01T00:00:00",
+            ),
         )
         conn.execute(
             """
@@ -175,8 +205,7 @@ def temp_db_no_under():
             (event_id, season, week, player_id, market, sportsbook, line, price, as_of)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("evt1", 2024, 1, "p1", "rushing_yards", "BookA", 70.5, -110,
-             "2024-09-01T00:00:00"),
+            ("evt1", 2024, 1, "p1", "rushing_yards", "BookA", 70.5, -110, "2024-09-01T00:00:00"),
         )
         conn.commit()
 
@@ -219,7 +248,7 @@ def test_no_vig_default_off(monkeypatch):
 
     monkeypatch.delenv("NFL_FEATURE_NO_VIG", raising=False)
 
-    cfg_path = Path(__file__).parent.parent / "config.py"
+    cfg_path = Path(__file__).parent.parent / "config" / "runtime.py"
     spec = importlib.util.spec_from_file_location("_config_under_test", cfg_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

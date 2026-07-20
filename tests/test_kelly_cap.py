@@ -37,8 +37,19 @@ def temp_db_high_edge(monkeypatch):
              model_version, featureset_hash, generated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (2024, 1, "p1", "MIA", "NE", "rushing_yards", 110.0, 8.0,
-             "v1", "hash1", "2024-09-01T00:00:00"),
+            (
+                2024,
+                1,
+                "p1",
+                "MIA",
+                "NE",
+                "rushing_yards",
+                110.0,
+                8.0,
+                "v1",
+                "hash1",
+                "2024-09-01T00:00:00",
+            ),
         )
         conn.execute(
             """
@@ -46,8 +57,7 @@ def temp_db_high_edge(monkeypatch):
             (event_id, season, week, player_id, market, sportsbook, line, price, as_of)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("evt1", 2024, 1, "p1", "rushing_yards", "BookA", 70.5, -110,
-             "2024-09-01T00:00:00"),
+            ("evt1", 2024, 1, "p1", "rushing_yards", "BookA", 70.5, -110, "2024-09-01T00:00:00"),
         )
         conn.commit()
 
@@ -90,9 +100,7 @@ def test_kelly_cap_flag_on_stake_reflects_capped_fraction(temp_db_high_edge, mon
     monkeypatch.setattr(config.features, "kelly_cap_enabled", True)
     df = rank_weekly_value(2024, 1, min_edge=-1.0)
     row = df.iloc[0]
-    assert row["stake"] == pytest.approx(
-        row["kelly_fraction"] * config.betting.bankroll, abs=1e-9
-    )
+    assert row["stake"] == pytest.approx(row["kelly_fraction"] * config.betting.bankroll, abs=1e-9)
 
 
 def test_kelly_cap_default_off(monkeypatch):
@@ -101,7 +109,7 @@ def test_kelly_cap_default_off(monkeypatch):
 
     monkeypatch.delenv("NFL_FEATURE_KELLY_CAP", raising=False)
 
-    cfg_path = Path(__file__).parent.parent / "config.py"
+    cfg_path = Path(__file__).parent.parent / "config" / "runtime.py"
     spec = importlib.util.spec_from_file_location("_config_under_test", cfg_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
