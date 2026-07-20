@@ -371,6 +371,17 @@ def _collect_nfl_week_counts(connection: Any, season: int, week: int) -> dict[st
         row = fetchone(sql, params=params, conn=connection)
         return int(row[0] or 0) if row else 0
 
+    latest_run = fetchone(
+        """
+        SELECT run_id FROM pipeline_runs
+        WHERE season = ? AND week = ? AND status = 'completed'
+        ORDER BY finished_at DESC, run_id DESC LIMIT 1
+        """,
+        params=(season, week),
+        conn=connection,
+    )
+    latest_run_id = str(latest_run[0]) if latest_run else None
+
     counts = {
         "games": scalar("SELECT COUNT(*) FROM games WHERE season = ? AND week = ?", (season, week)),
         "games_with_kickoff": scalar(
@@ -408,33 +419,24 @@ def _collect_nfl_week_counts(connection: Any, season: int, week: int) -> dict[st
             "SELECT COUNT(*) FROM agent_decisions WHERE season = ? AND week = ?",
             (season, week),
         ),
-        "completed_runs": scalar(
-            """
-            SELECT COUNT(*) FROM pipeline_runs
-            WHERE season = ? AND week = ? AND status = 'completed'
-            """,
-            (season, week),
-        ),
+        "completed_runs": 1 if latest_run_id else 0,
         "valid_odds_runs": scalar(
             """
-            SELECT COUNT(*) FROM pipeline_odds_validations validations
-            JOIN pipeline_runs runs ON runs.run_id = validations.run_id
-            WHERE runs.season = ? AND runs.week = ?
-              AND runs.status = 'completed' AND validations.valid = 1
+            SELECT COUNT(*) FROM pipeline_odds_validations
+            WHERE run_id = ? AND valid = 1
             """,
-            (season, week),
+            (latest_run_id,),
         ),
         "artifact_rows": scalar(
-            """
-            SELECT COUNT(*) FROM pipeline_artifacts artifacts
-            JOIN pipeline_runs runs ON runs.run_id = artifacts.run_id
-            WHERE runs.season = ? AND runs.week = ? AND runs.status = 'completed'
-            """,
-            (season, week),
+            "SELECT COUNT(*) FROM pipeline_artifacts WHERE run_id = ?",
+            (latest_run_id,),
         ),
         "card_rows": scalar(
-            "SELECT COUNT(*) FROM materialized_value_view WHERE season = ? AND week = ?",
-            (season, week),
+            """
+            SELECT COUNT(*) FROM materialized_value_view
+            WHERE season = ? AND week = ? AND published_run_id = ?
+            """,
+            (season, week, latest_run_id),
         ),
     }
     return counts

@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from schema_migrations import MigrationManager
 from scripts.preflight import (
     check_database,
     check_odds_key,
     check_private_api,
     check_private_modules,
     check_runtime_config,
+    collect_nfl_week_counts,
     evaluate_nfl_week_readiness,
 )
+from utils.db import execute
 
 
 def test_missing_sqlite_database_points_to_migration(tmp_path) -> None:
@@ -140,3 +143,40 @@ def test_postrun_readiness_requires_persisted_worker_evidence() -> None:
 
     assert "nfl_live_odds" in {item.name for item in failed if item.status == "fail"}
     assert "nfl_worker_run" in {item.name for item in failed if item.status == "fail"}
+
+
+def test_postrun_evidence_is_bound_to_latest_completed_run(tmp_path, monkeypatch) -> None:
+    database = tmp_path / "readiness.db"
+    monkeypatch.setenv("DB_BACKEND", "sqlite")
+    monkeypatch.setenv("SQLITE_DB_PATH", str(database))
+    MigrationManager(database).run()
+    for run_id, finished_at in (
+        ("old-run", "2026-09-01T12:00:00Z"),
+        ("new-run", "2026-09-01T13:00:00Z"),
+    ):
+        execute(
+            """
+            INSERT INTO pipeline_runs (
+                run_id, season, week, status, stages_requested, stages_completed,
+                started_at, finished_at, source, updated_at
+            ) VALUES (?, 2026, 1, 'completed', 6, 6, ?, ?, 'worker', ?)
+            """,
+            (run_id, finished_at, finished_at, finished_at),
+        )
+    execute("""
+        INSERT INTO pipeline_odds_validations (
+            run_id, attempt, valid, reason_code, reason, metrics_json, validated_at
+        ) VALUES ('old-run', 1, 1, 'valid', 'valid', '{}', '2026-09-01T12:00:00Z')
+        """)
+    execute("""
+        INSERT INTO pipeline_artifacts (
+            artifact_id, run_id, kind, uri, checksum, size_bytes, metadata_json, created_at
+        ) VALUES ('artifact-old', 'old-run', 'run_report', 'old.json', 'abc', 1, '{}',
+                  '2026-09-01T12:00:00Z')
+        """)
+
+    counts = collect_nfl_week_counts(2026, 1)
+
+    assert counts["completed_runs"] == 1
+    assert counts["valid_odds_runs"] == 0
+    assert counts["artifact_rows"] == 0
