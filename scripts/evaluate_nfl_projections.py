@@ -94,10 +94,12 @@ def evaluate_projections(
         blockers.append("no persisted projections were found")
         eligible = pd.DataFrame()
         failures: Counter[str] = Counter()
+        outcome_failures: Counter[str] = Counter()
     elif not scope["season_weeks"]:
         blockers.append("evaluation scope is empty")
         eligible = pd.DataFrame()
         failures = Counter()
+        outcome_failures = Counter()
     else:
         frame = projections.copy()
         frame["generated_at"] = _timestamps(frame["generated_at"])
@@ -110,6 +112,10 @@ def evaluate_projections(
         failures = Counter(frame["freshness_failure"].dropna().astype(str))
         if failures:
             blockers.append("projection freshness violations are present")
+        missing_actuals = int(frame["actual"].isna().sum())
+        outcome_failures = Counter({"missing_actual": missing_actuals} if missing_actuals else {})
+        if outcome_failures:
+            blockers.append("projection outcome coverage is incomplete")
         eligible = frame[frame["freshness_failure"].isna() & frame["actual"].notna()].copy()
         if not eligible.empty:
             eligible["signed_error"] = eligible["mu"].astype(float) - eligible["actual"].astype(
@@ -141,6 +147,7 @@ def evaluate_projections(
         "passed": not blockers,
         "blockers": blockers,
         "freshness_failures": dict(sorted(failures.items())),
+        "outcome_failures": dict(sorted(outcome_failures.items())),
         "metrics": {
             **overall,
             "by_market": by_market,

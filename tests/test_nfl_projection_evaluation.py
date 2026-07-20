@@ -103,6 +103,17 @@ def test_missing_actuals_do_not_become_zero_error() -> None:
     assert "no eligible projections with actual outcomes" in report["blockers"]
 
 
+def test_partial_actuals_fail_instead_of_improving_score_by_exclusion() -> None:
+    projections, actuals, games = _inputs()
+    actuals = actuals[actuals["player_id"] == "p1"]
+
+    report = evaluate_projections(projections, actuals, games, candidate_sha="d" * 40)
+
+    assert report["passed"] is False
+    assert report["outcome_failures"] == {"missing_actual": 1}
+    assert "projection outcome coverage is incomplete" in report["blockers"]
+
+
 def test_candidate_comparison_requires_real_overall_improvement() -> None:
     baseline = evaluate_projections(*_inputs(candidate_mu=60.0), candidate_sha="a" * 40)
     candidate = evaluate_projections(*_inputs(candidate_mu=52.0), candidate_sha="b" * 40)
