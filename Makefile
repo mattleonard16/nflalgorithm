@@ -63,7 +63,7 @@ ifeq ($(ENV_TYPE),uv)
     PYTHON := uv run python
     PIP_INSTALL := uv pip install
     PIP_UNINSTALL := uv pip uninstall
-    ENV_SETUP := uv venv --python 3.13 && uv pip install -r requirements.txt
+    ENV_SETUP := uv sync --frozen
 else
     PYTHON := venv/bin/python
     PIP_INSTALL := venv/bin/pip install
@@ -131,9 +131,8 @@ install-uv:
 		export PATH="$$HOME/.cargo/bin:$$PATH"; \
 	fi
 	uv python pin 3.13
-	uv venv --python 3.13
 	@start_time=$$(date +%s); \
-	uv pip install -r requirements.txt; \
+	uv sync --frozen; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
 	echo "Creating directories..."; \
@@ -157,7 +156,7 @@ install-venv:
 fast-sync:
 	@if command -v uv >/dev/null 2>&1; then \
 		echo "Lightning-fast UV dependency sync..."; \
-		time uv pip sync requirements.txt; \
+		time uv sync --frozen; \
 		echo "Sync complete!"; \
 	else \
 		echo "UV not available. Run 'make install-uv' first."; \
@@ -661,8 +660,7 @@ quick-reset:
 	@if command -v uv >/dev/null 2>&1; then \
 		echo "Quick environment reset with UV..."; \
 		rm -rf .venv/; \
-		time uv venv --python 3.13; \
-		time uv pip install -r requirements.txt; \
+		time uv sync --frozen; \
 		echo "Environment reset complete\!"; \
 	else \
 		echo "UV not available for quick reset"; \
@@ -676,9 +674,8 @@ add-dep:
 	fi
 	@if command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ]; then \
 		echo "Adding $(PKG) with UV..."; \
-		uv pip install $(PKG); \
-		uv pip freeze > requirements.txt; \
-		echo "Added $(PKG) and updated requirements.txt"; \
+		uv add $(PKG); \
+		echo "Added $(PKG) to pyproject.toml and uv.lock"; \
 	else \
 		echo "Adding $(PKG) with pip..."; \
 		$(PIP_INSTALL) $(PKG); \

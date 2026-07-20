@@ -11,6 +11,7 @@ optuna>=3.4.0
 requests>=2.31.0
 requests-cache>=1.1.0
 APScheduler>=3.10.0
+nflreadpy>=0.1.5
 # sqlite3 is built-in, removing from requirements
 
 # API & External Data
@@ -21,6 +22,10 @@ streamlit>=1.28.0
 plotly>=5.17.0
 jinja2>=3.1.0
 rich>=13.7.0
+fastapi>=0.109.0
+uvicorn>=0.27.0
+email-validator>=2.3.0
+httpx>=0.27.0
 
 # Development & Testing
 pytest>=7.4.0
@@ -30,5 +35,10 @@ isort>=5.12.0
 mypy>=1.6.0
 
 # Database
-pymysql
-sqlalchemy
+pymysql>=1.1.0
+sqlalchemy>=2.0.0
+
+# League integrations and production models
+nba_api>=1.4.0
+lightgbm>=4.0
+bcrypt>=4.1.0

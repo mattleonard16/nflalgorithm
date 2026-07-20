@@ -92,3 +92,10 @@ def test_doctor_season_checks_explicit_week_and_phase() -> None:
     assert "scripts.preflight" in command
     assert "--season 2026 --week 1 --season-phase post-run" in command
     assert "--require-live-odds --require-private-modules" in command
+
+
+def test_uv_install_uses_committed_lockfile() -> None:
+    command = run_make("-n", "install-uv", "ENV_FILE=/dev/null").stdout
+
+    assert "uv sync --frozen" in command
+    assert "uv pip install -r requirements.txt" not in command

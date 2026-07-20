@@ -16,7 +16,6 @@ ENV/
 !.env.render.example
 
 # UV (Python Package Manager) artifacts
-uv.lock
 .uv_cache/
 .uv/
 
