@@ -33,6 +33,7 @@ validate_migration.py
 # Runtime datasets and generated evaluation evidence
 data/
 logs/
+archive/
 
 # Large debug files
 debug_page.html

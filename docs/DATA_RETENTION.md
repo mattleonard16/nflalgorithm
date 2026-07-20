@@ -40,3 +40,5 @@ deployment identifiers, or outputs that are meaningful only for one commit and p
 The removed `2024_nfl_projections.csv` and `2024_nfl_rookies.csv` files were manually maintained,
 unreferenced, and unsuitable as point-in-time training data. The removed Week 10 odds JSON and
 generated reports/logs were also unreferenced runtime artifacts, not reproducible source fixtures.
+The removed tracked archive contained only obsolete migration material, a superseded season-level
+predictor, and an 8 KB SQLite file whose sole table was `test(id)`; none was runtime evidence.
