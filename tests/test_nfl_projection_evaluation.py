@@ -163,3 +163,18 @@ def test_candidate_comparison_rejects_different_evaluation_scope() -> None:
 
     assert comparison["passed"] is False
     assert "evaluation scope differs between baseline and candidate" in comparison["blockers"]
+
+
+def test_candidate_comparison_requires_positive_improvement_threshold() -> None:
+    baseline = evaluate_projections(*_inputs(), candidate_sha="a" * 40)
+    candidate = evaluate_projections(*_inputs(), candidate_sha="b" * 40)
+
+    comparison = compare_reports(
+        baseline,
+        candidate,
+        min_improvement_pct=0.0,
+        max_market_regression_pct=5.0,
+    )
+
+    assert comparison["passed"] is False
+    assert "minimum improvement must be greater than zero" in comparison["blockers"]

@@ -171,6 +171,10 @@ def compare_reports(
 ) -> dict[str, Any]:
     """Require overall improvement without hiding material market regressions."""
     blockers: list[str] = []
+    if min_improvement_pct <= 0:
+        blockers.append("minimum improvement must be greater than zero")
+    if max_market_regression_pct < 0:
+        blockers.append("maximum market regression cannot be negative")
     if baseline.get("passed") is not True:
         blockers.append("baseline evaluation did not pass")
     if candidate.get("passed") is not True:
@@ -301,7 +305,7 @@ def main() -> None:
     compare = subparsers.add_parser("compare")
     compare.add_argument("baseline", type=Path)
     compare.add_argument("candidate", type=Path)
-    compare.add_argument("--min-improvement-pct", type=float, default=0.0)
+    compare.add_argument("--min-improvement-pct", type=float, default=1.0)
     compare.add_argument("--max-market-regression-pct", type=float, default=5.0)
     compare.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
