@@ -8,15 +8,43 @@ from typing import Optional
 
 NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 VALID_NFL_TEAMS = {
-    'ARI', 'ATL', 'BAL', 'BUF', 'CAR', 'CHI', 'CIN', 'CLE',
-    'DAL', 'DEN', 'DET', 'GB', 'HOU', 'IND', 'JAX', 'KC',
-    'LAC', 'LAR', 'LV', 'MIA', 'MIN', 'NE', 'NO', 'NYG',
-    'NYJ', 'PHI', 'PIT', 'SEA', 'SF', 'TB', 'TEN', 'WAS'
+    "ARI",
+    "ATL",
+    "BAL",
+    "BUF",
+    "CAR",
+    "CHI",
+    "CIN",
+    "CLE",
+    "DAL",
+    "DEN",
+    "DET",
+    "GB",
+    "HOU",
+    "IND",
+    "JAX",
+    "KC",
+    "LAC",
+    "LAR",
+    "LV",
+    "MIA",
+    "MIN",
+    "NE",
+    "NO",
+    "NYG",
+    "NYJ",
+    "PHI",
+    "PIT",
+    "SEA",
+    "SF",
+    "TB",
+    "TEN",
+    "WAS",
 }
 
 TEAM_TYPO_FIXES = {
-    'jacson': 'JAX',
-    'ptd': 'DAL',
+    "jacson": "JAX",
+    "ptd": "DAL",
 }
 
 TEAM_ALIASES = {
@@ -81,19 +109,19 @@ def canonicalize_team(team: Optional[str]) -> str:
     token = re.sub(r"[^a-zA-Z0-9]", "", str(team)).upper()
     if not token:
         return ""
-    
+
     # Check typo fixes first
     if token.lower() in TEAM_TYPO_FIXES:
         token = TEAM_TYPO_FIXES[token.lower()]
-    
+
     # Apply aliases
     token = TEAM_ALIASES.get(token, token)
-    
+
     # Validate against known teams
     if token not in VALID_NFL_TEAMS:
         # Could be a position code or garbage - return empty
         return ""
-    
+
     return token
 
 
@@ -104,3 +132,17 @@ def make_player_id(name: Optional[str], team: Optional[str]) -> str:
     if not team_token:  # Handle invalid/missing teams
         return normalized_name if normalized_name else ""
     return f"{team_token}_{normalized_name}" if normalized_name else team_token
+
+
+def name_from_player_id(player_id: Optional[str]) -> str:
+    """Return the normalized display name encoded in a player identifier.
+
+    Player identifiers normally use ``TEAM_first_last``. A single-token value
+    is treated as an unscoped name for compatibility with older inputs.
+    """
+    if not player_id or not isinstance(player_id, str):
+        return ""
+
+    _, separator, name = player_id.partition("_")
+    normalized_name = name if separator else player_id
+    return normalized_name.replace("_", " ")
