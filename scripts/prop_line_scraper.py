@@ -175,11 +175,14 @@ class NFLPropScraper:
         kickoffs = pd.to_datetime(schedule["kickoff_utc"], errors="coerce", utc=True)
         if kickoffs.isna().any():
             raise RuntimeError("Requested-week schedule contains missing kickoff timestamps")
-        scheduled_ns = set(kickoffs.astype("int64").tolist())
+        # Compare timezone-aware timestamps directly. Pandas 3 may store a
+        # Series at microsecond resolution while scalar ``Timestamp.value`` is
+        # nanoseconds, which made equivalent kickoffs compare unequal.
+        scheduled_kickoffs = set(kickoffs.tolist())
         selected = []
         for event in events:
             kickoff = pd.to_datetime(event.get("commence_time"), errors="coerce", utc=True)
-            if pd.notna(kickoff) and int(kickoff.value) in scheduled_ns:
+            if pd.notna(kickoff) and kickoff in scheduled_kickoffs:
                 selected.append(event)
         if len(selected) != len(schedule):
             raise RuntimeError(
