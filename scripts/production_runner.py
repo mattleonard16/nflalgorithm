@@ -18,6 +18,8 @@ import argparse
 import json
 import logging
 import os
+import re
+import subprocess
 import uuid
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
@@ -31,6 +33,27 @@ from pipelines.orchestrator import PipelineStage, run_stages
 from utils.db import fetchone, read_dataframe
 
 logger = logging.getLogger(__name__)
+SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _runtime_commit_sha() -> str:
+    """Resolve the worker build identity before any pipeline side effect."""
+    configured = os.getenv("APP_COMMIT_SHA", "").strip().lower()
+    if configured:
+        if not SHA_PATTERN.fullmatch(configured):
+            raise RuntimeError("APP_COMMIT_SHA must be a full 40-character Git SHA")
+        return configured
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    commit_sha = result.stdout.strip().lower()
+    if not SHA_PATTERN.fullmatch(commit_sha):
+        raise RuntimeError("worker runtime could not resolve a full Git commit SHA")
+    return commit_sha
 
 
 def _validate_odds_observation(observed: Mapping[str, Any]) -> Dict[str, Any]:
@@ -38,7 +61,7 @@ def _validate_odds_observation(observed: Mapping[str, Any]) -> Dict[str, Any]:
     from pipelines.odds_validation import validate_odds_snapshot
 
     try:
-        return validate_odds_snapshot(observed)
+        return dict(validate_odds_snapshot(observed))
     except Exception as exc:
         logger.error("Odds validation failed: %s", exc)
         return {
@@ -61,7 +84,7 @@ def stage_prepare_week(
     try:
         from scripts.prepare_nfl_week import prepare_week
 
-        summary = prepare_week(season, week, refresh_history=refresh_history)
+        summary = dict(prepare_week(season, week, refresh_history=refresh_history))
         return {"status": "ok", "stage": "prepare_week", **summary}
     except Exception as exc:
         logger.error("Canonical pregame preparation failed: %s", exc)
@@ -258,6 +281,7 @@ def run_production_pipeline(
 
     Returns a run report with per-stage results.
     """
+    commit_sha = _runtime_commit_sha()
     started_at = datetime.now(timezone.utc).isoformat()
     stages = [
         PipelineStage(
@@ -308,6 +332,7 @@ def run_production_pipeline(
         stage.get("stage") == final_stage and stage.get("status") == "ok" for stage in stage_results
     )
     run_report = {
+        "commit_sha": commit_sha,
         "season": season,
         "week": week,
         "started_at": started_at,

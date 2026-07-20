@@ -4,6 +4,10 @@ The queue/worker architecture is an implementation candidate, not a production-r
 Promotion requires evidence from the deployed private integration and staging environment in
 addition to local tests.
 
+Set `APP_COMMIT_SHA` to the deployed image's full 40-character Git SHA. The worker resolves this
+identity before any stage runs, persists it in the completed run report, and projection evaluation
+rejects rows outside that run's execution window or attributed to another commit.
+
 | Gate | Current evidence | Remaining proof |
 |---|---|---|
 | Known commit SHA | Satisfied for the local candidate; the final SHA is recorded in the handoff | Use that exact SHA for staging and retain it with the release evidence |
@@ -97,16 +101,17 @@ comparison, while their original file checksums remain recorded as integrity evi
 
 ## Algorithm improvement proof
 
-Evaluate persisted pre-kickoff projections from the baseline and candidate on identical completed
-season/week inputs, then compare the reports. The comparison fails if scope differs, coverage falls,
-the required overall MAE improvement is missed, or any market regresses beyond the configured cap.
+From each exact checkout, evaluate its persisted pre-kickoff projections and completed run report on
+identical season/week inputs, then compare the reports. The evaluator derives the checkout SHA; it
+does not accept a caller-supplied label. The comparison fails if scope differs, coverage falls, the
+required overall MAE improvement is missed, or any market regresses beyond the configured cap.
 
 ```bash
 python -m scripts.evaluate_nfl_projections evaluate \
-  --season 2025 --weeks 1 2 3 --candidate-sha "$LEGACY_SHA" \
+  --season 2025 --weeks 1 2 3 \
   --output evidence/algorithm-baseline.json
 python -m scripts.evaluate_nfl_projections evaluate \
-  --season 2025 --weeks 1 2 3 --candidate-sha "$CANDIDATE_SHA" \
+  --season 2025 --weeks 1 2 3 \
   --output evidence/algorithm-candidate.json
 python -m scripts.evaluate_nfl_projections compare \
   evidence/algorithm-baseline.json evidence/algorithm-candidate.json \

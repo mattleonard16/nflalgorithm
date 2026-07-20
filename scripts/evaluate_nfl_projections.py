@@ -81,6 +81,7 @@ def evaluate_projections(
     projections: pd.DataFrame,
     actuals: pd.DataFrame,
     games: pd.DataFrame,
+    runs: pd.DataFrame,
     *,
     candidate_sha: str,
 ) -> dict[str, Any]:
@@ -88,8 +89,65 @@ def evaluate_projections(
     candidate_sha = candidate_sha.lower()
     scope = _evaluation_scope(projections, actuals, games)
     blockers: list[str] = []
+    provenance_failures: Counter[str] = Counter()
     if not SHA_PATTERN.fullmatch(candidate_sha):
         blockers.append("candidate SHA is not a full 40-character Git SHA")
+    required_run_columns = {
+        "run_id",
+        "season",
+        "week",
+        "status",
+        "started_at",
+        "finished_at",
+        "report_json",
+    }
+    if scope["season_weeks"] and not required_run_columns.issubset(runs.columns):
+        provenance_failures["invalid_run_report"] = len(scope["season_weeks"])
+    for item in scope["season_weeks"]:
+        if provenance_failures.get("invalid_run_report"):
+            break
+        season = int(item["season"])
+        week = int(item["week"])
+        matches = runs[
+            (runs["season"] == season) & (runs["week"] == week) & (runs["status"] == "completed")
+        ].copy()
+        if matches.empty:
+            provenance_failures["missing_completed_run"] += 1
+            continue
+        matches["finished_at"] = _timestamps(matches["finished_at"])
+        latest = matches.sort_values(["finished_at", "run_id"]).iloc[-1]
+        try:
+            report = json.loads(str(latest["report_json"]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            provenance_failures["invalid_run_report"] += 1
+            continue
+        if str(report.get("commit_sha", "")).lower() != candidate_sha:
+            provenance_failures["producer_sha_mismatch"] += 1
+        started_at = pd.to_datetime(latest["started_at"], errors="coerce", utc=True)
+        finished_at = latest["finished_at"]
+        generated = _timestamps(
+            projections.loc[
+                (projections["season"] == season) & (projections["week"] == week),
+                "generated_at",
+            ]
+        )
+        if (
+            pd.isna(started_at)
+            or pd.isna(finished_at)
+            or generated.empty
+            or generated.isna().any()
+            or (generated < started_at).any()
+            or (generated > finished_at).any()
+        ):
+            provenance_failures["outside_run_window"] += 1
+    if provenance_failures.get("producer_sha_mismatch"):
+        blockers.append("completed run producer SHA does not match candidate SHA")
+    if provenance_failures.get("outside_run_window"):
+        blockers.append("projections are not bound to the completed producer run")
+    if provenance_failures.get("missing_completed_run"):
+        blockers.append("evaluation scope is missing a completed producer run")
+    if provenance_failures.get("invalid_run_report"):
+        blockers.append("completed producer run report is invalid")
     if projections.empty:
         blockers.append("no persisted projections were found")
         eligible = pd.DataFrame()
@@ -147,6 +205,7 @@ def evaluate_projections(
         "passed": not blockers,
         "blockers": blockers,
         "freshness_failures": dict(sorted(failures.items())),
+        "provenance_failures": dict(sorted(provenance_failures.items())),
         "outcome_failures": dict(sorted(outcome_failures.items())),
         "metrics": {
             **overall,
@@ -286,7 +345,12 @@ def _load_inputs(season: int, weeks: Iterable[int]) -> tuple[pd.DataFrame, ...]:
         f"SELECT season, week, home_team, away_team, kickoff_utc FROM games WHERE {where}",
         params=params,
     )
-    return projections, actuals, games
+    runs = read_dataframe(
+        "SELECT run_id, season, week, status, started_at, finished_at, report_json "
+        f"FROM pipeline_runs WHERE {where} AND status = 'completed'",
+        params=params,
+    )
+    return projections, actuals, games, runs
 
 
 def _write(path: Path, payload: Mapping[str, Any]) -> None:
@@ -300,7 +364,6 @@ def main() -> None:
     evaluate = subparsers.add_parser("evaluate")
     evaluate.add_argument("--season", type=int, required=True)
     evaluate.add_argument("--weeks", type=int, nargs="+", required=True)
-    evaluate.add_argument("--candidate-sha", default=None)
     evaluate.add_argument("--output", type=Path, required=True)
     compare = subparsers.add_parser("compare")
     compare.add_argument("baseline", type=Path)
@@ -313,7 +376,7 @@ def main() -> None:
     if args.command == "evaluate":
         report = evaluate_projections(
             *_load_inputs(args.season, args.weeks),
-            candidate_sha=args.candidate_sha or _git_sha(),
+            candidate_sha=_git_sha(),
         )
     else:
         report = compare_reports(

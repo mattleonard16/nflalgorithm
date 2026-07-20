@@ -8,7 +8,9 @@ import pytest
 from scripts.evaluate_nfl_projections import compare_reports, evaluate_projections
 
 
-def _inputs(*, candidate_mu: float = 55.0) -> tuple[pd.DataFrame, ...]:
+def _inputs(
+    *, candidate_mu: float = 55.0, candidate_sha: str = "a" * 40
+) -> tuple[pd.DataFrame, ...]:
     projections = pd.DataFrame(
         [
             {
@@ -64,7 +66,20 @@ def _inputs(*, candidate_mu: float = 55.0) -> tuple[pd.DataFrame, ...]:
             }
         ]
     )
-    return projections, actuals, games
+    runs = pd.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "season": 2025,
+                "week": 1,
+                "status": "completed",
+                "started_at": "2025-09-03T11:00:00Z",
+                "finished_at": "2025-09-03T13:00:00Z",
+                "report_json": '{"commit_sha":"' + candidate_sha + '"}',
+            }
+        ]
+    )
+    return projections, actuals, games, runs
 
 
 def test_evaluation_scores_only_pregame_production_outputs() -> None:
@@ -80,11 +95,34 @@ def test_evaluation_scores_only_pregame_production_outputs() -> None:
     assert report["metrics"]["by_market"]["rushing_yards"]["mae"] == 10.0
 
 
+def test_evaluation_rejects_run_from_another_commit() -> None:
+    report = evaluate_projections(*_inputs(), candidate_sha="b" * 40)
+
+    assert report["passed"] is False
+    assert "completed run producer SHA does not match candidate SHA" in report["blockers"]
+
+
+def test_evaluation_rejects_projection_outside_completed_run_window() -> None:
+    projections, actuals, games, runs = _inputs()
+    projections["generated_at"] = "2025-09-03T14:00:00Z"
+
+    report = evaluate_projections(
+        projections,
+        actuals,
+        games,
+        runs,
+        candidate_sha="a" * 40,
+    )
+
+    assert report["passed"] is False
+    assert "projections are not bound to the completed producer run" in report["blockers"]
+
+
 def test_post_kickoff_projection_fails_closed() -> None:
-    projections, actuals, games = _inputs()
+    projections, actuals, games, runs = _inputs(candidate_sha="b" * 40)
     projections.loc[0, "generated_at"] = "2025-09-04T18:00:00Z"
 
-    report = evaluate_projections(projections, actuals, games, candidate_sha="b" * 40)
+    report = evaluate_projections(projections, actuals, games, runs, candidate_sha="b" * 40)
 
     assert report["passed"] is False
     assert report["metrics"]["projection_count"] == 1
@@ -93,10 +131,10 @@ def test_post_kickoff_projection_fails_closed() -> None:
 
 
 def test_missing_actuals_do_not_become_zero_error() -> None:
-    projections, actuals, games = _inputs()
+    projections, actuals, games, runs = _inputs(candidate_sha="c" * 40)
     actuals = actuals.iloc[0:0]
 
-    report = evaluate_projections(projections, actuals, games, candidate_sha="c" * 40)
+    report = evaluate_projections(projections, actuals, games, runs, candidate_sha="c" * 40)
 
     assert report["passed"] is False
     assert report["metrics"]["projection_count"] == 0
@@ -104,10 +142,10 @@ def test_missing_actuals_do_not_become_zero_error() -> None:
 
 
 def test_partial_actuals_fail_instead_of_improving_score_by_exclusion() -> None:
-    projections, actuals, games = _inputs()
+    projections, actuals, games, runs = _inputs(candidate_sha="d" * 40)
     actuals = actuals[actuals["player_id"] == "p1"]
 
-    report = evaluate_projections(projections, actuals, games, candidate_sha="d" * 40)
+    report = evaluate_projections(projections, actuals, games, runs, candidate_sha="d" * 40)
 
     assert report["passed"] is False
     assert report["outcome_failures"] == {"missing_actual": 1}
@@ -116,7 +154,9 @@ def test_partial_actuals_fail_instead_of_improving_score_by_exclusion() -> None:
 
 def test_candidate_comparison_requires_real_overall_improvement() -> None:
     baseline = evaluate_projections(*_inputs(candidate_mu=60.0), candidate_sha="a" * 40)
-    candidate = evaluate_projections(*_inputs(candidate_mu=52.0), candidate_sha="b" * 40)
+    candidate = evaluate_projections(
+        *_inputs(candidate_mu=52.0, candidate_sha="b" * 40), candidate_sha="b" * 40
+    )
 
     comparison = compare_reports(
         baseline,
@@ -131,9 +171,9 @@ def test_candidate_comparison_requires_real_overall_improvement() -> None:
 
 def test_candidate_comparison_rejects_market_regression() -> None:
     baseline = evaluate_projections(*_inputs(candidate_mu=55.0), candidate_sha="a" * 40)
-    projections, actuals, games = _inputs(candidate_mu=58.0)
+    projections, actuals, games, runs = _inputs(candidate_mu=58.0, candidate_sha="b" * 40)
     projections.loc[1, "mu"] = 48.0
-    candidate = evaluate_projections(projections, actuals, games, candidate_sha="b" * 40)
+    candidate = evaluate_projections(projections, actuals, games, runs, candidate_sha="b" * 40)
 
     comparison = compare_reports(
         baseline,
@@ -148,11 +188,12 @@ def test_candidate_comparison_rejects_market_regression() -> None:
 
 def test_candidate_comparison_rejects_different_evaluation_scope() -> None:
     baseline = evaluate_projections(*_inputs(), candidate_sha="a" * 40)
-    projections, actuals, games = _inputs()
+    projections, actuals, games, runs = _inputs(candidate_sha="b" * 40)
     projections["week"] = 2
     actuals["week"] = 2
     games["week"] = 2
-    candidate = evaluate_projections(projections, actuals, games, candidate_sha="b" * 40)
+    runs["week"] = 2
+    candidate = evaluate_projections(projections, actuals, games, runs, candidate_sha="b" * 40)
 
     comparison = compare_reports(
         baseline,
@@ -167,7 +208,7 @@ def test_candidate_comparison_rejects_different_evaluation_scope() -> None:
 
 def test_candidate_comparison_requires_positive_improvement_threshold() -> None:
     baseline = evaluate_projections(*_inputs(), candidate_sha="a" * 40)
-    candidate = evaluate_projections(*_inputs(), candidate_sha="b" * 40)
+    candidate = evaluate_projections(*_inputs(candidate_sha="b" * 40), candidate_sha="b" * 40)
 
     comparison = compare_reports(
         baseline,

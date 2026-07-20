@@ -70,6 +70,7 @@ def test_retry_safety_is_explicit_per_canonical_stage(monkeypatch) -> None:
 
 
 def test_pipeline_always_runs_canonical_prepare_even_when_reusing_history(monkeypatch) -> None:
+    monkeypatch.setenv("APP_COMMIT_SHA", "a" * 40)
     calls: list[tuple[str, object]] = []
 
     def prepare(season: int, week: int, refresh_history=None):
@@ -88,6 +89,7 @@ def test_pipeline_always_runs_canonical_prepare_even_when_reusing_history(monkey
 
     assert calls == [("prepare", False), ("odds", None)]
     assert report["success"] is True
+    assert report["commit_sha"] == "a" * 40
 
 
 def test_pipeline_stops_when_canonical_prepare_fails(monkeypatch) -> None:
