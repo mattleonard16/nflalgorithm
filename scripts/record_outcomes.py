@@ -9,16 +9,36 @@ Usage:
 """
 
 import argparse
-import uuid
+import hashlib
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pandas as pd
 
 from config import config
+from utils.clv import STATUS_OK, compute_clv, resolve_closing_lines
 from utils.db import execute, executemany, get_connection, read_dataframe
 from utils.grading import calculate_profit_units, get_confidence_tier, grade_bet
 from utils.nfl_markets import MARKET_TO_STAT
+
+
+def make_bet_id(
+    season: int,
+    week: int,
+    player_id: str,
+    market: str,
+    sportsbook: str,
+    side: str,
+    line: float,
+) -> str:
+    """Derive a stable bet_id from the bet's natural key.
+
+    A random UUID per grading run defeats `INSERT OR REPLACE`, so re-running a
+    week duplicates every row in bet_outcomes. Hashing the natural key makes
+    re-grading idempotent and lets clv_weekly.bet_id join back reliably.
+    """
+    key = f"{season}|{week}|{player_id}|{market}|{sportsbook}|{side}|{float(line):.4f}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
 
 
 # Market to stat column mapping
@@ -116,9 +136,10 @@ def grade_bets(season: int, week: int) -> List[Dict]:
 
         # Create outcome record
         outcome = {
-            "bet_id": str(uuid.uuid4()),
+            "bet_id": make_bet_id(season, week, player_id, market, pred["sportsbook"], side, line),
             "season": season,
             "week": week,
+            "event_id": pred.get("event_id"),
             "player_id": player_id,
             "player_name": (
                 actuals[actuals["player_id"] == player_id]["name"].iloc[0]
@@ -136,6 +157,9 @@ def grade_bets(season: int, week: int) -> List[Dict]:
             "confidence_tier": confidence_tier,
             "edge_at_placement": edge_pct,
             "recorded_at": datetime.now(timezone.utc).isoformat(),
+            # Carried for CLV only — not persisted to bet_outcomes.
+            "mu": pred.get("mu"),
+            "sigma": pred.get("sigma"),
         }
 
         outcomes.append(outcome)
@@ -153,6 +177,98 @@ def grade_bets(season: int, week: int) -> List[Dict]:
         print(f"Total profit: {total_profit:.2f} units")
 
     return outcomes
+
+
+def compute_and_save_clv(season: int, week: int, outcomes: List[Dict]) -> Optional[float]:
+    """Compute closing-line value per bet and persist it to clv_weekly.
+
+    Closing is `MAX(as_of)` per (event_id, player_id, market, sportsbook) —
+    the `games` table has no populated kickoff, so "last line before kickoff"
+    is not expressible yet.
+
+    Args:
+        season: NFL season year
+        week: NFL week number
+        outcomes: Graded outcomes from grade_bets()
+
+    Returns:
+        Mean clv_bp across bets with a resolvable close, or None when no bet
+        had enough snapshot depth. Never 0 as a stand-in for "unknown".
+    """
+    if not outcomes:
+        return None
+
+    odds = read_dataframe(
+        """
+        SELECT event_id, player_id, market, sportsbook, line, price, under_price, as_of
+        FROM weekly_odds
+        WHERE season = ? AND week = ?
+        """,
+        params=(season, week),
+    )
+
+    if odds.empty:
+        print(f"No weekly_odds snapshots for {season} Week {week} — CLV unavailable")
+        return None
+
+    closing = resolve_closing_lines(odds)
+    close_by_key = {
+        (row["event_id"], row["player_id"], row["market"], row["sportsbook"]): row
+        for row in closing.to_dict("records")
+    }
+
+    records: List[tuple] = []
+    clv_values: List[float] = []
+    insufficient = 0
+    closed_at = datetime.now(timezone.utc).isoformat()
+
+    for outcome in outcomes:
+        key = (
+            outcome.get("event_id"),
+            outcome["player_id"],
+            outcome["market"],
+            outcome["sportsbook"],
+        )
+        result = compute_clv(outcome, close_by_key.get(key))
+
+        if result["status"] != STATUS_OK:
+            insufficient += 1
+            continue
+
+        if result["clv_bp"] is not None:
+            clv_values.append(result["clv_bp"])
+
+        records.append(
+            (
+                outcome["bet_id"],
+                result["close_line"],
+                result["close_price"],
+                result["clv_bp"],
+                result["closed_at"] or closed_at,
+            )
+        )
+
+    if insufficient:
+        print(f"CLV skipped for {insufficient} bets (insufficient odds snapshots)")
+
+    if not records:
+        print("No bets had enough snapshot depth to compute CLV")
+        return None
+
+    executemany(
+        """
+        INSERT OR REPLACE INTO clv_weekly (
+            bet_id, close_line, close_price, clv_bp, closed_at
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        records,
+    )
+    print(f"Wrote {len(records)} CLV records to clv_weekly")
+
+    if not clv_values:
+        return None
+
+    return sum(clv_values) / len(clv_values)
 
 
 def save_outcomes(outcomes: List[Dict]) -> None:
@@ -206,20 +322,22 @@ def save_outcomes(outcomes: List[Dict]) -> None:
 
     # Aggregate weekly performance
     df = pd.DataFrame(outcomes)
-    season = df["season"].iloc[0]
-    week = df["week"].iloc[0]
+    # Cast out of numpy scalars: sqlite3 stores an unconverted np.int64 as a
+    # BLOB, which silently breaks every later season/week lookup.
+    season = int(df["season"].iloc[0])
+    week = int(df["week"].iloc[0])
 
     total_bets = len(outcomes)
     wins = len(df[df["result"] == "win"])
     losses = len(df[df["result"] == "loss"])
     pushes = len(df[df["result"] == "push"])
-    profit_units = df["profit_units"].sum()
+    profit_units = float(df["profit_units"].sum())
 
     # ROI calculation: profit / units risked (excluding pushes)
     units_risked = wins + losses  # Each bet risks 1 unit
     roi_pct = (profit_units / units_risked * 100) if units_risked > 0 else 0.0
 
-    avg_edge = df["edge_at_placement"].mean()
+    avg_edge = float(df["edge_at_placement"].mean())
 
     # Best/worst bets (by profit)
     best_bet_row = df.loc[df["profit_units"].idxmax()] if not df.empty else None
@@ -236,38 +354,40 @@ def save_outcomes(outcomes: List[Dict]) -> None:
         else None
     )
 
-    # CLV (Closing Line Value) - placeholder for now
-    clv_avg = None
+    # CLV (Closing Line Value) against the closing snapshot, in basis points.
+    clv_avg = compute_and_save_clv(season, week, outcomes)
 
-    # Update weekly_performance
-    perf_sql = """
+    # weekly_performance.clv_avg is NOT NULL DEFAULT 0: binding an explicit
+    # None works on SQLite but fails on MySQL, so omit the column entirely when
+    # CLV is unknown and let the column default stand.
+    clv_columns = "clv_avg," if clv_avg is not None else ""
+    clv_placeholder = "?," if clv_avg is not None else ""
+    perf_sql = f"""
         INSERT OR REPLACE INTO weekly_performance (
             season, week, total_bets, wins, losses, pushes,
-            profit_units, roi_pct, avg_edge, clv_avg,
+            profit_units, roi_pct, avg_edge, {clv_columns}
             best_bet, worst_bet, updated_at
         ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, {clv_placeholder} ?, ?, ?
         )
     """
 
-    execute(
-        perf_sql,
-        (
-            season,
-            week,
-            total_bets,
-            wins,
-            losses,
-            pushes,
-            profit_units,
-            roi_pct,
-            avg_edge,
-            clv_avg,
-            best_bet,
-            worst_bet,
-            datetime.now(timezone.utc).isoformat(),
-        ),
-    )
+    perf_params: List[object] = [
+        season,
+        week,
+        total_bets,
+        wins,
+        losses,
+        pushes,
+        profit_units,
+        roi_pct,
+        avg_edge,
+    ]
+    if clv_avg is not None:
+        perf_params.append(clv_avg)
+    perf_params.extend([best_bet, worst_bet, datetime.now(timezone.utc).isoformat()])
+
+    execute(perf_sql, tuple(perf_params))
 
     print(f"Updated weekly_performance for {season} Week {week}")
     print(f"  Total bets: {total_bets}")
@@ -275,6 +395,7 @@ def save_outcomes(outcomes: List[Dict]) -> None:
     print(f"  Profit: {profit_units:.2f} units")
     print(f"  ROI: {roi_pct:.2f}%")
     print(f"  Avg edge: {avg_edge:.2f}%")
+    print(f"  Avg CLV: {f'{clv_avg:.1f} bp' if clv_avg is not None else 'unavailable'}")
 
 
 def main():
