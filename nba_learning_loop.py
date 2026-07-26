@@ -14,10 +14,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 
-from utils.db import execute, executemany, read_dataframe
+from utils.db import executemany, read_dataframe
 
 logger = logging.getLogger(__name__)
 

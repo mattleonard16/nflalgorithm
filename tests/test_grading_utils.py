@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import math
 
-import pytest
 
 from utils.grading import calculate_profit_units, get_confidence_tier, grade_bet
 

@@ -16,9 +16,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
-import pandas as pd
 
 from utils.db import read_dataframe
 

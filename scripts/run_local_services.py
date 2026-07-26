@@ -13,7 +13,6 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 from config import config
 from scripts.preflight import collect_diagnostics, print_diagnostics

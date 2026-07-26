@@ -90,7 +90,7 @@ def _seed_game_logs(
 class TestEngineerFeatures:
     def test_produces_required_columns(self, db):
         """_engineer_features must add all FEATURE_COLS to the DataFrame."""
-        from models.nba.minutes_model import FEATURE_COLS, _engineer_features
+        from models.nba.minutes_model import _engineer_features
 
         _seed_game_logs(20)
         df = read_dataframe(

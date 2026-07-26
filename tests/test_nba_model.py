@@ -8,11 +8,10 @@ Uses a fresh SQLite DB with seeded game logs. No NBA.com calls.
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from schema_migrations import MigrationManager
-from utils.db import execute, executemany, read_dataframe
+from utils.db import executemany, read_dataframe
 
 
 @pytest.fixture()

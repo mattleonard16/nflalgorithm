@@ -10,7 +10,6 @@ Covers:
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from utils.target_share import (
     calculate_target_share,

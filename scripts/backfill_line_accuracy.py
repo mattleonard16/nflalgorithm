@@ -12,14 +12,14 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
 
 from config import config
-from utils.db import get_connection, read_dataframe, write_dataframe
-from utils.nfl_markets import MARKET_TO_STAT, melt_actuals
+from utils.db import read_dataframe, write_dataframe
+from utils.nfl_markets import melt_actuals
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

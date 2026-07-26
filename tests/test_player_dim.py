@@ -1,7 +1,5 @@
 """Tests for the player_dim canonical dimension table."""
 
-import sqlite3
-from datetime import datetime, timezone
 
 import pytest
 

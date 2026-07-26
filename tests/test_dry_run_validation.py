@@ -10,15 +10,11 @@ Covers:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import numpy as np
 import pandas as pd
-import pytest
 
 from scripts.dry_run_validation import (
-    LINE_MOVEMENT_OFFSETS,
-    MARKET_TO_STAT,
     _apply_agent_filter,
     _compute_week_metrics,
     _empty_metrics,

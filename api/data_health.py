@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
-from utils.db import fetchall, fetchone
+from utils.db import fetchone
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,6 @@ NFR-6 gate: behavior must be off by default and toggle via
 
 from __future__ import annotations
 
-import os
 import sqlite3
 import tempfile
 from pathlib import Path

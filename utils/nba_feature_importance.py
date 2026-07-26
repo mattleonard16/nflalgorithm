@@ -16,8 +16,6 @@ Usage::
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -236,7 +234,6 @@ def _shap_fallback_without_y(
     feature_names: list[str],
 ) -> pd.DataFrame:
     """Fallback when y is unavailable: use feature_importances_ if present, else zeros."""
-    from sklearn.ensemble import StackingRegressor
 
     # Try to get feature_importances_ from the base estimator
     base = _extract_tree_estimator(model)

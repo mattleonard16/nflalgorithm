@@ -1,6 +1,5 @@
 """Tests for the pipeline run API endpoints (Feature 1)."""
 
-import json
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -9,7 +8,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from schema_migrations import MigrationManager
-from utils.db import execute, fetchone
+from utils.db import execute
 
 
 @pytest.fixture()

@@ -13,14 +13,11 @@ Covers:
 
 from __future__ import annotations
 
-import math
-import os
-import random
 
 import pytest
 
 from schema_migrations import MigrationManager
-from utils.db import executemany, read_dataframe
+from utils.db import executemany
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +408,6 @@ class TestRankNbaValueCalibratedFlag:
         cal = NBACalibrator()
         cal.fit(min_samples=50)
 
-        import os
         from pathlib import Path
         model_dir = Path(db).parent / "models" / "nba"
         model_dir.mkdir(parents=True, exist_ok=True)

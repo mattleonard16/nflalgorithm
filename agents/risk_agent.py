@@ -14,7 +14,6 @@ from agents import AgentReport
 from agents.base_agent import BaseAgent
 from risk_manager import (
     assess_risk,
-    detect_correlations,
     detect_team_stacks,
 )
 

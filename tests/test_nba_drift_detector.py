@@ -7,7 +7,6 @@ All tests use tmp_path SQLite DB — no real NBA data required.
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from schema_migrations import MigrationManager

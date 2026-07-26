@@ -3,7 +3,6 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-import pytest
 
 from config import config
 from prop_integration import join_odds_projections, normalize_player_name

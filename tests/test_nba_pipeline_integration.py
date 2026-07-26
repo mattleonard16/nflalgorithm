@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from schema_migrations import MigrationManager
-from utils.db import execute, executemany, fetchall, read_dataframe
+from utils.db import execute, fetchall
 
 
 GAME_DATE = "2026-02-17"

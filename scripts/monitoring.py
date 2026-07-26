@@ -7,14 +7,11 @@ automated alerts, and professional-grade reporting capabilities.
 """
 
 import logging
-import time
 import sqlite3
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from datetime import datetime
+from typing import Dict, Any
 import json
-import numpy as np
 import pandas as pd
-from pathlib import Path
 
 from config import config
 

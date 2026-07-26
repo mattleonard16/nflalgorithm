@@ -13,7 +13,6 @@ from __future__ import annotations
 import math
 
 import pandas as pd
-import pytest
 
 from confidence_engine import (
     compute_confidence_score,

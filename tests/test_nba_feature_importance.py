@@ -7,15 +7,13 @@ SHAP fallback, and DB persistence — all on synthetic data / tmp SQLite DB.
 from __future__ import annotations
 
 import importlib
-import sys
-from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from schema_migrations import MigrationManager
-from utils.db import executemany, read_dataframe
+from utils.db import read_dataframe
 
 
 # ---------------------------------------------------------------------------

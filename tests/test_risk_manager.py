@@ -13,7 +13,6 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from risk_manager import (
     assess_risk,
-    build_correlation_matrix,
     compute_exposure,
     detect_correlations,
     detect_team_stacks,
