@@ -11,7 +11,6 @@ from importlib import import_module
 from typing import Any
 
 from .base_model import BasePositionModel
-from .rb_model import RBModel
 
 
 def _weekly_module() -> Any:
@@ -36,4 +35,4 @@ def predict_week(*args: Any, **kwargs: Any) -> Any:
     return _weekly_module().predict_week(*args, **kwargs)
 
 
-__all__ = ["BasePositionModel", "RBModel", "predict_week", "train_weekly_models"]
+__all__ = ["BasePositionModel", "predict_week", "train_weekly_models"]

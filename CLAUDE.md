@@ -752,20 +752,20 @@ Key test files:
 
 A 5-agent audit identified blockers and high-impact fixes for the 2026 season. Use this as the source of work when invoking AI-DLC's Requirements Analysis on a fix item.
 
-### Tier 0 — BLOCKERS (broken code)
-1. Snap counts dead merge — `scripts/ingest_real_nfl_data.py:100-111`. Every player gets `snap_percentage=50.0`.
-2. Auth endpoints all TypeError — `api/server.py:1236-1382` vs `api/auth.py`. Plus SHA256 not bcrypt.
-3. `user_bets` INSERT broken — `api/server.py:1364-1383`. Wrong cols, 10 `?` for 11 values.
-4. Side hardcoded "over" — `scripts/record_outcomes.py:91`, `value_betting_engine.py:122-128`.
-5. Hardcoded season/week — `prop_integration.py:417-418`.
-6. Hardcoded fields — `age=26`, `game_date=f"{season}-01-01"`, weather all zeros.
+### Tier 0 — BLOCKERS (broken code) — ALL RESOLVED
+1. [RESOLVED] Snap counts dead merge — `scripts/ingest_real_nfl_data.py:100-111`. Real snap counts now merged; no `snap_percentage=50.0` fallback.
+2. [RESOLVED] Auth endpoints all TypeError — `api/server.py` vs `api/auth.py`. Signatures aligned and password hashing moved to bcrypt.
+3. [RESOLVED] `user_bets` INSERT broken — column list and placeholder count now match.
+4. [RESOLVED] Side hardcoded "over" — over/under both supported end to end (`side` column on `materialized_value_view`).
+5. [RESOLVED] Hardcoded season/week — `prop_integration.py` now requires explicit season/week.
+6. [RESOLVED] Hardcoded fields — real `age` and `game_date` are ingested rather than defaulted.
 
 ### Tier 1 — HIGH IMPACT (MAE + ROI)
 7. Premium features dropped in `_CONTEXTUAL_COLS` (weekly.py:44).
 8. No vig removal — `value_betting_engine.py:37-41`. Port `implied_probability_no_vig` from NBA.
 9. CLV never captured — `record_outcomes.py:226`.
 10. No NFL walk-forward backtest — NBA has `utils/nba_backtest.py`.
-11. Universal model, no position split — `rb_model.py` orphaned.
+11. [RESOLVED — by deletion] Universal model, no position split. Decision: the orphaned `RBModel` subclass was deleted rather than revived; `models/position_specific/weekly.py` is the single production model path. `BasePositionModel` is retained as the shared base. Revisit per-position splits as new work against weekly.py, not the old subclass.
 12. nflreadpy sources unused — pbp, rosters, schedules, ftn, injuries, depth_charts.
 13. Kelly cap not applied in ranking path — `materialized_value_view.py:139`.
 
@@ -788,4 +788,4 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 27. Stacking final estimator Ridge → LightGBM or isotonic calibration.
 28. WR role priors stale.
 29. Cache stale-while-revalidate no in-flight dedup.
-30. `materialized_value_view(edge_percentage)` unindexed.
+30. [RESOLVED] `materialized_value_view` ranking index — composite `(season, week, edge_percentage)` on `idx_materialized_value_view_lookup`, created on both the SQLite and MySQL branches of `_ensure_indexes`. It supersedes the former `(season, week)` index.

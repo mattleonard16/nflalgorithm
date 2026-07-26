@@ -4,11 +4,8 @@ Enhanced NFL Algorithm Hyperparameter Optimization with Optuna
 Professional-grade optimization targeting MAE ≤ 3.0
 """
 
-import os
-import sys
-import sqlite3
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, Any
 from datetime import datetime
 
 import pandas as pd
@@ -19,12 +16,10 @@ import shap
 from optuna.storages import RDBStorage
 from sklearn.model_selection import cross_val_score, TimeSeriesSplit
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
-from sklearn.metrics import mean_absolute_error
 from sklearn.ensemble import StackingRegressor
 # import tensorflow as tf  # Commented out for now due to Python 3.13 compatibility
 
 from config import config
-from models.position_specific.rb_model import RBModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
