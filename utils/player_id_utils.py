@@ -66,6 +66,9 @@ TEAM_ALIASES = {
     "LARAMS": "LAR",
     "LOSANGELESRAMS": "LAR",
     "STL": "LAR",
+    # nflverse schedules abbreviate the Rams as "LA"; the Chargers are always
+    # "LAC" there, so this is unambiguous for that source.
+    "LA": "LAR",
     "WSH": "WAS",
     "WFT": "WAS",
     "HST": "HOU",
