@@ -103,7 +103,7 @@ def temp_db():
 
 def test_rank_weekly_value_with_valid_data(temp_db):
     """Test that rank_weekly_value correctly handles valid data with season/week."""
-    result = rank_weekly_value(2023, 1, min_edge=0.0, place=False)
+    result = rank_weekly_value(2023, 1, min_edge=0.0)
     
     assert not result.empty
     assert 'season' in result.columns

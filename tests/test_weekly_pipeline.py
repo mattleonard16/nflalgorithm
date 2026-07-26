@@ -59,7 +59,7 @@ def test_weekly_roundtrip_pipeline():
         predictions = predict_week(2023, 13)
         assert not predictions.empty
 
-        ranked = rank_weekly_value(2023, 13, min_edge=0.0, place=False)
+        ranked = rank_weekly_value(2023, 13, min_edge=0.0)
         assert not ranked.empty
 
         materialize_week(2023, 13)

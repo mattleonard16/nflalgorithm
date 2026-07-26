@@ -30,7 +30,7 @@ def materialize_week(
     staged = run_id is not None and attempt is not None
 
     threshold = min_edge if min_edge is not None else config.betting.min_edge_threshold
-    ranked = rank_weekly_value(season, week, threshold, place=False)
+    ranked = rank_weekly_value(season, week, threshold)
 
     with get_connection() as conn:
         if staged:

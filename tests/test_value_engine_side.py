@@ -70,7 +70,7 @@ def temp_db():
 
 
 def test_rank_weekly_value_emits_side_column(temp_db):
-    df = rank_weekly_value(2024, 1, min_edge=0.0, place=False)
+    df = rank_weekly_value(2024, 1, min_edge=0.0)
     assert "side" in df.columns
     assert (df["side"] == "over").all()
 
