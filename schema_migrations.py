@@ -1412,6 +1412,33 @@ class MigrationManager:
         )
         cursor.execute("DROP TABLE _mvv_old")
 
+    @staticmethod
+    def _drop_mysql_index_if_columns_differ(
+        cursor: Any, table: str, index: str, columns: str
+    ) -> None:
+        """Drop a MySQL index whose column list no longer matches the target.
+
+        MySQL has no `CREATE INDEX IF NOT EXISTS`, so this migrator checks for
+        the index by name. That check cannot see a widened definition: an index
+        created as (season, week) satisfies a name lookup for the intended
+        (season, week, edge_percentage) and would never be rebuilt.
+        """
+        cursor.execute(
+            """
+            SELECT column_name FROM information_schema.statistics
+            WHERE table_schema = DATABASE() AND table_name = %s AND index_name = %s
+            ORDER BY seq_in_index
+            """,
+            (table, index),
+        )
+        existing = [str(row[0]).lower() for row in cursor.fetchall()]
+        if not existing:
+            return
+
+        desired = [col.strip().lower() for col in columns.split(",")]
+        if existing != desired:
+            cursor.execute(f"DROP INDEX `{index}` ON `{table}`")
+
     def _ensure_indexes(self, cursor: Any) -> None:
         if get_backend() == "mysql":
             for table, index, columns in (
@@ -1442,7 +1469,16 @@ class MigrationManager:
                     "idx_pipeline_card_staging_run",
                     "run_id, attempt, season, week",
                 ),
+                (
+                    "materialized_value_view",
+                    "idx_materialized_value_view_lookup",
+                    "season, week, edge_percentage",
+                ),
             ):
+                # Existence is keyed on index name, so an index whose column set
+                # was widened later would otherwise keep its stale definition
+                # forever. Drop the outdated one before the create check.
+                self._drop_mysql_index_if_columns_differ(cursor, table, index, columns)
                 cursor.execute(
                     """
                     SELECT 1 FROM information_schema.statistics
@@ -1478,8 +1514,13 @@ class MigrationManager:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_feed_freshness_week ON feed_freshness(season, week)"
         )
+        # Supersedes the former (season, week) index. IF NOT EXISTS keys off the
+        # index name, so an existing narrow index must be dropped for the
+        # edge_percentage column to be added to the covering set.
+        cursor.execute("DROP INDEX IF EXISTS idx_materialized_value_view_lookup")
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_materialized_value_view_lookup ON materialized_value_view(season, week)"
+            "CREATE INDEX IF NOT EXISTS idx_materialized_value_view_lookup "
+            "ON materialized_value_view(season, week, edge_percentage)"
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_player_mappings_odds ON player_mappings(player_id_odds)"

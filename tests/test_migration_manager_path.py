@@ -104,6 +104,10 @@ def test_mysql_index_refresh_is_idempotent_without_if_not_exists(monkeypatch) ->
         def fetchone(self):
             return None
 
+        def fetchall(self):
+            # No index rows exist yet, so nothing is dropped before create.
+            return []
+
     cursor = RecordingCursor()
     monkeypatch.setattr(schema_migrations, "get_backend", lambda: "mysql")
 
@@ -116,6 +120,47 @@ def test_mysql_index_refresh_is_idempotent_without_if_not_exists(monkeypatch) ->
     assert all("IF NOT EXISTS" not in statement for statement in create_statements)
     assert any("idx_pipeline_jobs_claim" in statement for statement in create_statements)
     assert any("idx_pipeline_jobs_stale" in statement for statement in create_statements)
+    assert any(
+        "idx_materialized_value_view_lookup" in statement and "edge_percentage" in statement
+        for statement in create_statements
+    )
+
+
+def test_mysql_stale_narrow_index_is_dropped_before_recreate(monkeypatch) -> None:
+    """A pre-existing (season, week) index must be rebuilt with edge_percentage.
+
+    MySQL index existence is checked by name, so without an explicit drop the
+    widened column set would never reach an already-migrated database.
+    """
+
+    class NarrowIndexCursor:
+        def __init__(self) -> None:
+            self.statements: list[tuple[str, tuple | None]] = []
+            self._last: tuple[str, tuple | None] | None = None
+
+        def execute(self, statement: str, params: tuple | None = None) -> None:
+            self.statements.append((statement, params))
+            self._last = (statement, params)
+
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            statement, params = self._last or ("", None)
+            if "column_name" in statement and params == (
+                "materialized_value_view",
+                "idx_materialized_value_view_lookup",
+            ):
+                return [("season",), ("week",)]
+            return []
+
+    cursor = NarrowIndexCursor()
+    monkeypatch.setattr(schema_migrations, "get_backend", lambda: "mysql")
+
+    MigrationManager("ignored-for-mysql.db")._ensure_indexes(cursor)
+
+    drops = [statement for statement, _ in cursor.statements if "DROP INDEX" in statement]
+    assert any("idx_materialized_value_view_lookup" in statement for statement in drops)
 
 
 def test_mysql_ddl_bounds_key_text_and_translates_auto_increment() -> None:
