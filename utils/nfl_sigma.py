@@ -163,26 +163,3 @@ def _ewma_sigma(values: np.ndarray, decay: float) -> float:
     sum_w2 = float(np.dot(weights, weights))
     correction = 1.0 / (1.0 - sum_w2) if sum_w2 < 1.0 else 1.0
     return float(np.sqrt(weighted_var * correction))
-
-
-def get_sigma_or_default(
-    sigma_value: float | None,
-    projected_value: float,
-    market: str = "rushing_yards",
-    position: str | None = None,
-) -> float:
-    """Return sigma from projections table, falling back to the bucket default.
-
-    Used by the value engine and explainability layer when sigma may be NULL.
-    ``position=None`` reproduces the legacy per-market fallback exactly.
-    """
-    if sigma_value is not None and not (isinstance(sigma_value, float) and np.isnan(sigma_value)):
-        return float(sigma_value)
-
-    # Fallback: (market, position) default, then legacy per-market, then heuristic
-    bucket = _position_bucket(position)
-    if bucket is not None and (market, bucket) in SIGMA_DEFAULTS:
-        return SIGMA_DEFAULTS[(market, bucket)]
-    if (market, None) in SIGMA_DEFAULTS:
-        return SIGMA_DEFAULTS[(market, None)]
-    return max(projected_value * 0.25, 10.0)
