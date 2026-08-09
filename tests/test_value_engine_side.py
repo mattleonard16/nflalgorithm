@@ -127,6 +127,30 @@ def test_materialized_view_pk_allows_both_sides(temp_db):
     assert count == 2
 
 
+def test_materialize_week_return_matches_persisted_side_and_stake(temp_db):
+    """Return contract: the frame handed back carries side/confidence and the
+    same per-row stakes the view persisted."""
+    returned = materialize_week(2024, 1, min_edge=0.0)
+    assert not returned.empty
+    assert "side" in returned.columns
+    assert "confidence_score" in returned.columns
+    assert "confidence_tier" in returned.columns
+
+    with sqlite3.connect(temp_db) as conn:
+        rows = conn.execute(
+            "SELECT sportsbook, side, stake FROM materialized_value_view "
+            "WHERE season=? AND week=?",
+            (2024, 1),
+        ).fetchall()
+
+    assert len(rows) == len(returned)
+    persisted = {(r[0], r[1]): r[2] for r in rows}
+    for _, row in returned.iterrows():
+        assert persisted[(row["sportsbook"], row["side"])] == pytest.approx(
+            row["stake"]
+        )
+
+
 def test_grade_bet_under_pathway_works():
     """T0 #4: under bets must be gradable (not stuck on hardcoded 'over')."""
     assert grade_bet(60.0, 70.5, "under") == "win"

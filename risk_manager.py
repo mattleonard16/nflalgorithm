@@ -181,6 +181,58 @@ def compute_exposure(df: pd.DataFrame, bankroll: float) -> pd.DataFrame:
     )
 
 
+# ── Portfolio-level stake normalization ──────────────────────────────────────
+
+def normalize_portfolio_stakes(
+    df: pd.DataFrame,
+    bankroll: float,
+    max_total_fraction: float = 1.0,
+) -> pd.DataFrame:
+    """Scale stakes so total stake <= bankroll * max_total_fraction.
+
+    Per-bet Kelly capping bounds each bet individually, but a large card can
+    still sum past the bankroll. When it does, every ``stake`` (and the
+    stake-derived ``kelly_fraction``, when present) is multiplied by the same
+    factor so the total lands exactly on the limit — relative sizing across
+    the card is preserved. Cards at or under the limit are returned
+    unchanged, as are empty or zero-stake frames. Stakes must be
+    non-negative and non-NaN; anything else raises ValueError, because a
+    proportional scale over mixed-sign or NaN stakes cannot guarantee the
+    cap holds per bet.
+
+    This is a global constraint on the whole card: it must run after all
+    rows for the week have been ranked, never per-row. Returns a *new*
+    DataFrame; the caller's frame is not mutated.
+    """
+    if bankroll <= 0:
+        raise ValueError(f"bankroll must be positive, got {bankroll}")
+    if max_total_fraction <= 0:
+        raise ValueError(
+            f"max_total_fraction must be positive, got {max_total_fraction}"
+        )
+    if df.empty:
+        return df.copy()
+
+    stakes = df["stake"].astype(float)
+    invalid = stakes.isna() | (stakes < 0)
+    if invalid.any():
+        raise ValueError(
+            "stakes must be non-negative and non-NaN to enforce the "
+            f"portfolio cap; offending values: {stakes[invalid].tolist()}"
+        )
+
+    total = float(stakes.sum())
+    limit = bankroll * max_total_fraction
+    if total <= 0 or total <= limit:
+        return df.copy()
+
+    scale = limit / total
+    scaled = {"stake": stakes * scale}
+    if "kelly_fraction" in df.columns:
+        scaled["kelly_fraction"] = df["kelly_fraction"].astype(float) * scale
+    return df.assign(**scaled)
+
+
 # ── Integration entry point ───────────────────────────────────────────
 
 def assess_risk(df: pd.DataFrame, bankroll: Optional[float] = None) -> pd.DataFrame:

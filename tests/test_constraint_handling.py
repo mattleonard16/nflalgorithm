@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 import os
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -142,6 +143,59 @@ def test_materialize_week_with_no_data(temp_db):
         ).fetchone()[0]
     
     assert count == 0
+
+
+def test_materialize_week_returns_exactly_what_it_persists(temp_db, monkeypatch):
+    """Persist/return contract for the Tier A money path.
+
+    materialize_week must return the SAME frame the view stores — post
+    filters, confidence scoring, and portfolio normalization — and the
+    persisted card must never total more than the bankroll even when the
+    per-bet-capped stakes sum past it."""
+    n_books = 25
+    with sqlite3.connect(temp_db) as conn:
+        for i in range(n_books):
+            conn.execute(
+                """
+                INSERT INTO weekly_odds
+                (event_id, season, week, player_id, market, sportsbook, line, price, as_of)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("event1", 2023, 1, "test_player_1_team1", "rushing_yards",
+                 f"Book{i:02d}", 70.5, -110, "2023-09-01T00:00:00"),
+            )
+        conn.commit()
+
+    bankroll = 100.0
+    monkeypatch.setattr(config.betting, "bankroll", bankroll)
+
+    # Self-check: the raw ranked card must exceed the bankroll, otherwise
+    # this test would pass vacuously without exercising normalization.
+    raw = rank_weekly_value(2023, 1, min_edge=0.0)
+    assert raw["stake"].sum() > bankroll, (
+        "fixture no longer oversubscribes the bankroll; add more odds rows"
+    )
+
+    returned = materialize_week(2023, 1, min_edge=0.0)
+
+    with sqlite3.connect(temp_db) as conn:
+        db = pd.read_sql_query(
+            "SELECT sportsbook, stake, kelly_fraction FROM materialized_value_view "
+            "WHERE season=? AND week=?",
+            conn,
+            params=(2023, 1),
+        )
+
+    assert not db.empty
+    # Global cap holds in what the VIEW stores, not just in the return value.
+    assert db["stake"].sum() <= bankroll + 1e-6
+    assert db["stake"].sum() == pytest.approx(bankroll)
+
+    # Row-for-row parity between the returned frame and the persisted card.
+    merged = returned.merge(db, on="sportsbook", suffixes=("_ret", "_db"))
+    assert len(merged) == len(db) == len(returned)
+    assert np.allclose(merged["stake_ret"], merged["stake_db"])
+    assert np.allclose(merged["kelly_fraction_ret"], merged["kelly_fraction_db"])
 
 
 def test_season_week_constraint_not_null(temp_db):
