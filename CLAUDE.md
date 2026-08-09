@@ -619,16 +619,25 @@ From `config.py`:
 # Install
 make install
 
-# Ingest data (2024+2025 seasons)
+# Ingest data
 make ingest-nfl
 
 # Run tests
 make test
 
-# Weekly workflow
+# Weekly workflow (local/manual — see docs/OPERATIONS.md for the production run)
 make week-predict SEASON=2025 WEEK=13
 make week-materialize SEASON=2025 WEEK=13
-make week-grade SEASON=2025 WEEK=13
+make week-grade SEASON=2025 WEEK=13      # grades bets, records CLV
+
+# Quality gate — non-zero exit when a position regresses past its MAE ceiling
+make mae-gate SEASON=2025 WEEK=13
+
+# Durable production path
+make migrate
+make doctor
+make production-run SEASON=2026 WEEK=1
+make pipeline-worker
 
 # Launch services
 make api          # FastAPI on :8000
@@ -683,23 +692,55 @@ Odds API -> prop_line_scraper.py -> weekly_odds
                                               |
                                 prop_integration.py (3-tier match)
                                               |
-                              value_betting_engine.py (Kelly + CLV)
+                              value_betting_engine.py (Kelly + no-vig edge)
                                               |
                            materialized_value_view.py (dashboard layer)
                                               |
                              api/server.py -> React Dashboard
+
+Grading loop (after results land):
+  weekly_odds + materialized_value_view
+        -> utils/clv.py (closing line, points + no-vig bp)
+        -> scripts/record_outcomes.py
+        -> bet_outcomes, clv_weekly, weekly_performance.clv_avg
 ```
+
+This is the data-flow view. For the durable job/worker execution architecture that actually runs
+production — FastAPI enqueues, a separate worker owns the fail-closed pipeline — see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/OPERATIONS.md](docs/OPERATIONS.md).
+`make week-*` targets are the local/manual path and are **not** the production publication path.
 
 ---
 
 ## Data Status
 
-| Season | Source | Notes |
-|--------|--------|-------|
-| 2024 | nflreadpy | Full season (weeks 1-18) |
-| 2025 | nflreadpy | Through latest available week |
+Local `nfl_data.db` as of 2026-07-24 (`player_stats_enhanced`):
+
+| Season | Rows | Players | Weeks |
+|--------|------|---------|-------|
+| 2023 | 6,167 | 604 | 1–22 |
+| 2024 | 6,407 | 639 | 1–22 |
+| 2025 | 6,558 | 663 | 1–21 |
+
+Week numbers run past 18 because postseason weeks are included. Re-run the verification query
+below rather than trusting these counts — they drift with every ingest.
+
+**2026 season prep (as of 2026-08-03)**: the full 2026 schedule is loaded (`games`: 272 games, all
+with `kickoff_utc`), 2026 rosters are in `nfl_roster_players` (2,924 players, 32 teams), week-1
+context snapshots exist, and `make week-refresh SEASON=2026 WEEK=1` has produced 1,396 week-1
+projections (872 players) with `team` populated on every row. Feeds keyed to the stats year
+(weekly stats, injuries, weekly rosters) are unpublished until the season starts; the ingest skips
+them with a warning instead of crashing (`_is_missing_feed_error` treats nflreadpy's season-range
+`ValueError` as an unpublished feed for optional seasons only — history seasons still fail loud).
 
 **Data Source**: All data ingested via `scripts/ingest_real_nfl_data.py` using nflverse/nflreadpy.
+
+**Known gap**: `weekly_projections.team` is empty on legacy 2025 rows (546 of 568), so evaluation
+joins to `games` find no kickoff for those weeks and `make mae-gate` fails loud with
+`missing_kickoff` there. The current roster-backed prediction path populates `team` (2026 W1: 0
+empty of 1,396), so the gate becomes verifiable on real data once 2026 actuals land. Do not
+re-run `make week-refresh` for a past 2025 week to "fix" those rows — it would overwrite pregame
+evidence (and the pre-kickoff guard refuses anyway).
 
 ### Verify Data
 ```bash
@@ -746,18 +787,32 @@ make test
 Key test files:
 - `tests/test_market_mu_wr.py` - EWMA and role priors
 - `tests/test_prop_integration_wr.py` - 3-tier player matching
-- `tests/test_projection_accuracy.py` - MAE validation
-- `tests/test_value_betting.py` - Kelly criterion and edge calculation
+- `tests/test_nfl_projection_evaluation.py` - evaluation metrics and the per-position MAE gate
+- `tests/test_clv.py` - closing line value math (points and no-vig basis points)
+- `tests/test_kelly_cap.py` - Kelly fraction capping
+- `tests/test_value_engine_side.py` - over/under side handling
+- `tests/test_weekly_pipeline.py` - end-to-end ingest → train → predict → materialize
+
+`tests/conftest.py` uses `collect_ignore` to skip tests that import gitignored modules, so the
+suite runs in CI without the private code. Tests for logic CI must cover therefore need to import
+from tracked modules only.
 
 ---
 
 ## Notes
 
-- Database migrations are managed by `schema_migrations.py`
-- All proprietary logic is in .gitignored files
+- Database migrations are managed by `schema_migrations.py`. `_ensure_indexes` has a **MySQL branch
+  that returns before the SQLite index list** — an index added to only one branch silently does not
+  exist on the other. Add to both. `materialized_value_view` also has a near-duplicate `CREATE`
+  inside `_rebuild_mvv_pk_if_needed`; schema changes must land in both copies.
+- Most proprietary logic is gitignored, but not all — see the Proprietary Files section for the
+  exact set and why it matters for CI.
 - Use `make fullstack` for complete local development environment
 - Front-end dashboard is in `/frontend` (Next.js + TypeScript)
 - Legacy Streamlit dashboard available via `make dashboard`
+- Further docs: [ARCHITECTURE](docs/ARCHITECTURE.md) (durable job pipeline),
+  [OPERATIONS](docs/OPERATIONS.md) (weekly runbook),
+  [TROUBLESHOOTING](docs/TROUBLESHOOTING.md), [MODEL_CARD](docs/MODEL_CARD.md)
 
 ---
 
@@ -775,11 +830,21 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 
 ### Tier 1 — HIGH IMPACT (MAE + ROI)
 7. Premium features dropped in `_CONTEXTUAL_COLS` (weekly.py:44).
-8. No vig removal — `value_betting_engine.py:37-41`. Port `implied_probability_no_vig` from NBA.
-9. CLV never captured — `record_outcomes.py:226`.
+8. [RESOLVED] No vig removal — `implied_probability_no_vig` now lives in `value_betting_engine.py`
+   and is what `utils/clv.py` uses for probability-space CLV.
+9. [RESOLVED] CLV never captured — `utils/clv.py` computes it; `scripts/record_outcomes.py` writes
+   per-bet rows to `clv_weekly` and aggregates into `weekly_performance.clv_avg`. Closing line is
+   `MAX(as_of)` per `(event_id, player_id, market, sportsbook)` — chosen when `games.kickoff_utc`
+   was unpopulated. That premise is now stale: `games` carries kickoffs for all of 2023–2026
+   (272/272 per season), so the closing definition can be upgraded to last-snapshot-before-kickoff.
+   Open follow-up, not yet done. A key with a single snapshot reports `insufficient_snapshots`,
+   never a silent 0.
 10. No NFL walk-forward backtest — NBA has `utils/nba_backtest.py`.
 11. [RESOLVED — by deletion] Universal model, no position split. Decision: the orphaned `RBModel` subclass was deleted rather than revived; `models/position_specific/weekly.py` is the single production model path. `BasePositionModel` is retained as the shared base. Revisit per-position splits as new work against weekly.py, not the old subclass.
-12. nflreadpy sources unused — pbp, rosters, schedules, ftn, injuries, depth_charts.
+12. [MOSTLY RESOLVED] nflreadpy sources unused — rosters, weekly rosters, schedules, depth charts,
+    injuries, and pbp red-zone touches are all ingested by `scripts/ingest_real_nfl_data.py` and
+    feed `games`, `nfl_roster_players`, and `nfl_player_context_snapshots`. Still unused: FTN
+    charting; pbp is only mined for red-zone touches (EPA and the rest untapped).
 13. Kelly cap not applied in ranking path — `materialized_value_view.py:139`.
 
 ### Tier 2 — MEDIUM (correctness/ops)
@@ -796,7 +861,12 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 
 ### Tier 3 — LOWER (polish)
 24. Property tests for Kelly/edge/vig math.
-25. CI gate on per-position MAE.
+25. [RESOLVED] CI gate on per-position MAE — `check_position_mae` in
+    `scripts/evaluate_nfl_projections.py`, exposed as the `mae-gate` subcommand and `make mae-gate`.
+    Ceilings: QB 18.0, RB 12.0, WR 12.0, TE 9.0; a position under 30 projections is reported as
+    skipped, never silently passed. CI runs the gate's unit tests only (no projection data in CI);
+    the real-data run is the Makefile target. See the Data Status note — the real-data path
+    currently fails on `missing_kickoff`.
 26. Perf regression budgets.
 27. Stacking final estimator Ridge → LightGBM or isotonic calibration.
 28. WR role priors stale.
