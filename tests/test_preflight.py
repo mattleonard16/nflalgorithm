@@ -149,6 +149,11 @@ def test_postrun_evidence_is_bound_to_latest_completed_run(tmp_path, monkeypatch
     database = tmp_path / "readiness.db"
     monkeypatch.setenv("DB_BACKEND", "sqlite")
     monkeypatch.setenv("SQLITE_DB_PATH", str(database))
+
+    import config as cfg
+
+    monkeypatch.setattr(cfg.config.database, "path", str(database))
+    monkeypatch.setattr(cfg.config.database, "backend", "sqlite")
     MigrationManager(database).run()
     for run_id, finished_at in (
         ("old-run", "2026-09-01T12:00:00Z"),
