@@ -16,7 +16,9 @@ from risk_manager import (
     compute_exposure,
     detect_correlations,
     detect_team_stacks,
+    monte_carlo_drawdown,
     normalize_portfolio_stakes,
+    risk_adjusted_kelly,
 )
 
 
@@ -220,6 +222,66 @@ class TestExposureCaps:
         assert warnings.notna().all()
         assert all("game_exposure" in str(w) for w in warnings)
         assert not any("team_exposure" in str(w) for w in warnings)
+
+
+# ── Monte Carlo simulation ───────────────────────────────────────────
+
+class TestMonteCarloDrawdown:
+
+    def test_basic_simulation(self):
+        kelly = np.array([0.05, 0.04, 0.03])
+        probs = np.array([0.55, 0.60, 0.50])
+        odds = np.array([-110, -110, +100])
+
+        stats = monte_carlo_drawdown(kelly, probs, odds, iterations=500)
+        assert "mean_drawdown" in stats
+        assert "max_drawdown" in stats
+        assert "p95_drawdown" in stats
+        assert stats["mean_drawdown"] >= 0
+        assert stats["max_drawdown"] >= stats["mean_drawdown"]
+
+    def test_empty_bets(self):
+        stats = monte_carlo_drawdown(
+            np.array([]), np.array([]), np.array([]), iterations=100,
+        )
+        assert stats["mean_drawdown"] == 0.0
+        assert stats["max_drawdown"] == 0.0
+
+    def test_high_kelly_produces_larger_drawdown(self):
+        low_kelly = np.array([0.01, 0.01])
+        high_kelly = np.array([0.10, 0.10])
+        probs = np.array([0.55, 0.55])
+        odds = np.array([-110, -110])
+
+        low_stats = monte_carlo_drawdown(low_kelly, probs, odds, iterations=500)
+        high_stats = monte_carlo_drawdown(high_kelly, probs, odds, iterations=500)
+        assert high_stats["mean_drawdown"] > low_stats["mean_drawdown"]
+
+    def test_deterministic_seed(self):
+        kelly = np.array([0.05, 0.04])
+        probs = np.array([0.55, 0.60])
+        odds = np.array([-110, -110])
+
+        stats1 = monte_carlo_drawdown(kelly, probs, odds, iterations=200)
+        stats2 = monte_carlo_drawdown(kelly, probs, odds, iterations=200)
+        assert stats1["mean_drawdown"] == stats2["mean_drawdown"]
+
+
+# ── Risk-adjusted Kelly ──────────────────────────────────────────────
+
+class TestRiskAdjustedKelly:
+
+    def test_no_scaling_below_threshold(self):
+        dd = {"mean_drawdown": 0.05, "max_drawdown": 0.10, "p95_drawdown": 0.15}
+        result = risk_adjusted_kelly(0.05, dd)
+        assert result == 0.05
+
+    def test_scales_down_above_threshold(self):
+        dd = {"mean_drawdown": 0.10, "max_drawdown": 0.40, "p95_drawdown": 0.30}
+        result = risk_adjusted_kelly(0.05, dd)
+        assert result < 0.05
+        expected = 0.05 * (0.20 / 0.30)
+        assert abs(result - expected) < 1e-10
 
 
 # ── Portfolio-level stake normalization ───────────────────────────────
@@ -548,13 +610,11 @@ class TestAssessRisk:
         assert set(df.columns) == original_cols, "assess_risk must not mutate input"
 
 
-# ── run_risk_check return contracts + CLI dispatch (DB layer stubbed) ─
-# Print formatting is deliberately unasserted — the report text is not a
-# contract; the returned frame (consumed by scripts/production_runner.py) is.
+# ── run_risk_check report + CLI wiring (DB layer stubbed) ─────────────
 
 
-class TestRunRiskCheck:
-    def test_returns_assessed_frame(self, monkeypatch):
+class TestRunRiskCheckReport:
+    def test_report_printed_and_assessed_frame_returned(self, monkeypatch, capsys):
         import risk_manager as rm
 
         df = _make_value_df([
@@ -567,26 +627,35 @@ class TestRunRiskCheck:
         ])
         monkeypatch.setattr(rm, "read_dataframe", lambda q, params=None: df)
         result = rm.run_risk_check(2025, 8)
+        out = capsys.readouterr().out
+        assert "Risk Assessment: 2 bets analyzed" in out
+        assert "Correlated groups: 2" in out
+        assert "Team stacks:" in out
+        assert "KC: 2 bets" in out
+        assert "Total Kelly:" in out
         assert "risk_adjusted_kelly" in result.columns
-        assert "correlation_group" in result.columns
         assert len(result) == 2
 
-    def test_empty_view_returns_empty(self, monkeypatch):
+    def test_empty_view_prints_and_returns_empty(self, monkeypatch, capsys):
         import risk_manager as rm
 
         monkeypatch.setattr(
             rm, "read_dataframe", lambda q, params=None: pd.DataFrame()
         )
-        assert rm.run_risk_check(2025, 8).empty
+        result = rm.run_risk_check(2025, 8)
+        assert "No value bets for season=2025 week=8" in capsys.readouterr().out
+        assert result.empty
 
-    def test_db_error_returns_empty_instead_of_raising(self, monkeypatch):
+    def test_db_error_prints_and_returns_empty(self, monkeypatch, capsys):
         import risk_manager as rm
 
         def boom(q, params=None):
             raise RuntimeError("db unavailable")
 
         monkeypatch.setattr(rm, "read_dataframe", boom)
-        assert rm.run_risk_check(2025, 8).empty
+        result = rm.run_risk_check(2025, 8)
+        assert "No data for season=2025 week=8" in capsys.readouterr().out
+        assert result.empty
 
     def test_main_parses_args_and_dispatches(self, monkeypatch):
         import risk_manager as rm

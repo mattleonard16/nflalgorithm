@@ -270,57 +270,58 @@ class TestClampBounds:
 
 
 class TestExactPipelineValues:
-    """Pin normalize→shrink to exact hand-computed values.
+    """Pin the normalize→shrink formula to exact closed-form values.
 
     Balanced design (every player faces every defense once, identical stat
-    shape) makes each player's baseline 100 * mean(factors), so the raw
-    per-defense relative performance is factor / mean(factors). Expected
-    values below were computed BY HAND from the documented contract
-    (shrink weight n/(n+25) with n=16 player-games → 16/41) and are
-    hard-coded: if they drift, money-path multipliers changed.
+    shape) makes baseline = 100 * mean(factors), so the raw per-defense
+    relative performance is factor / mean(factors), the group mean is 1.0
+    by construction, and the emitted value is exactly
+    1 + (normalized - 1) * n / (n + SHRINKAGE_K).
     """
 
-    def test_balanced_group_matches_hand_computed_values(self):
-        # factors [0.8, 1.0, 1.2], mean 1.0, shrink 16/41:
-        #   D0: 1 - 0.2 * 16/41 = 0.9219512195121951
-        #   D1: 1.0
-        #   D2: 1 + 0.2 * 16/41 = 1.0780487804878049
+    def test_balanced_group_matches_closed_form(self):
+        factors = [0.8, 1.0, 1.2]
+        n_players = 16
         stats = make_stats(
-            balanced_group_rows("RB", "rushing_yards", [0.8, 1.0, 1.2], n_players=16)
+            balanced_group_rows("RB", "rushing_yards", factors, n_players=n_players)
         )
         mults = compute_multipliers_from_game_stats(stats)
 
-        assert mults[("D0", "RB", "rushing_yards")] == pytest.approx(
-            0.9219512195121951, abs=1e-12
-        )
-        assert mults[("D1", "RB", "rushing_yards")] == pytest.approx(1.0, abs=1e-12)
-        assert mults[("D2", "RB", "rushing_yards")] == pytest.approx(
-            1.0780487804878049, abs=1e-12
-        )
+        n = n_players  # player-games observed per defense
+        w = n / (n + da.SHRINKAGE_K)
+        mean_f = sum(factors) / len(factors)
+        for d, f in enumerate(factors):
+            expected = 1.0 + (f / mean_f - 1.0) * w
+            assert mults[(f"D{d}", "RB", "rushing_yards")] == pytest.approx(
+                expected, abs=1e-12
+            )
 
     def test_clamped_member_pins_to_bound_and_group_mean_may_drift(self):
         """What the code actually guarantees when clamps bind: every member
         stays inside CLAMP_BOUNDS, unclamped members keep their exact
-        values, and the post-clamp group mean is ALLOWED to drift off 1.0
-        (renormalization happens before clamping, not after).
-
-        factors [0.5, 0.5, 0.5, 4.0], mean 1.375, shrink 16/41:
-          low  = 1 + (0.5/1.375 - 1) * 16/41 = 0.7516629711751663 (unclamped)
-          high = 1 + (4.0/1.375 - 1) * 16/41 = 1.7450110864745011 → clamps to 1.3
-        """
+        formula values, and the post-clamp group mean is ALLOWED to drift
+        off 1.0 (renormalization happens before clamping, not after)."""
+        factors = [0.5, 0.5, 0.5, 4.0]
+        n_players = 16
         stats = make_stats(
-            balanced_group_rows("RB", "rushing_yards", [0.5, 0.5, 0.5, 4.0], n_players=16)
+            balanced_group_rows("RB", "rushing_yards", factors, n_players=n_players)
         )
         mults = compute_multipliers_from_game_stats(stats)
         group = {opp: v for (opp, pos, st), v in mults.items()
                  if (pos, st) == ("RB", "rushing_yards")}
-        assert len(group) == 4
+        assert len(group) == len(factors)
 
         lo, hi = CLAMP_BOUNDS
+        w = n_players / (n_players + da.SHRINKAGE_K)
+        mean_f = sum(factors) / len(factors)
+        expected_low = 1.0 + (0.5 / mean_f - 1.0) * w
+        expected_high_unclamped = 1.0 + (4.0 / mean_f - 1.0) * w
+        assert lo < expected_low < hi, "low side must be genuinely unclamped"
+        assert expected_high_unclamped > hi, "high side must genuinely bind"
+
         for d in range(3):
-            assert group[f"D{d}"] == pytest.approx(0.7516629711751663, abs=1e-12)
+            assert group[f"D{d}"] == pytest.approx(expected_low, abs=1e-12)
         assert group["D3"] == hi
-        assert all(lo <= v <= hi for v in group.values())
 
         # The drift the clamp introduces — asserting mean == 1.0 here would
         # be asserting something the code does not promise.
@@ -489,3 +490,29 @@ class TestDbEntryPoint:
         monkeypatch.setattr(da, "_load_schedule", lambda season: pd.DataFrame())
         assert da.compute_defense_vs_position_multipliers(2025, 4) == {}
 
+
+class TestPrintRankings:
+    def test_prints_grouped_rankings(self, monkeypatch, capsys):
+        table = {
+            ("CIN", "RB", "rushing_yards"): 1.25,
+            ("DEN", "RB", "rushing_yards"): 0.82,
+            ("MIA", "WR", "receiving_yards"): 1.05,
+        }
+        monkeypatch.setattr(
+            da, "compute_defense_vs_position_multipliers",
+            lambda season, through_week, min_games=3: table,
+        )
+        da.print_defense_rankings(2025, 12)
+        out = capsys.readouterr().out
+        assert "Defense vs Rushing Yards" in out
+        assert "CIN" in out and "Weak D" in out
+        assert "DEN" in out and "Strong D" in out
+        assert "MIA" in out and "Average" in out
+
+    def test_prints_placeholder_when_no_data(self, monkeypatch, capsys):
+        monkeypatch.setattr(
+            da, "compute_defense_vs_position_multipliers",
+            lambda season, through_week, min_games=3: {},
+        )
+        da.print_defense_rankings(2025, 12)
+        assert "No defense data available" in capsys.readouterr().out

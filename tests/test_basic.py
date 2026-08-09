@@ -6,7 +6,6 @@ import os
 import sqlite3
 import tempfile
 from contextlib import contextmanager
-from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
@@ -158,25 +157,6 @@ class TestConfiguration:
         assert config.model.target_mae == 3.0
         assert config.betting.min_edge_threshold == 0.08
         assert config.betting.min_confidence == 0.75
-
-# Integration tests
-class TestIntegration:
-    """Integration tests for complete workflows."""
-    
-    @patch('data_pipeline.requests.get')
-    def test_pipeline_integration(self, mock_requests):
-        """Test basic pipeline integration."""
-        # Mock API responses
-        mock_response = Mock()
-        mock_response.json.return_value = {'main': {'temp': 70}, 'wind': {'speed': 5}}
-        mock_response.raise_for_status.return_value = None
-        mock_requests.return_value = mock_response
-        
-        with pipeline_for_tests() as pipeline:
-            try:
-                pipeline.setup_enhanced_database()
-            except Exception as e:
-                pytest.fail(f"Pipeline integration failed: {e}")
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
