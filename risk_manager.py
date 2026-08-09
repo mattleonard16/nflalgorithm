@@ -181,49 +181,6 @@ def compute_exposure(df: pd.DataFrame, bankroll: float) -> pd.DataFrame:
     )
 
 
-# ── Historical correlation matrix ─────────────────────────────────────
-
-def build_correlation_matrix(
-    season: int,
-    week: Optional[int] = None,
-) -> pd.DataFrame:
-    """Compute correlation matrix of stat columns from player_stats_enhanced.
-
-    Uses historical data up to (but not including) *week* so we only look
-    at information that was available before prediction time.
-    """
-    stat_cols = [
-        "rushing_yards",
-        "receiving_yards",
-        "receptions",
-        "targets",
-        "air_yards",
-    ]
-    col_str = ", ".join(stat_cols)
-
-    if week is not None:
-        query = (
-            f"SELECT {col_str} FROM player_stats_enhanced "
-            f"WHERE season = ? AND week < ?"
-        )
-        params: tuple = (season, week)
-    else:
-        query = (
-            f"SELECT {col_str} FROM player_stats_enhanced WHERE season = ?"
-        )
-        params = (season,)
-
-    try:
-        df = read_dataframe(query, params=params)
-    except Exception:
-        return pd.DataFrame()
-
-    if df.empty:
-        return pd.DataFrame()
-
-    return df[stat_cols].corr()
-
-
 # ── Integration entry point ───────────────────────────────────────────
 
 def assess_risk(df: pd.DataFrame, bankroll: Optional[float] = None) -> pd.DataFrame:
