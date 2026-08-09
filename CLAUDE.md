@@ -573,7 +573,8 @@ No .env file needed — SQLite is the default local dev database.
 
 ## Proprietary Files (.gitignored)
 
-These files are excluded from version control:
+Excluded from version control. This is the complete set — verify with
+`git check-ignore -v <file>` rather than assuming.
 
 | File | Purpose |
 |------|---------|
@@ -583,7 +584,19 @@ These files are excluded from version control:
 | `prop_integration.py` | 3-tier player matching (odds to projections) |
 | `models/position_specific/weekly.py` | Weekly model training and prediction |
 | `api/server.py` | FastAPI REST API for frontend dashboard |
-| `scripts/record_outcomes.py` | Bet grading and outcome recording |
+
+**Not proprietary, despite previous versions of this file saying otherwise**:
+`materialized_value_view.py` and `scripts/record_outcomes.py` are tracked in git with long commit
+histories. They are not gitignored and never were.
+
+**Consequence for the gitignored set**: edits to those files live only on the local machine and in
+no commit — a fresh clone gets whatever the deployment supplies. When a change spans a gitignored
+module and a tracked one, only the tracked half reaches git. Say so explicitly instead of letting a
+reviewer read the commit as the whole change.
+
+Because CI has no access to these modules, logic that CI must verify belongs in a tracked module.
+`utils/clv.py` exists for exactly this reason: `scripts/record_outcomes.py` can call it, and the
+math stays testable without the private code.
 
 ---
 
