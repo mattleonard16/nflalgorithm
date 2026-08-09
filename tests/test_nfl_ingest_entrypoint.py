@@ -91,6 +91,42 @@ def test_weekly_fetch_propagates_missing_historical_feed(monkeypatch) -> None:
         ingest_real_nfl_data.fetch_weekly_stats([2025])
 
 
+def test_offseason_season_guard_is_treated_as_unpublished_feed() -> None:
+    """Offseason: stats-year loaders reject the upcoming season with a range
+    ValueError before any fetch. That is 'not published yet', not a crash."""
+    calls: list[list[int]] = []
+
+    def fake_loader(seasons: list[int]) -> _PandasResult:
+        calls.append(seasons)
+        season = seasons[0]
+        if season == 2026:
+            raise ValueError("Season must be between 2002 and 2025")
+        return _PandasResult(pd.DataFrame({"season": [season], "week": [1]}))
+
+    frame = ingest_real_nfl_data._load_nflverse_by_season(
+        fake_loader,
+        [2025, 2026],
+        "weekly rosters",
+        optional_missing_seasons=[2026],
+    )
+
+    assert calls == [[2025], [2026]]
+    assert frame["season"].tolist() == [2025]
+
+
+def test_weekly_fetch_propagates_season_guard_for_history_season(monkeypatch) -> None:
+    """The same range ValueError on a non-optional (history) season still fails loud."""
+
+    def fail_history(seasons: list[int]) -> _PandasResult:
+        raise ValueError("Season must be between 2002 and 2025")
+
+    monkeypatch.setattr(ingest_real_nfl_data.nfl, "get_current_season", lambda roster: 2026)
+    monkeypatch.setattr(ingest_real_nfl_data.nfl, "load_player_stats", fail_history)
+
+    with pytest.raises(ValueError, match="Season must be between"):
+        ingest_real_nfl_data.fetch_weekly_stats([2024])
+
+
 def test_schedule_fetch_propagates_current_season_outage(monkeypatch) -> None:
     def fail_schedule_fetch(seasons: list[int]) -> _PandasResult:
         raise ConnectionError("schedule service unavailable")

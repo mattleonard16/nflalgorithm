@@ -153,6 +153,14 @@ def _is_missing_feed_error(exc: Exception) -> bool:
     if isinstance(exc, FileNotFoundError):
         return True
 
+    # During the offseason, roster-year loaders accept the upcoming season but
+    # stats-year loaders (load_rosters_weekly, load_injuries, load_player_stats)
+    # reject it with a range ValueError before any fetch. For a season already
+    # declared optional-missing, that rejection means "not published yet", not a
+    # caller bug — history seasons are never optional, so they still fail loud.
+    if isinstance(exc, ValueError) and "Season must be between" in str(exc):
+        return True
+
     current: BaseException | None = exc
     while current is not None:
         response = getattr(current, "response", None)
