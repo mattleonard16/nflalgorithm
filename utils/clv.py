@@ -24,8 +24,6 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from value_betting_engine import implied_probability_no_vig, prob_over
-
 # Key identifying one book's quote on one player prop.
 SNAPSHOT_KEY = ["event_id", "player_id", "market", "sportsbook"]
 
@@ -115,7 +113,15 @@ def _fair_prob(
 
     Callers must guarantee one of the two paths is available; the raise is a
     programming-error guard, not an expected branch.
+
+    ``value_betting_engine`` is imported here rather than at module scope: it is
+    gitignored, so a top-level import makes this module — and every test that
+    touches it — fail to import in CI, which is the opposite of why the math
+    lives in a tracked file. Tests that exercise the no-vig path must inject
+    prices and are skipped when the private module is absent.
     """
+    from value_betting_engine import implied_probability_no_vig, prob_over
+
     over_odds = _as_odds(price)
     under_odds = _as_odds(under_price)
 

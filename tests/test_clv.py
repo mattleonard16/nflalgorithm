@@ -3,14 +3,27 @@
 Hand-built frames only — no database. The consumer
 (`scripts/record_outcomes.py`) is gitignored, so this is the CI-reachable
 contract for the CLV computation.
+
+`resolve_closing_lines` is pure pandas and always runs. The probability
+conversion inside `compute_clv` delegates to the gitignored
+`value_betting_engine`, so tests that reach it are marked `needs_engine` and
+skip when that module is absent — the snapshot-resolution and
+insufficient-data contracts stay covered either way.
 """
 
 from __future__ import annotations
+
+import importlib.util
 
 import pandas as pd
 import pytest
 
 from utils.clv import STATUS_INSUFFICIENT, STATUS_OK, compute_clv, resolve_closing_lines
+
+needs_engine = pytest.mark.skipif(
+    importlib.util.find_spec("value_betting_engine") is None,
+    reason="value_betting_engine is gitignored and absent in this checkout",
+)
 
 
 def _odds_row(as_of: str, line: float, price: int = -110, under_price: int | None = -110) -> dict:
@@ -104,6 +117,7 @@ def test_resolve_closing_lines_orders_by_time_not_string():
 # ---------------------------------------------------------------------------
 
 
+@needs_engine
 def test_compute_clv_over_beats_close_when_line_rises():
     """Took over 50.5, market closed at 54.5 → negative points CLV."""
     entry = {"line": 50.5, "side": "over", "price": -110, "under_price": -110}
@@ -123,6 +137,7 @@ def test_compute_clv_over_beats_close_when_line_rises():
     assert result["closed_at"] == "2025-11-27T18:00:00+00:00"
 
 
+@needs_engine
 def test_compute_clv_over_gains_when_line_drops():
     entry = {"line": 54.5, "side": "over", "price": -110, "under_price": -110}
     close = {
@@ -136,6 +151,7 @@ def test_compute_clv_over_gains_when_line_drops():
     assert compute_clv(entry, close)["clv_points"] == pytest.approx(4.0)
 
 
+@needs_engine
 def test_compute_clv_under_sign_is_corrected():
     """An under bettor gains when the line moves up — opposite sign to over."""
     close = {
@@ -153,6 +169,7 @@ def test_compute_clv_under_sign_is_corrected():
     assert under["clv_points"] == pytest.approx(4.0)
 
 
+@needs_engine
 def test_compute_clv_bp_uses_no_vig_probabilities():
     """Price movement alone moves clv_bp, with the book margin removed.
 
@@ -180,6 +197,7 @@ def test_compute_clv_bp_uses_no_vig_probabilities():
     assert result["clv_bp"] < (raw_over - 0.5) * 10_000
 
 
+@needs_engine
 def test_compute_clv_bp_zero_line_and_price_unchanged():
     """No movement at all → exactly zero bp, not noise."""
     quote = {"price": -110, "under_price": -110}
@@ -228,6 +246,7 @@ def test_compute_clv_missing_line_is_insufficient():
     assert result["status"] == STATUS_INSUFFICIENT
 
 
+@needs_engine
 def test_compute_clv_one_sided_quote_without_model_reports_unknown_bp():
     """Points CLV still resolves; probability CLV is unknown, not zero."""
     entry = {"line": 50.5, "side": "over", "price": -110, "under_price": None}
@@ -246,6 +265,7 @@ def test_compute_clv_one_sided_quote_without_model_reports_unknown_bp():
     assert result["clv_bp"] is None
 
 
+@needs_engine
 def test_compute_clv_one_sided_quote_falls_back_to_model_distribution():
     """With mu/sigma available, a one-sided book still yields a bp figure."""
     entry = {
@@ -276,6 +296,7 @@ def test_compute_clv_rejects_unknown_side():
         compute_clv({"line": 50.5, "side": "middle"}, None)
 
 
+@needs_engine
 def test_resolve_then_compute_end_to_end():
     """The two functions compose on a realistic multi-snapshot frame."""
     odds = pd.DataFrame(
