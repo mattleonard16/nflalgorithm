@@ -57,192 +57,61 @@ import { ExplainPopover } from "@/components/explain-popover";
 import { RiskPanel } from "@/components/risk-panel";
 import { AddToSlipModal } from "@/components/add-to-slip-modal";
 import {
-  TrendingUp,
-  Trophy,
-  Target,
-  BarChart3,
-  DollarSign,
   RefreshCw,
   Download,
   FileJson,
   ShieldCheck,
   Info,
   PlusCircle,
-  ArrowUp,
-  ArrowDown,
 } from "lucide-react";
 
-/* ─── Tier color system ─── */
-const TIER_CONFIG: Record<
-  string,
-  {
-    bg: string;
-    text: string;
-    border: string;
-    glow: string;
-    row: string;
-    icon: string;
-  }
-> = {
-  Premium: {
-    bg: "bg-amber-500/15",
-    text: "text-amber-300",
-    border: "border-amber-500/40",
-    glow: "tier-premium",
-    row: "hover:bg-amber-500/[0.04]",
-    icon: "text-amber-400",
-  },
-  Strong: {
-    bg: "bg-orange-500/15",
-    text: "text-orange-300",
-    border: "border-orange-500/40",
-    glow: "tier-strong",
-    row: "hover:bg-orange-500/[0.04]",
-    icon: "text-orange-400",
-  },
-  Marginal: {
-    bg: "bg-blue-500/15",
-    text: "text-blue-300",
-    border: "border-blue-500/40",
-    glow: "tier-marginal",
-    row: "hover:bg-blue-500/[0.04]",
-    icon: "text-blue-400",
-  },
-  Pass: {
-    bg: "bg-slate-700/20",
-    text: "text-slate-400",
-    border: "border-slate-600/40",
-    glow: "tier-pass",
-    row: "hover:bg-slate-800/30",
-    icon: "text-slate-500",
-  },
+/* ─── Tier accents ───
+ * One neutral ramp; gold is reserved for Premium. Tier identity comes from
+ * the section grouping and the word itself, not from a per-tier palette. */
+const TIER_CONFIG: Record<string, { text: string; marker: string }> = {
+  Premium: { text: "text-primary", marker: "bg-primary" },
+  Strong: { text: "text-slate-200", marker: "bg-slate-400" },
+  Marginal: { text: "text-slate-400", marker: "bg-slate-600" },
+  Pass: { text: "text-slate-500", marker: "bg-slate-700" },
 };
 
 function getTierConfig(tier: string) {
   return TIER_CONFIG[tier] || TIER_CONFIG.Pass;
 }
 
-/* ─── Edge color gradient ─── */
+/* ─── Edge emphasis: gold past the strong-edge mark, neutral otherwise ─── */
 function getEdgeColor(edge: number): string {
-  if (edge >= 0.25) return "text-amber-300";
-  if (edge >= 0.15) return "text-amber-400";
-  if (edge >= 0.1) return "text-orange-400";
-  if (edge >= 0.06) return "text-blue-400";
-  return "text-slate-400";
-}
-
-function getEdgeBarWidth(edge: number): string {
-  const pct = Math.min(edge * 200, 100);
-  return `${pct}%`;
-}
-
-/* ─── Animated count-up for KPI numbers ─── */
-function useCountUp(target: number, durationMs = 700): number {
-  const [display, setDisplay] = useState(target);
-  const prevRef = useRef(target);
-
-  useEffect(() => {
-    const from = prevRef.current;
-    prevRef.current = target;
-    if (from === target) {
-      return;
-    }
-    if (
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ) {
-      const reducedMotionRaf = requestAnimationFrame(() => setDisplay(target));
-      return () => cancelAnimationFrame(reducedMotionRaf);
-    }
-    let raf: number;
-    const start = performance.now();
-    const tick = (now: number) => {
-      const t = Math.min((now - start) / durationMs, 1);
-      // ease-out cubic
-      const eased = 1 - Math.pow(1 - t, 3);
-      setDisplay(from + (target - from) * eased);
-      if (t < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [target, durationMs]);
-
-  return display;
+  return edge >= 0.15 ? "text-primary" : "text-slate-300";
 }
 
 /* ─── KPI Card ─── */
 function KPICard({
   title,
   value,
-  numericValue,
-  format,
   subtitle,
-  icon: Icon,
-  accent = false,
+  valueClassName = "text-slate-100",
 }: {
   title: string;
-  value?: string | number;
-  numericValue?: number;
-  format?: (n: number) => string;
+  value: string | number;
   subtitle?: string;
-  icon: React.ComponentType<{ className?: string }>;
-  accent?: boolean;
+  valueClassName?: string;
 }) {
-  const animated = useCountUp(numericValue ?? 0);
-  const shown =
-    numericValue !== undefined
-      ? (format ?? ((n: number) => Math.round(n).toString()))(animated)
-      : value;
-
   return (
-    <div className="relative group">
-      <div
-        className={`kpi-card rounded-lg border p-4 relative overflow-hidden ${
-          accent
-            ? "kpi-card-accent bg-gradient-to-br from-amber-500/10 to-amber-900/5 border-amber-500/20 hover:border-amber-500/40 shimmer-host"
-            : "bg-[#111827]/80 border-slate-800/60 hover:border-slate-700/80"
-        }`}
-      >
-        {/* corner stripe accent */}
-        <div
-          className={`absolute top-0 right-0 w-10 h-[3px] slant-accent ${
-            accent ? "bg-amber-500/50" : "bg-slate-700/50"
-          }`}
-        />
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-            {title}
-          </span>
-          <Icon
-            className={`h-3.5 w-3.5 transition-transform duration-200 group-hover:scale-110 ${accent ? "text-amber-500/50" : "text-slate-600"}`}
-          />
-        </div>
-        <div
-          className={`text-3xl font-bold font-display tabular-nums leading-none ${
-            accent ? "text-amber-200" : "text-slate-100"
-          }`}
-        >
-          {shown}
-        </div>
-        {subtitle && (
-          <p className="text-[11px] text-slate-500 mt-1.5 font-[family-name:var(--font-jetbrains)]">
-            {subtitle}
-          </p>
-        )}
+    <div className="rounded-lg border border-slate-800/60 bg-[#111827]/60 p-4">
+      <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wider mb-2">
+        {title}
       </div>
+      <div
+        className={`text-3xl font-bold font-display tabular-nums leading-none ${valueClassName}`}
+      >
+        {value}
+      </div>
+      {subtitle && (
+        <p className="text-[11px] text-slate-500 mt-1.5 font-[family-name:var(--font-jetbrains)]">
+          {subtitle}
+        </p>
+      )}
     </div>
-  );
-}
-
-/* ─── Confidence Badge ─── */
-function ConfidenceBadge({ tier }: { tier: string }) {
-  const config = getTierConfig(tier);
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide uppercase border ${config.bg} ${config.text} ${config.border}`}
-    >
-      {tier}
-    </span>
   );
 }
 
@@ -256,88 +125,25 @@ function formatPlayerName(bet: ValueBet): string {
     .join(" ");
 }
 
-/* ─── Position badge ─── */
+/* ─── Position: plain mono text, no colored box ─── */
 function PositionBadge({ position }: { position: string | null }) {
-  if (!position) return <span className="text-slate-600">--</span>;
-
-  const colors: Record<string, string> = {
-    QB: "bg-purple-500/20 text-purple-300 border-purple-500/30",
-    RB: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
-    WR: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
-    TE: "bg-rose-500/20 text-rose-300 border-rose-500/30",
-  };
-
   return (
-    <span
-      className={`inline-flex items-center justify-center w-8 h-5 rounded text-[10px] font-bold border font-[family-name:var(--font-jetbrains)] ${
-        colors[position] || "bg-slate-700/30 text-slate-400 border-slate-600/30"
-      }`}
-    >
-      {position}
+    <span className="text-[12px] text-slate-400 font-[family-name:var(--font-jetbrains)]">
+      {position ?? "--"}
     </span>
   );
 }
 
-/* ─── Over/Under side badge ─── */
+/* ─── Over/Under: a single letter ahead of the line number ─── */
 function SideBadge({ side }: { side?: string | null }) {
   const isUnder = side === "under";
   return (
     <span
-      className={`inline-flex items-center gap-0.5 px-1 h-5 rounded text-[9px] font-bold border uppercase tracking-wide ${
-        isUnder
-          ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
-          : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-      }`}
+      className="text-[10px] text-slate-500 font-[family-name:var(--font-jetbrains)]"
       title={isUnder ? "Under" : "Over"}
     >
-      {isUnder ? (
-        <ArrowDown className="w-2.5 h-2.5" />
-      ) : (
-        <ArrowUp className="w-2.5 h-2.5" />
-      )}
-      {isUnder ? "Und" : "Ovr"}
+      {isUnder ? "U" : "O"}
     </span>
-  );
-}
-
-/* ─── Reason Chips ─── */
-function ReasonChips({ bet }: { bet: ValueBet }) {
-  const chips: { label: string; color: string }[] = [];
-
-  // Edge strength chip
-  if (bet.edge_percentage >= 0.2) {
-    chips.push({ label: "High Edge", color: "bg-amber-500/15 text-amber-400 border-amber-500/20" });
-  } else if (bet.edge_percentage >= 0.12) {
-    chips.push({ label: "Good Edge", color: "bg-orange-500/15 text-orange-400 border-orange-500/20" });
-  }
-
-  // Win probability chip
-  if (bet.p_win >= 0.65) {
-    chips.push({ label: `${(bet.p_win * 100).toFixed(0)}% Win`, color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20" });
-  }
-
-  // Model delta chip (model projection vs line)
-  const delta = bet.mu - bet.line;
-  if (Math.abs(delta) > 5) {
-    chips.push({
-      label: `${delta > 0 ? "+" : ""}${delta.toFixed(0)} vs line`,
-      color: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
-    });
-  }
-
-  if (chips.length === 0) return null;
-
-  return (
-    <div className="flex gap-1 mt-0.5">
-      {chips.slice(0, 3).map((chip) => (
-        <span
-          key={chip.label}
-          className={`inline-flex items-center px-1.5 py-0 rounded text-[9px] font-medium border ${chip.color}`}
-        >
-          {chip.label}
-        </span>
-      ))}
-    </div>
   );
 }
 
@@ -367,27 +173,19 @@ function WhyButton({
     }
   };
 
+  const edgeLabel = (
+    <span
+      className={`text-[13px] font-[family-name:var(--font-jetbrains)] tabular-nums font-semibold ${getEdgeColor(bet.edge_percentage)}`}
+    >
+      {(bet.edge_percentage * 100).toFixed(1)}%
+    </span>
+  );
+
   if (why) {
     return (
       <ExplainPopover why={why}>
-        <div className="flex items-center justify-end gap-2 cursor-pointer">
-          <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all animate-bar-sweep ${
-                bet.edge_percentage >= 0.2
-                  ? "bg-gradient-to-r from-amber-500 to-amber-400"
-                  : bet.edge_percentage >= 0.1
-                    ? "bg-gradient-to-r from-orange-500 to-orange-400"
-                    : "bg-gradient-to-r from-blue-500 to-blue-400"
-              }`}
-              style={{ width: getEdgeBarWidth(bet.edge_percentage) }}
-            />
-          </div>
-          <span
-            className={`text-[13px] font-[family-name:var(--font-jetbrains)] tabular-nums font-semibold ${getEdgeColor(bet.edge_percentage)}`}
-          >
-            {(bet.edge_percentage * 100).toFixed(1)}%
-          </span>
+        <div className="flex items-center justify-end cursor-pointer">
+          {edgeLabel}
         </div>
       </ExplainPopover>
     );
@@ -395,26 +193,10 @@ function WhyButton({
 
   return (
     <div
-      className="flex items-center justify-end gap-2 cursor-pointer group"
+      className="flex items-center justify-end gap-1.5 cursor-pointer group"
       onClick={handleClick}
     >
-      <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all animate-bar-sweep ${
-            bet.edge_percentage >= 0.2
-              ? "bg-gradient-to-r from-amber-500 to-amber-400"
-              : bet.edge_percentage >= 0.1
-                ? "bg-gradient-to-r from-orange-500 to-orange-400"
-                : "bg-gradient-to-r from-blue-500 to-blue-400"
-          }`}
-          style={{ width: getEdgeBarWidth(bet.edge_percentage) }}
-        />
-      </div>
-      <span
-        className={`text-[13px] font-[family-name:var(--font-jetbrains)] tabular-nums font-semibold ${getEdgeColor(bet.edge_percentage)}`}
-      >
-        {(bet.edge_percentage * 100).toFixed(1)}%
-      </span>
+      {edgeLabel}
       {loading ? (
         <div className="w-3 h-3 border border-slate-500 border-t-slate-300 rounded-full animate-spin" />
       ) : (
@@ -424,12 +206,12 @@ function WhyButton({
   );
 }
 
-/* ─── Data Health Badge ─── */
+/* ─── Data health: quiet when healthy, colored only on warn/fail ─── */
 function DataHealthBadge({ overall }: { overall: string }) {
-  const config: Record<string, { bg: string; text: string; label: string }> = {
-    pass: { bg: "bg-emerald-500/10 border-emerald-500/20", text: "text-emerald-400", label: "Healthy" },
-    warn: { bg: "bg-amber-500/10 border-amber-500/20", text: "text-amber-400", label: "Warning" },
-    fail: { bg: "bg-red-500/10 border-red-500/20", text: "text-red-400", label: "Issues" },
+  const config: Record<string, { text: string; label: string }> = {
+    pass: { text: "text-slate-500", label: "data ok" },
+    warn: { text: "text-primary", label: "data warning" },
+    fail: { text: "text-red-400", label: "data issues" },
   };
   const c = config[overall] || config.warn;
 
@@ -437,7 +219,7 @@ function DataHealthBadge({ overall }: { overall: string }) {
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border ${c.bg} ${c.text}`}>
+          <span className={`inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider ${c.text}`}>
             <ShieldCheck className="w-3 h-3" />
             {c.label}
           </span>
@@ -459,19 +241,16 @@ function BetsTable({ bets, tier, season, week }: { bets: ValueBet[]; tier: strin
   const config = getTierConfig(tier);
 
   return (
-    <div
-      className="animate-fade-in"
-      style={{ animationDelay: `${tier === "Premium" ? 0 : tier === "Strong" ? 80 : tier === "Marginal" ? 160 : 240}ms` }}
-    >
+    <div>
       <div className="flex items-center gap-2 mb-3">
-        <div className={`w-1.5 h-5 slant-accent ${config.bg} ${config.border} border`} />
+        <div className={`w-1 h-4 ${config.marker}`} />
         <h3 className={`text-lg font-bold font-display uppercase tracking-wide ${config.text}`}>
           {tier}
         </h3>
         <span className="text-[11px] text-slate-600 font-[family-name:var(--font-jetbrains)]">
           {bets.length} {bets.length === 1 ? "pick" : "picks"}
         </span>
-        <div className="h-px flex-1 bg-gradient-to-r from-slate-700/40 to-transparent" />
+        <div className="h-px flex-1 bg-slate-800/60" />
       </div>
 
       <div className="rounded-lg border border-slate-800/60 bg-[#111827]/50 overflow-hidden">
@@ -508,9 +287,6 @@ function BetsTable({ bets, tier, season, week }: { bets: ValueBet[]; tier: strin
               <TableHead className="text-[11px] text-slate-500 uppercase tracking-wider font-medium h-9 text-right">
                 Win%
               </TableHead>
-              <TableHead className="text-[11px] text-slate-500 uppercase tracking-wider font-medium h-9 text-center w-20">
-                Tier
-              </TableHead>
               <TableHead className="text-[11px] text-slate-500 uppercase tracking-wider font-medium h-9 w-10" />
             </TableRow>
           </TableHeader>
@@ -518,14 +294,10 @@ function BetsTable({ bets, tier, season, week }: { bets: ValueBet[]; tier: strin
             {bets.map((bet, idx) => (
               <TableRow
                 key={`${bet.player_id}-${bet.market}-${bet.sportsbook}-${idx}`}
-                className={`border-slate-800/30 ${config.row} transition-colors duration-100 animate-row-in`}
-                style={{ animationDelay: `${Math.min(idx * 45, 450)}ms` }}
+                className="border-slate-800/30 hover:bg-slate-800/30 transition-colors duration-100"
               >
                 <TableCell className="font-medium text-slate-100 text-[13px]">
-                  <div>
-                    {formatPlayerName(bet)}
-                    <ReasonChips bet={bet} />
-                  </div>
+                  {formatPlayerName(bet)}
                 </TableCell>
                 <TableCell className="text-center">
                   <PositionBadge position={bet.position} />
@@ -558,13 +330,10 @@ function BetsTable({ bets, tier, season, week }: { bets: ValueBet[]; tier: strin
                   {(bet.p_win * 100).toFixed(0)}%
                 </TableCell>
                 <TableCell className="text-center">
-                  <ConfidenceBadge tier={bet.confidence_tier || "Pass"} />
-                </TableCell>
-                <TableCell className="text-center">
                   <button
                     onClick={() => setSlipBet(bet)}
                     title="Add to bet slip"
-                    className="text-slate-600 hover:text-blue-400 transition-colors"
+                    className="text-slate-600 hover:text-primary transition-colors"
                   >
                     <PlusCircle className="h-4 w-4" />
                   </button>
@@ -739,12 +508,6 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-end justify-between">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 live-dot" />
-            <span className="text-[11px] text-emerald-400/80 font-[family-name:var(--font-jetbrains)] uppercase tracking-widest">
-              Live
-            </span>
-          </div>
           <h1 className="text-4xl font-bold text-slate-100 tracking-tight font-display uppercase">
             Value Dashboard
           </h1>
@@ -841,7 +604,7 @@ export default function DashboardPage() {
           <div className="space-y-1.5 w-44">
             <Label className="text-[11px] text-slate-500 uppercase tracking-wider">
               Min Edge{" "}
-              <span className="text-amber-500/70 font-[family-name:var(--font-jetbrains)]">
+              <span className="text-primary/80 font-[family-name:var(--font-jetbrains)]">
                 {(filters.minEdge * 100).toFixed(0)}%
               </span>
             </Label>
@@ -962,12 +725,12 @@ export default function DashboardPage() {
               Last Run
             </span>
             <span
-              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
+              className={`text-[10px] font-semibold uppercase tracking-wider ${
                 pipelineRun.status === "completed"
-                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                  ? "text-slate-400"
                   : pipelineRun.status === "running"
-                    ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                    : "bg-red-500/10 text-red-400 border-red-500/20"
+                    ? "text-primary"
+                    : "text-red-400"
               }`}
             >
               {pipelineRun.status}
@@ -979,7 +742,7 @@ export default function DashboardPage() {
               {new Date(pipelineRun.started_at).toLocaleTimeString()}
             </span>
             {pipelineRun.status === "running" && (
-              <span className="text-[10px] text-blue-400 font-[family-name:var(--font-jetbrains)]">
+              <span className="text-[10px] text-slate-400 font-[family-name:var(--font-jetbrains)]">
                 {pipelineRun.stages_completed}/{pipelineRun.stages_requested} stages
               </span>
             )}
@@ -994,7 +757,7 @@ export default function DashboardPage() {
             )}
             {/* Agent review stamp */}
             {reviewStatus?.reviewed && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border bg-purple-500/10 text-purple-400 border-purple-500/20">
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400">
                 <ShieldCheck className="w-3 h-3" />
                 Reviewed {reviewStatus.decision_count} bets
                 {reviewStatus.reviewed_at && (
@@ -1020,72 +783,53 @@ export default function DashboardPage() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <KPICard
-          title="Active Bets"
-          numericValue={bets.length}
-          icon={BarChart3}
-        />
+        <KPICard title="Active Bets" value={bets.length} />
         <KPICard
           title="Premium"
-          numericValue={premiumBets.length}
-          icon={Trophy}
-          accent={premiumBets.length > 0}
+          value={premiumBets.length}
+          valueClassName={premiumBets.length > 0 ? "text-primary" : "text-slate-100"}
         />
-        <KPICard
-          title="Avg Edge"
-          numericValue={avgEdge}
-          format={(n) => `${n.toFixed(1)}%`}
-          icon={Target}
-        />
-        <KPICard
-          title="Record"
-          value={seasonRecord}
-          icon={TrendingUp}
-        />
+        <KPICard title="Avg Edge" value={`${avgEdge.toFixed(1)}%`} />
+        <KPICard title="Record" value={seasonRecord} />
         <KPICard
           title="P/L"
-          numericValue={seasonPL}
-          format={(n) => `${n >= 0 ? "+" : ""}${n.toFixed(1)}u`}
+          value={`${seasonPL >= 0 ? "+" : ""}${seasonPL.toFixed(1)}u`}
           subtitle={
             performance
               ? `${performance.overall_roi.toFixed(1)}% ROI`
               : undefined
           }
-          icon={DollarSign}
-          accent={seasonPL > 0}
+          valueClassName={
+            seasonPL > 0
+              ? "text-emerald-400"
+              : seasonPL < 0
+                ? "text-red-400"
+                : "text-slate-100"
+          }
         />
       </div>
 
       {/* Top Picks Strip */}
       {premiumBets.length > 0 && (
-        <div className="flex items-center gap-3 px-1">
-          <span className="text-[11px] text-amber-500/60 uppercase tracking-wider font-medium shrink-0">
+        <div className="flex items-baseline gap-3 px-1 text-[12px]">
+          <span className="text-[11px] text-primary uppercase tracking-wider font-medium shrink-0">
             Top Picks
           </span>
-          <div className="h-px flex-1 bg-gradient-to-r from-amber-500/20 to-transparent" />
-          <div className="flex flex-wrap gap-2">
-            {premiumBets.slice(0, 6).map((bet, idx) => (
-              <span
-                key={`chip-${idx}`}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-[12px] text-amber-300 font-medium"
-              >
-                <span className="w-1 h-1 rounded-full bg-amber-400" />
-                {formatPlayerName(bet)}
-              </span>
-            ))}
+          <span className="text-slate-300">
+            {premiumBets.slice(0, 6).map(formatPlayerName).join("  ·  ")}
             {premiumBets.length > 6 && (
-              <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-slate-800/50 border border-slate-700/40 text-[12px] text-slate-500">
-                +{premiumBets.length - 6} more
+              <span className="text-slate-500">
+                {"  ·  "}+{premiumBets.length - 6} more
               </span>
             )}
-          </div>
+          </span>
         </div>
       )}
 
       {/* Bets Tables */}
       {loading ? (
         <div className="flex flex-col items-center justify-center py-16 gap-3">
-          <div className="w-6 h-6 border-2 border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
+          <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
           <span className="text-sm text-slate-500">
             Loading projections...
           </span>
@@ -1104,7 +848,7 @@ export default function DashboardPage() {
             </TabsTrigger>
             <TabsTrigger
               value="premium"
-              className="text-[12px] data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300 text-slate-500 px-3 py-1.5 rounded-md"
+              className="text-[12px] data-[state=active]:bg-slate-800 data-[state=active]:text-slate-100 text-slate-500 px-3 py-1.5 rounded-md"
             >
               Premium{" "}
               <span className="ml-1 font-[family-name:var(--font-jetbrains)] tabular-nums">
@@ -1113,7 +857,7 @@ export default function DashboardPage() {
             </TabsTrigger>
             <TabsTrigger
               value="strong"
-              className="text-[12px] data-[state=active]:bg-orange-500/15 data-[state=active]:text-orange-300 text-slate-500 px-3 py-1.5 rounded-md"
+              className="text-[12px] data-[state=active]:bg-slate-800 data-[state=active]:text-slate-100 text-slate-500 px-3 py-1.5 rounded-md"
             >
               Strong{" "}
               <span className="ml-1 font-[family-name:var(--font-jetbrains)] tabular-nums">
@@ -1122,7 +866,7 @@ export default function DashboardPage() {
             </TabsTrigger>
             <TabsTrigger
               value="marginal"
-              className="text-[12px] data-[state=active]:bg-blue-500/15 data-[state=active]:text-blue-300 text-slate-500 px-3 py-1.5 rounded-md"
+              className="text-[12px] data-[state=active]:bg-slate-800 data-[state=active]:text-slate-100 text-slate-500 px-3 py-1.5 rounded-md"
             >
               Marginal{" "}
               <span className="ml-1 font-[family-name:var(--font-jetbrains)] tabular-nums">
@@ -1131,7 +875,7 @@ export default function DashboardPage() {
             </TabsTrigger>
             <TabsTrigger
               value="pass"
-              className="text-[12px] data-[state=active]:bg-slate-700/30 data-[state=active]:text-slate-300 text-slate-500 px-3 py-1.5 rounded-md"
+              className="text-[12px] data-[state=active]:bg-slate-800 data-[state=active]:text-slate-100 text-slate-500 px-3 py-1.5 rounded-md"
             >
               Pass{" "}
               <span className="ml-1 font-[family-name:var(--font-jetbrains)] tabular-nums">
