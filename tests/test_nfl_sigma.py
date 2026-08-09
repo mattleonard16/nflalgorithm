@@ -4,13 +4,18 @@ Mirrors tests/test_nba_sigma.py structure adapted for NFL markets.
 
 Covers:
 - EWMA variance computation with known values
-- Market-specific floors (rushing_yards=15, receiving_yards=12, passing_yards=30)
+- Legacy per-market floors via position=None (rushing=15, receiving=12, passing=30)
+- Position-bucketed floors/defaults keyed by (market, position)
+- position=None reproduces legacy behavior exactly (backward compatibility)
+- WR receiving fat-tail multiplier (1.20 on the EWMA estimate)
 - Fallback defaults for <6 games
 - Edge cases: empty list, single game, all same values
 - Decay parameter affects output correctly
 - get_sigma_or_default helper
 - Defense multiplier applied to mu in predict_week (integration)
 - Sigma is data-driven, not flat percentage
+- Synthetic Gaussian coverage: returned sigma yields ~68% +/-1 sigma coverage
+  (the test that would have caught the 2025 WR/TE rushing over-coverage)
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ import pytest
 # Constants mirroring nfl_sigma module
 # ---------------------------------------------------------------------------
 
+# Legacy per-market values — the position=None path must return exactly these.
 SIGMA_FLOORS = {
     "rushing_yards": 15.0,
     "receiving_yards": 12.0,
@@ -35,6 +41,29 @@ SIGMA_DEFAULTS = {
     "passing_yards": 50.0,
 }
 MIN_GAMES = 6
+
+# Position-bucketed recalibration (2025 held-out coverage study).
+POSITION_SIGMA_FLOORS = {
+    ("rushing_yards", "RB"): 15.0,
+    ("rushing_yards", "QB"): 12.0,
+    ("rushing_yards", "WR"): 5.0,
+    ("rushing_yards", "TE"): 5.0,
+    ("receiving_yards", "WR"): 13.0,
+    ("receiving_yards", "RB"): 10.0,
+    ("receiving_yards", "TE"): 12.0,
+    ("passing_yards", "QB"): 30.0,  # unvalidated — legacy value
+}
+POSITION_SIGMA_DEFAULTS = {
+    ("rushing_yards", "RB"): 25.0,
+    ("rushing_yards", "QB"): 20.0,
+    ("rushing_yards", "WR"): 10.0,
+    ("rushing_yards", "TE"): 10.0,
+    ("receiving_yards", "WR"): 24.0,
+    ("receiving_yards", "RB"): 16.0,
+    ("receiving_yards", "TE"): 20.0,
+    ("passing_yards", "QB"): 50.0,  # unvalidated — legacy value
+}
+WR_RECEIVING_MULTIPLIER = 1.20
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +132,7 @@ class TestComputePlayerSigma:
 
 
 # ---------------------------------------------------------------------------
-# NFL Market-specific floors
+# NFL Market-specific floors (legacy position=None path)
 # ---------------------------------------------------------------------------
 
 
@@ -142,6 +171,132 @@ class TestNFLMarketFloors:
         sigma = compute_player_sigma(values, market="fumbles")
         # Should use generic floor (10.0), not crash
         assert sigma >= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Position-bucketed floors and defaults
+# ---------------------------------------------------------------------------
+
+
+class TestPositionBucketSelection:
+    """(market, position) selects the recalibrated floor/default."""
+
+    @pytest.mark.parametrize(
+        "market,position,expected_floor",
+        sorted(
+            ((m, p, f) for (m, p), f in POSITION_SIGMA_FLOORS.items()),
+        ),
+    )
+    def test_bucket_floor_selected(self, market, position, expected_floor):
+        from utils.nfl_sigma import compute_player_sigma
+
+        # Constant values => zero variance => bucket floor applies
+        values = [50.0] * 10
+        sigma = compute_player_sigma(values, market=market, position=position)
+        assert sigma == pytest.approx(expected_floor)
+
+    @pytest.mark.parametrize(
+        "market,position,expected_default",
+        sorted(
+            ((m, p, d) for (m, p), d in POSITION_SIGMA_DEFAULTS.items()),
+        ),
+    )
+    def test_bucket_default_selected(self, market, position, expected_default):
+        from utils.nfl_sigma import compute_player_sigma
+
+        values = [60.0, 75.0, 85.0]  # 3 games < MIN_GAMES
+        sigma = compute_player_sigma(values, market=market, position=position)
+        assert sigma == pytest.approx(expected_default)
+
+    def test_unknown_position_falls_back_to_legacy(self):
+        """Positions outside QB/RB/WR/TE use the legacy per-market values."""
+        from utils.nfl_sigma import compute_player_sigma
+
+        constant = [50.0] * 10
+        short = [60.0, 75.0]
+        for position in ("FB", "K", "OL", ""):
+            sigma_floor = compute_player_sigma(
+                constant, market="rushing_yards", position=position
+            )
+            sigma_default = compute_player_sigma(
+                short, market="rushing_yards", position=position
+            )
+            assert sigma_floor == pytest.approx(SIGMA_FLOORS["rushing_yards"])
+            assert sigma_default == pytest.approx(SIGMA_DEFAULTS["rushing_yards"])
+
+    def test_position_normalised_case_and_whitespace(self):
+        """'wr' and ' WR ' should hit the WR bucket."""
+        from utils.nfl_sigma import compute_player_sigma
+
+        constant = [50.0] * 10
+        expected = POSITION_SIGMA_FLOORS[("rushing_yards", "WR")]
+        for position in ("wr", " WR ", "Wr"):
+            sigma = compute_player_sigma(constant, market="rushing_yards", position=position)
+            assert sigma == pytest.approx(expected)
+
+    def test_wr_te_rushing_floor_far_below_legacy(self):
+        """The recalibration's core fix: WR/TE rushing floors shrink hard."""
+        assert POSITION_SIGMA_FLOORS[("rushing_yards", "WR")] < SIGMA_FLOORS["rushing_yards"] / 2
+        assert POSITION_SIGMA_FLOORS[("rushing_yards", "TE")] < SIGMA_FLOORS["rushing_yards"] / 2
+
+    def test_wr_receiving_floor_raised(self):
+        """Fat tails in WR receiving → floor slightly above legacy."""
+        assert POSITION_SIGMA_FLOORS[("receiving_yards", "WR")] > SIGMA_FLOORS["receiving_yards"]
+
+
+class TestPositionNoneLegacyParity:
+    """position=None (the default) must reproduce pre-recalibration values exactly."""
+
+    def test_explicit_none_equals_omitted(self):
+        from utils.nfl_sigma import compute_player_sigma
+
+        values = [60.0, 75.0, 85.0, 45.0, 90.0, 70.0, 55.0, 80.0]
+        assert compute_player_sigma(values, market="receiving_yards") == pytest.approx(
+            compute_player_sigma(values, market="receiving_yards", position=None)
+        )
+
+    def test_legacy_ewma_value_reproduced(self):
+        """Golden check: position=None matches an independent EWMA computation."""
+        from utils.nfl_sigma import compute_player_sigma
+
+        values = np.array([60.0, 75.0, 85.0, 45.0, 90.0, 70.0, 55.0, 80.0])
+        decay = 0.65
+        raw = np.array([decay ** i for i in range(len(values) - 1, -1, -1)])
+        w = raw / raw.sum()
+        mean = float(np.dot(w, values))
+        var = float(np.dot(w, (values - mean) ** 2))
+        corr = 1.0 / (1.0 - float(np.dot(w, w)))
+        expected = max(float(np.sqrt(var * corr)), SIGMA_FLOORS["rushing_yards"])
+
+        sigma = compute_player_sigma(values.tolist(), market="rushing_yards", position=None)
+        assert sigma == pytest.approx(expected)
+
+    def test_no_multiplier_on_none_path(self):
+        """The WR fat-tail multiplier must not leak into the position=None path."""
+        from utils.nfl_sigma import compute_player_sigma
+
+        # High variance so no floor binds
+        values = [10.0, 120.0, 15.0, 110.0, 12.0, 105.0, 18.0, 100.0]
+        sigma_none = compute_player_sigma(values, market="receiving_yards", position=None)
+        sigma_wr = compute_player_sigma(values, market="receiving_yards", position="WR")
+        assert sigma_wr == pytest.approx(sigma_none * WR_RECEIVING_MULTIPLIER)
+        assert sigma_wr > sigma_none
+
+
+class TestFloorsActuallyFloor:
+    """Low-variance history → the bucket floor wins over the EWMA estimate."""
+
+    @pytest.mark.parametrize(
+        "market,position",
+        sorted(POSITION_SIGMA_FLOORS.keys()),
+    )
+    def test_low_variance_history_returns_floor(self, market, position):
+        from utils.nfl_sigma import compute_player_sigma
+
+        # Tiny jitter: EWMA sigma ~0.8, far below every bucket floor
+        values = [50.0, 50.5, 49.5, 50.2, 49.8, 50.1, 49.9, 50.3]
+        sigma = compute_player_sigma(values, market=market, position=position)
+        assert sigma == pytest.approx(POSITION_SIGMA_FLOORS[(market, position)])
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +441,68 @@ class TestSigmaIsDataDriven:
 
 
 # ---------------------------------------------------------------------------
+# Synthetic Gaussian coverage — the calibration regression guard
+# ---------------------------------------------------------------------------
+
+
+def _simulated_coverage(market, position, true_sigma, mu_range, seed=7):
+    """+/-1 sigma empirical coverage over synthetic Gaussian player histories.
+
+    For each synthetic player: draw a 17-game Gaussian history, compute sigma
+    via compute_player_sigma, then check how often fresh outcomes from the
+    same distribution fall within mu +/- sigma (mu = true player mean, i.e.
+    an unbiased model). Nominal Gaussian coverage is 68.3%.
+    """
+    from utils.nfl_sigma import compute_player_sigma
+
+    rng = np.random.default_rng(seed)
+    hits = 0
+    total = 0
+    for _ in range(400):
+        mu = rng.uniform(*mu_range)
+        history = rng.normal(mu, true_sigma, 17)
+        sigma = compute_player_sigma(history.tolist(), market=market, position=position)
+        outcomes = rng.normal(mu, true_sigma, 5)
+        hits += int(np.sum(np.abs(outcomes - mu) <= sigma))
+        total += 5
+    return hits / total
+
+
+class TestSyntheticGaussianCoverage:
+    """Returned sigma must produce sane +/-1 sigma coverage (55-80% band).
+
+    This is the test that would have caught the 2025 miscalibration:
+    the legacy 15.0 rushing floor pushed WR/TE rushing coverage to ~99.7%
+    (measured 95.6%/95.1% on real data) — far outside this band.
+    """
+
+    @pytest.mark.parametrize(
+        "market,position,true_sigma,mu_range",
+        [
+            ("rushing_yards", "RB", 25.0, (30.0, 110.0)),
+            ("rushing_yards", "QB", 12.0, (10.0, 50.0)),
+            ("rushing_yards", "WR", 5.0, (0.0, 8.0)),
+            ("rushing_yards", "TE", 5.0, (0.0, 8.0)),
+            ("receiving_yards", "WR", 25.0, (30.0, 110.0)),
+            ("receiving_yards", "RB", 14.0, (10.0, 50.0)),
+            ("receiving_yards", "TE", 15.0, (15.0, 70.0)),
+        ],
+    )
+    def test_coverage_in_band(self, market, position, true_sigma, mu_range):
+        coverage = _simulated_coverage(market, position, true_sigma, mu_range)
+        assert 0.55 <= coverage <= 0.80, (
+            f"{market}/{position}: +/-1 sigma coverage {coverage:.3f} outside "
+            f"[0.55, 0.80] — sigma is miscalibrated for this bucket"
+        )
+
+    def test_legacy_floor_fails_coverage_for_wr_rushing(self):
+        """Demonstrate the caught bug: the legacy path (position=None) blows
+        past the band on a WR-rushing-shaped generating process."""
+        coverage = _simulated_coverage("rushing_yards", None, 5.0, (0.0, 8.0))
+        assert coverage > 0.80  # legacy 15.0 floor → ~99.7% over-coverage
+
+
+# ---------------------------------------------------------------------------
 # get_sigma_or_default helper
 # ---------------------------------------------------------------------------
 
@@ -326,6 +543,22 @@ class TestGetNFLSigmaOrDefault:
         floor = SIGMA_FLOORS["rushing_yards"]
         result = get_sigma_or_default(floor, projected_value=75.0, market="rushing_yards")
         assert result == pytest.approx(floor)
+
+    def test_position_bucket_default_when_none(self):
+        """With a position, the NULL fallback uses the bucket default."""
+        from utils.nfl_sigma import get_sigma_or_default
+
+        result = get_sigma_or_default(
+            None, projected_value=5.0, market="rushing_yards", position="WR"
+        )
+        assert result == pytest.approx(POSITION_SIGMA_DEFAULTS[("rushing_yards", "WR")])
+
+    def test_unknown_market_uses_projection_heuristic(self):
+        """Unknown market falls back to max(projected * 0.25, 10.0) as before."""
+        from utils.nfl_sigma import get_sigma_or_default
+
+        result = get_sigma_or_default(None, projected_value=80.0, market="sacks")
+        assert result == pytest.approx(20.0)
 
 
 # ---------------------------------------------------------------------------
@@ -379,3 +612,128 @@ class TestDefenseMultiplierApplied:
             through_week=1,
         )
         assert mult == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# Degenerate EWMA inputs and legacy-table identity
+# ---------------------------------------------------------------------------
+
+
+class TestEwmaSigmaDegenerate:
+    """_ewma_sigma with fewer than 2 values must return 0.0, not NaN/crash."""
+
+    def test_empty_array_yields_zero(self):
+        from utils.nfl_sigma import _ewma_sigma
+
+        assert _ewma_sigma(np.array([]), decay=0.65) == 0.0
+
+    def test_single_value_yields_zero(self):
+        from utils.nfl_sigma import _ewma_sigma
+
+        assert _ewma_sigma(np.array([42.0]), decay=0.65) == 0.0
+
+    def test_two_values_yield_positive_sigma(self):
+        from utils.nfl_sigma import _ewma_sigma
+
+        assert _ewma_sigma(np.array([10.0, 30.0]), decay=0.65) > 0.0
+
+
+class TestLegacyTablesByteIdentical:
+    """The (market, None) bucket must carry EXACTLY the legacy values —
+    == identity, not approx — for all three markets."""
+
+    def test_none_bucket_floors_match_legacy_exactly(self):
+        from utils.nfl_sigma import SIGMA_FLOORS as MODULE_FLOORS
+
+        for market, floor in SIGMA_FLOORS.items():
+            assert MODULE_FLOORS[(market, None)] == floor
+
+    def test_none_bucket_defaults_match_legacy_exactly(self):
+        from utils.nfl_sigma import SIGMA_DEFAULTS as MODULE_DEFAULTS
+
+        for market, default in SIGMA_DEFAULTS.items():
+            assert MODULE_DEFAULTS[(market, None)] == default
+
+    def test_no_multiplier_on_any_none_bucket(self):
+        from utils.nfl_sigma import SIGMA_EWMA_MULTIPLIERS
+
+        assert not any(bucket is None for (_, bucket) in SIGMA_EWMA_MULTIPLIERS)
+
+
+# ---------------------------------------------------------------------------
+# Floors bind exactly at the boundary
+# ---------------------------------------------------------------------------
+
+
+class TestFloorBindsExactlyAtBoundary:
+    """sigma = max(estimate, floor): pin behavior a hair either side of the
+    floor by rescaling a fixed history's spread (sigma scales linearly)."""
+
+    BASE = [50.0, 80.0, 20.0, 90.0, 40.0, 70.0, 60.0, 30.0]
+
+    @staticmethod
+    def _raw_sigma(values, decay=0.65):
+        values = np.asarray(values, dtype=float)
+        raw = np.array([decay ** i for i in range(len(values) - 1, -1, -1)])
+        w = raw / raw.sum()
+        mean = float(np.dot(w, values))
+        var = float(np.dot(w, (values - mean) ** 2))
+        corr = 1.0 / (1.0 - float(np.dot(w, w)))
+        return float(np.sqrt(var * corr))
+
+    def _scaled_history(self, target_sigma, multiplier=1.0):
+        """History whose (EWMA sigma * multiplier) equals target_sigma."""
+        s0 = self._raw_sigma(self.BASE)
+        mean = float(np.mean(self.BASE))
+        c = target_sigma / (s0 * multiplier)
+        return [mean + (v - mean) * c for v in self.BASE]
+
+    def test_estimate_just_below_legacy_floor_returns_floor(self):
+        from utils.nfl_sigma import compute_player_sigma
+
+        floor = SIGMA_FLOORS["rushing_yards"]
+        values = self._scaled_history(floor * 0.999)
+        assert compute_player_sigma(values, market="rushing_yards") == floor
+
+    def test_estimate_just_above_legacy_floor_returns_estimate(self):
+        from utils.nfl_sigma import compute_player_sigma
+
+        floor = SIGMA_FLOORS["rushing_yards"]
+        values = self._scaled_history(floor * 1.001)
+        result = compute_player_sigma(values, market="rushing_yards")
+        assert result > floor
+        assert result == pytest.approx(floor * 1.001)
+
+    def test_wr_receiving_boundary_includes_fat_tail_multiplier(self):
+        """The 1.20 multiplier applies BEFORE flooring: the boundary sits at
+        estimate * 1.20 vs the 13.0 WR floor."""
+        from utils.nfl_sigma import compute_player_sigma
+
+        floor = POSITION_SIGMA_FLOORS[("receiving_yards", "WR")]
+        below = self._scaled_history(floor * 0.999, multiplier=WR_RECEIVING_MULTIPLIER)
+        above = self._scaled_history(floor * 1.001, multiplier=WR_RECEIVING_MULTIPLIER)
+        assert compute_player_sigma(below, market="receiving_yards", position="WR") == floor
+        result = compute_player_sigma(above, market="receiving_yards", position="WR")
+        assert result > floor
+        assert result == pytest.approx(floor * 1.001)
+
+
+# ---------------------------------------------------------------------------
+# get_sigma_or_default remaining fallback branches
+# ---------------------------------------------------------------------------
+
+
+class TestGetSigmaOrDefaultRemainingBranches:
+    def test_unknown_market_small_projection_hits_ten_floor(self):
+        from utils.nfl_sigma import get_sigma_or_default
+
+        result = get_sigma_or_default(None, projected_value=8.0, market="sacks")
+        assert result == pytest.approx(10.0)
+
+    def test_unknown_position_falls_back_to_legacy_market_default(self):
+        from utils.nfl_sigma import get_sigma_or_default
+
+        result = get_sigma_or_default(
+            None, projected_value=75.0, market="rushing_yards", position="K"
+        )
+        assert result == pytest.approx(SIGMA_DEFAULTS["rushing_yards"])
