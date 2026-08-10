@@ -40,9 +40,31 @@ must print `True` with no env var set.
 - The sigma call passes position:
   `compute_player_sigma(history, market=market, position=position) * uncertainty_multiplier`
 - The per-row defense multiplier call passes `position=position`.
+- **Writes `volatility_score`.** Imports `volatility_score_or_none` from `utils.volatility_scoring`,
+  calls it on the same per-player weekly series the sigma uses, and carries the result through
+  `_write_predictions` into the `weekly_projections` INSERT — column list, placeholder count, and
+  **both** the SQLite `ON CONFLICT` and MySQL `ON DUPLICATE KEY` clauses. The value is passed
+  through `_optional_float` so "not measured" survives as NULL rather than becoming NaN.
+
+  Note the deliberate asymmetry: `volatility_score` is **not** in the
+  `for col in (...)` default loop next to it, because that loop fills 0.0, and 0.0 means "measured
+  as perfectly steady" — a claim — where None means "not measured".
+
+  If this write is missing, the column is all-NULL, `apply_volatility_widening` reports every row
+  unscored, and sigma widening silently does nothing. That is safer than the old behavior it
+  replaced, but the feature is inert.
 
 Verify: `command grep -n "position=position" models/position_specific/weekly.py` returns the sigma
-call site.
+call site, and after a predict run:
+
+```bash
+DB_BACKEND=sqlite SQLITE_DB_PATH=nfl_data.db uv run python -c "
+from utils.db import read_dataframe
+print(read_dataframe('SELECT COUNT(*) n, COUNT(volatility_score) scored FROM weekly_projections WHERE season=2026 AND week=1'))
+"
+```
+`scored` must be non-zero. Measured on the 2026 W1 slate: 784 of 1396 scored, widening multiplier
+spanning 1.0000-1.1500 across 472 distinct values (it was a constant 1.075 on every row before).
 
 ### `prop_integration.py`
 - Imports `latest_snapshot_per_key`, `name_variants`, `positions_compatible`, `strip_name_suffix`,
