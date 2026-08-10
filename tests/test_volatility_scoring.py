@@ -18,12 +18,59 @@ from utils.target_share import (
     cap_confidence_for_low_volume,
 )
 from utils.volatility_scoring import (
+    apply_volatility_widening,
     coefficient_of_variation,
     max_week_contribution,
     range_ratio,
     compute_volatility_score,
     widen_sigma_for_volatility,
 )
+
+
+# ======================================================================
+# Column-wise widening: a missing score is not a middling score
+# ======================================================================
+
+
+def test_widening_leaves_unscored_rows_untouched_and_counts_them():
+    """An absent score must not be priced as risk.
+
+    The NFL model has never written volatility_score, so treating a missing
+    value as 50 silently multiplied every sigma by 1.075.
+    """
+    sigma = pd.Series([10.0, 20.0, 30.0])
+    scores = pd.Series([None, 0.0, 100.0])
+
+    widened, missing = apply_volatility_widening(
+        sigma, scores, penalty_weight=0.15
+    )
+
+    assert missing == 1
+    assert widened.iloc[0] == 10.0   # no score -> no widening
+    assert widened.iloc[1] == 20.0   # measured zero volatility -> no widening
+    assert widened.iloc[2] == 30.0 * 1.15
+
+
+def test_widening_reports_every_row_when_the_column_is_absent():
+    sigma = pd.Series([10.0, 12.0])
+
+    widened, missing = apply_volatility_widening(sigma, None)
+
+    assert missing == 2
+    assert list(widened) == [10.0, 12.0]
+
+
+def test_measured_midpoint_still_earns_its_penalty():
+    """A real score of 50 is information and must still widen sigma.
+
+    This is what separates the fix from simply disabling the feature.
+    """
+    widened, missing = apply_volatility_widening(
+        pd.Series([10.0]), pd.Series([50.0]), penalty_weight=0.15
+    )
+
+    assert missing == 0
+    assert widened.iloc[0] == 10.0 * 1.075
 
 
 # ======================================================================
