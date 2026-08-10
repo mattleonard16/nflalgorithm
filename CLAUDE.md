@@ -788,10 +788,15 @@ Key test files:
 - `tests/test_market_mu_wr.py` - EWMA and role priors
 - `tests/test_prop_integration_wr.py` - 3-tier player matching
 - `tests/test_nfl_projection_evaluation.py` - evaluation metrics and the per-position MAE gate
-- `tests/test_clv.py` - closing line value math (points and no-vig basis points)
+- `tests/test_clv.py` - closing line value math (points and no-vig basis points), including the
+  kickoff-aware closing definition
+- `tests/test_event_keys.py` - odds → game key resolution; the contract the gitignored writers honor
+- `tests/test_odds_quality.py` - screening unjoinable and circular snapshots out of grading
 - `tests/test_kelly_cap.py` - Kelly fraction capping
 - `tests/test_value_engine_side.py` - over/under side handling
-- `tests/test_weekly_pipeline.py` - end-to-end ingest → train → predict → materialize
+- `tests/test_weekly_pipeline.py` - end-to-end ingest → train → predict → materialize. Seeds its
+  own `games` rows: odds are keyed by game, so a club with no scheduled game gets no line and
+  every later assertion would pass vacuously.
 
 `tests/conftest.py` uses `collect_ignore` to skip tests that import gitignored modules, so the
 suite runs in CI without the private code. Tests for logic CI must cover therefore need to import
@@ -834,11 +839,25 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
    and is what `utils/clv.py` uses for probability-space CLV.
 9. [RESOLVED] CLV never captured — `utils/clv.py` computes it; `scripts/record_outcomes.py` writes
    per-bet rows to `clv_weekly` and aggregates into `weekly_performance.clv_avg`. Closing line is
-   `MAX(as_of)` per `(event_id, player_id, market, sportsbook)` — chosen when `games.kickoff_utc`
-   was unpopulated. That premise is now stale: `games` carries kickoffs for all of 2023–2026
-   (272/272 per season), so the closing definition can be upgraded to last-snapshot-before-kickoff.
-   Open follow-up, not yet done. A key with a single snapshot reports `insufficient_snapshots`,
-   never a silent 0.
+   now the **last snapshot at or before kickoff** when `resolve_closing_lines` is given a
+   `kickoffs` frame; omitting it preserves the old `MAX(as_of)` behavior exactly. Degradation is
+   per key, not wholesale — a key with no schedule row or an unparseable kickoff keeps
+   `MAX(as_of)`, and a key whose every snapshot is post-kickoff yields no closing row rather than
+   one graded off a stale in-game quote. A key with a single snapshot reports
+   `insufficient_snapshots`, never a silent 0.
+
+   **`weekly_odds.event_id` is now a real game key.** It previously held per-player strings
+   (`2025_W22_NE_a_hooper`) and The Odds API's opaque provider ids, both of which joined to zero
+   `games` rows — which is why kickoff was unreachable. `utils/event_keys.py` (tracked) mints the
+   canonical nflverse form `{season}_{week:02d}_{away}_{home}`, and all three writers resolve
+   through it; a row that cannot be tied to a game is dropped rather than stored under a key that
+   looks joinable. `utils/odds_quality.py` screens the two disqualifiers — unjoinable keys and
+   circular `SimBook` rows — out of the value/CLV path.
+
+   **The 89 pre-existing snapshots are not backfillable and were deliberately left in place.**
+   `describe_excluded` reports `{total: 89, unjoinable: 89, synthetic: 72, gradeable: 0}`. Week 10
+   rows are the `alpha_receiver` test fixture; week 22 has zero scheduled games. `clv_weekly` is
+   empty, so nothing was ever computed from them. Screened, not deleted.
 10. No NFL walk-forward backtest — NBA has `utils/nba_backtest.py`.
 11. [RESOLVED — by deletion] Universal model, no position split. Decision: the orphaned `RBModel` subclass was deleted rather than revived; `models/position_specific/weekly.py` is the single production model path. `BasePositionModel` is retained as the shared base. Revisit per-position splits as new work against weekly.py, not the old subclass.
 12. [MOSTLY RESOLVED] nflreadpy sources unused — rosters, weekly rosters, schedules, depth charts,
@@ -855,7 +874,9 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 18. Migration runner no version table, no rollback.
 19. Opening vs closing line never separated.
 20. Tier-3 name-only match no position guard; suffix stripping destructive.
-21. Stale-line filter missing.
+21. Stale-line filter missing. `utils/matching.filter_stale_snapshots` exists, is tested, and is
+    still **unwired**. It joins on `event_id`, which was the blocker; that join now works for new
+    writes. It filters nothing on the 89 legacy rows, since none carry a joinable key.
 22. CORS hard-coded localhost; no rate limits; unbounded threads.
 23. No observability — no Sentry/OTel; logger has no basicConfig.
 
