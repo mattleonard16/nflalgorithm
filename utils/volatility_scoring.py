@@ -108,6 +108,38 @@ def compute_volatility_score(
     return round(min(max(raw * 100, 0.0), 100.0), 2)
 
 
+MIN_WEEKS_FOR_VOLATILITY = 4
+
+
+def volatility_score_or_none(
+    weekly_yards: Sequence[float],
+    *,
+    min_weeks: int = MIN_WEEKS_FOR_VOLATILITY,
+) -> float | None:
+    """Score a player's boom-bust profile, or None when it cannot be measured.
+
+    This is the writer-side counterpart to :func:`apply_volatility_widening`.
+    ``compute_volatility_score`` answers 50.0 for a short series, which is a
+    reasonable neutral for a display but wrong for storage: persisted as a
+    score it is indistinguishable from a player genuinely measured at 50, and
+    the value engine would widen sigma by 7.5% on the strength of no evidence.
+
+    Returning None keeps "not measured" distinguishable from "measured as
+    middling" all the way to the database, where it lands as NULL.
+
+    A handful of games cannot separate a boom-bust player from a steady one,
+    so the bar is a partial season rather than the bare two points the
+    variance math needs.
+    """
+    arr = np.asarray(list(weekly_yards), dtype=float)
+    arr = arr[~np.isnan(arr)]
+
+    if len(arr) < max(2, min_weeks):
+        return None
+
+    return compute_volatility_score(arr)
+
+
 def widen_sigma_for_volatility(
     sigma: float,
     volatility_score: float,

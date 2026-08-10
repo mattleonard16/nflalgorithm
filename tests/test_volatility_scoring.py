@@ -23,8 +23,44 @@ from utils.volatility_scoring import (
     max_week_contribution,
     range_ratio,
     compute_volatility_score,
+    volatility_score_or_none,
     widen_sigma_for_volatility,
 )
+
+
+# ======================================================================
+# Writer-side scoring: unmeasurable must stay unmeasured
+# ======================================================================
+
+
+def test_short_history_scores_none_rather_than_a_neutral_50():
+    """Storing 50.0 for an unmeasurable player is the bug this prevents.
+
+    Persisted, it is indistinguishable from a real 50 and earns an
+    unearned 7.5% sigma penalty downstream.
+    """
+    assert volatility_score_or_none([]) is None
+    assert volatility_score_or_none([80.0]) is None
+    assert volatility_score_or_none([80.0, 20.0, 60.0]) is None
+
+    # ...whereas compute_volatility_score answers a number for the same input.
+    assert compute_volatility_score([80.0]) == 50.0
+
+
+def test_sufficient_history_scores_and_separates_steady_from_boom_bust():
+    steady = volatility_score_or_none([50.0, 52.0, 48.0, 51.0, 49.0])
+    boom_bust = volatility_score_or_none([5.0, 0.0, 140.0, 3.0, 10.0])
+
+    assert steady is not None and boom_bust is not None
+    assert boom_bust > steady
+
+
+def test_nans_do_not_count_toward_the_minimum():
+    """A missed week is absent data, not a measurement."""
+    import numpy as np
+
+    assert volatility_score_or_none([50.0, np.nan, 48.0, np.nan]) is None
+    assert volatility_score_or_none([50.0, 48.0, 52.0, 47.0]) is not None
 
 
 # ======================================================================
