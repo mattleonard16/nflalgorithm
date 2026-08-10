@@ -148,34 +148,44 @@ def _sample_wr_stats():
     return pd.DataFrame(
         [
             {
-                "player_id": make_player_id("Alpha Receiver", "AAA"),
+                "player_id": make_player_id("Alpha Receiver", "BUF"),
                 "name": "Alpha Receiver",
-                "team": "AAA",
+                "team": "BUF",
                 "position": "WR",
                 "games_played": 1,
                 "receiving_yards": 50.0,  # Higher to pass min_wr_baseline (line * 0.8 >= 35)
                 "rolling_targets": 7.0,  # 7 * 8 = 56 yards baseline
                 "rushing_yards": 2.0,
                 "rolling_air_yards": 40.0,
-                "game_id": "2025_W10_BBB_at_AAA",
+                "game_id": "2025_10_KC_BUF",
             },
             {
-                "player_id": make_player_id("Inactive Guy", "BBB"),
+                "player_id": make_player_id("Inactive Guy", "KC"),
                 "name": "Inactive Guy",
-                "team": "BBB",
+                "team": "KC",
                 "position": "WR",
                 "games_played": 0,
                 "receiving_yards": 0.0,
                 "rolling_targets": 0.0,
                 "rushing_yards": 0.0,
                 "rolling_air_yards": 0.0,
-                "game_id": "2025_W10_BBB_at_AAA",
+                "game_id": "2025_10_KC_BUF",
             },
         ]
     )
 
 
-def test_synthesize_weekly_odds_wr_generates_receiving_lines():
+@pytest.fixture
+def week10_schedule(monkeypatch):
+    """Stub the week's schedule so game keys resolve without ambient DB state."""
+    monkeypatch.setattr(
+        "data_pipeline._weekly_matchups",
+        lambda season, week: {"BUF": ("BUF", "KC"), "KC": ("BUF", "KC")},
+    )
+    monkeypatch.setattr("data_pipeline.write_dataframe", lambda *a, **k: None)
+
+
+def test_synthesize_weekly_odds_wr_generates_receiving_lines(week10_schedule):
     stats = _sample_wr_stats()
     dp = DataPipeline.__new__(DataPipeline)
     synthetic = dp._synthesize_weekly_odds(stats, season=2025, week=10)
@@ -190,7 +200,25 @@ def test_synthesize_weekly_odds_wr_generates_receiving_lines():
     assert synthetic[synthetic["player_id"] == stats.iloc[1]["player_id"]].empty
 
 
-def test_fetch_real_weekly_odds_adds_synthetic_receiving_when_missing(monkeypatch):
+def test_synthesized_odds_carry_a_game_key_that_joins_to_games(week10_schedule):
+    """Synthetic rows must be keyed by game, not by player: a per-player id
+    joins to no kickoff and silently disables every stale-line filter."""
+    dp = DataPipeline.__new__(DataPipeline)
+    synthetic = dp._synthesize_weekly_odds(_sample_wr_stats(), season=2025, week=10)
+
+    assert set(synthetic["event_id"]) == {"2025_10_KC_BUF"}
+
+
+def test_synthesized_odds_skip_players_with_no_scheduled_game(monkeypatch):
+    """A club on a bye gets no line rather than a line under a fabricated key."""
+    monkeypatch.setattr("data_pipeline._weekly_matchups", lambda season, week: {})
+    monkeypatch.setattr("data_pipeline.write_dataframe", lambda *a, **k: None)
+    dp = DataPipeline.__new__(DataPipeline)
+
+    assert dp._synthesize_weekly_odds(_sample_wr_stats(), season=2025, week=10).empty
+
+
+def test_fetch_real_weekly_odds_adds_synthetic_receiving_when_missing(week10_schedule, monkeypatch):
     stats = _sample_wr_stats()
 
     class FakeScraper:
@@ -199,7 +227,7 @@ def test_fetch_real_weekly_odds_adds_synthetic_receiving_when_missing(monkeypatc
             return [
                 {
                     "player": "Alpha Receiver",
-                    "team": "AAA",
+                    "team": "BUF",
                     "stat": "rushing_yards",
                     "line": 10.5,
                     "over_odds": -110,
@@ -218,3 +246,56 @@ def test_fetch_real_weekly_odds_adds_synthetic_receiving_when_missing(monkeypatc
         & (odds["sportsbook"] == "SimBook")
     ]
     assert not receiving_rows.empty
+    # Both the real and the synthesized row key to the same game.
+    assert set(odds["event_id"]) == {"2025_10_KC_BUF"}
+
+
+def test_fetch_real_weekly_odds_prefers_the_key_the_scraper_resolved(week10_schedule, monkeypatch):
+    """The scraper already resolves a canonical key; the pipeline must not
+    re-derive a different one for the same snapshot."""
+
+    class FakeScraper:
+        def get_upcoming_week_props(self, week, season):
+            return [
+                {
+                    "event_id": "2025_10_KC_BUF",
+                    "player": "Alpha Receiver",
+                    "team": "BUF",
+                    "stat": "receiving_yards",
+                    "line": 55.5,
+                    "over_odds": -110,
+                    "book": "RealBook",
+                }
+            ]
+
+    monkeypatch.setattr("scripts.prop_line_scraper.NFLPropScraper", FakeScraper)
+
+    dp = DataPipeline.__new__(DataPipeline)
+    odds = dp._fetch_real_weekly_odds(
+        season=2025, week=10, player_stats=_sample_wr_stats().iloc[1:]
+    )
+
+    assert list(odds["event_id"]) == ["2025_10_KC_BUF"]
+
+
+def test_fetch_real_weekly_odds_drops_rows_with_no_resolvable_game(monkeypatch):
+    monkeypatch.setattr("data_pipeline._weekly_matchups", lambda season, week: {})
+
+    class FakeScraper:
+        def get_upcoming_week_props(self, week, season):
+            return [
+                {
+                    "player": "Alpha Receiver",
+                    "team": "BUF",
+                    "stat": "receiving_yards",
+                    "line": 55.5,
+                    "over_odds": -110,
+                    "book": "RealBook",
+                }
+            ]
+
+    monkeypatch.setattr("scripts.prop_line_scraper.NFLPropScraper", FakeScraper)
+
+    dp = DataPipeline.__new__(DataPipeline)
+
+    assert dp._fetch_real_weekly_odds(season=2025, week=10, player_stats=pd.DataFrame()).empty
