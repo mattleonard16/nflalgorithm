@@ -788,7 +788,10 @@ Key test files:
 - `tests/test_market_mu_wr.py` - EWMA and role priors
 - `tests/test_prop_integration_wr.py` - 3-tier player matching
 - `tests/test_nfl_projection_evaluation.py` - evaluation metrics and the per-position MAE gate
-- `tests/test_clv.py` - closing line value math (points and no-vig basis points), including the
+- `tests/test_clv.py` - closing line value math (points and no-vig basis points)
+- `tests/test_two_sided_odds.py` - over/under pairing at the same line (no-vig depends on it)
+- `tests/test_odds_snapshot.py` - scraper quote to `weekly_odds` row, incl. `under_price`
+- `tests/test_game_context.py` - schedule spread/total/weather extraction and its conventions, including the
   kickoff-aware closing definition
 - `tests/test_event_keys.py` - odds → game key resolution; the contract the gitignored writers honor
 - `tests/test_odds_quality.py` - screening unjoinable and circular snapshots out of grading
@@ -836,7 +839,13 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 ### Tier 1 — HIGH IMPACT (MAE + ROI)
 7. Premium features dropped in `_CONTEXTUAL_COLS` (weekly.py:44).
 8. [RESOLVED] No vig removal — `implied_probability_no_vig` now lives in `value_betting_engine.py`
-   and is what `utils/clv.py` uses for probability-space CLV.
+   and is what `utils/clv.py` uses for probability-space CLV. Both inputs are now actually
+   captured: `utils/two_sided_odds.py` pairs an Over with the Under **at the same line** (the
+   scraper previously matched on player name alone, which crosses alternate lines — a
+   `DraftKings_Alt` book is already in the DB), and `utils/odds_snapshot.build_snapshot_row`
+   carries `under_price` into storage. It had been NULL on every row because the writer in
+   `data_pipeline._fetch_real_weekly_odds` built a row with `price` and no under column at all.
+   Synthetic `SimBook` rows store NULL explicitly — there is no second side to de-vig against.
 9. [RESOLVED] CLV never captured — `utils/clv.py` computes it; `scripts/record_outcomes.py` writes
    per-bet rows to `clv_weekly` and aggregates into `weekly_performance.clv_avg`. Closing line is
    now the **last snapshot at or before kickoff** when `resolve_closing_lines` is given a
@@ -862,8 +871,13 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 11. [RESOLVED — by deletion] Universal model, no position split. Decision: the orphaned `RBModel` subclass was deleted rather than revived; `models/position_specific/weekly.py` is the single production model path. `BasePositionModel` is retained as the shared base. Revisit per-position splits as new work against weekly.py, not the old subclass.
 12. [MOSTLY RESOLVED] nflreadpy sources unused — rosters, weekly rosters, schedules, depth charts,
     injuries, and pbp red-zone touches are all ingested by `scripts/ingest_real_nfl_data.py` and
-    feed `games`, `nfl_roster_players`, and `nfl_player_context_snapshots`. Still unused: FTN
-    charting; pbp is only mined for red-zone touches (EPA and the rest untapped).
+    feed `games`, `nfl_roster_players`, and `nfl_player_context_snapshots`. The schedule's pregame
+    context (`spread_line`, `total_line`, `temp`, `wind`, `roof`, `surface`, `div_game`) is now
+    extracted by `utils/game_context.py` and persisted on `games` — but **nothing consumes those
+    columns yet**; the model does not read them. Still unused: FTN charting; pbp is only mined for
+    red-zone touches (EPA and the rest untapped). Touchdown and reception columns are still
+    discarded at `transform_to_enhanced_stats` `final_cols`, so TD props cannot be priced;
+    `game_script` remains hardcoded 0.0 on every row.
 13. Kelly cap not applied in ranking path — `materialized_value_view.py:139`.
 
 ### Tier 2 — MEDIUM (correctness/ops)
