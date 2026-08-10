@@ -55,8 +55,16 @@ Verify: `command grep -n "from utils.matching import" prop_integration.py`
 
 ### `value_betting_engine.py`
 - The per-bet Kelly cap is gated on `config.features.kelly_cap_enabled` (~line 266).
+- Sigma widening calls `apply_volatility_widening(df["sigma"], df.get("volatility_score"))` from
+  `utils.volatility_scoring` and logs the unscored row count. **An older copy uses
+  `fillna(50.0)` + `widen_sigma_for_volatility`, which inflates every NFL sigma by a flat 7.5%
+  because `volatility_score` is never written (0 of 1964 rows).** This is the one item here whose
+  absence silently changes every price on the card, so check it first.
 - Three unused `__init__` attributes (`bankroll`, `default_fraction`, `min_edge`) were removed. This
   is cosmetic; their presence breaks nothing.
+
+Verify: `command grep -n "apply_volatility_widening" value_betting_engine.py` returns the call site,
+and `command grep -n "fillna(50.0)" value_betting_engine.py` returns nothing.
 
 ### `data_pipeline.py`
 - `compute_player_volatility` deleted (was never wired to anything).
