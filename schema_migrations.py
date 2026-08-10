@@ -234,6 +234,18 @@ class MigrationManager:
                 kickoff_utc TEXT,
                 game_date DATE NOT NULL,
                 venue TEXT,
+                -- Pregame market and conditions, published on the schedule feed.
+                -- spread_line is quoted from the HOME team's perspective:
+                -- positive means the home side is favored.
+                spread_line REAL,
+                total_line REAL,
+                -- NULL for indoor games, which means climate controlled rather
+                -- than unknown. See utils.game_context.
+                temp REAL,
+                wind REAL,
+                roof TEXT,
+                surface TEXT,
+                div_game INTEGER,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
@@ -1004,6 +1016,22 @@ class MigrationManager:
             # T0 #4 (cont.): widen PRIMARY KEY to include `side`. SQLite ALTER cannot
             # modify PK, so detect old-shape via sqlite_master DDL and rebuild.
             self._rebuild_mvv_pk_if_needed(cursor)
+
+        # T1 #3: games gains the pregame context the schedule feed already
+        # carries. All nullable: seasons predating a column, and indoor games
+        # with no weather, must stay loadable.
+        if table_exists("games", conn=cursor.connection):
+            for column, sql_type in (
+                ("spread_line", "REAL"),
+                ("total_line", "REAL"),
+                ("temp", "REAL"),
+                ("wind", "REAL"),
+                ("roof", "TEXT"),
+                ("surface", "TEXT"),
+                ("div_game", "INTEGER"),
+            ):
+                if not column_exists("games", column, conn=cursor.connection):
+                    cursor.execute(f"ALTER TABLE games ADD COLUMN {column} {sql_type}")
 
         # T1 #8: weekly_odds gains under_price for no-vig probability calc.
         # Nullable — engine falls back to single-sided vig-included implied prob when missing.
