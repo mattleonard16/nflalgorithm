@@ -34,20 +34,35 @@ STATUS_OK = "ok"
 STATUS_INSUFFICIENT = "insufficient_snapshots"
 
 
-def resolve_closing_lines(odds_df: pd.DataFrame) -> pd.DataFrame:
+def resolve_closing_lines(
+    odds_df: pd.DataFrame, kickoffs: pd.DataFrame | None = None
+) -> pd.DataFrame:
     """Return the closing snapshot per ``SNAPSHOT_KEY``.
 
-    Closing is defined as the row at ``MAX(as_of)`` for the key. The ``games``
-    table carries no populated ``kickoff_utc``, so "last snapshot before
-    kickoff" is not expressible yet; this matches the NBA reference
-    (``scripts/record_nba_outcomes.py``) and ``scripts/backfill_line_accuracy.py``.
+    Closing is the last snapshot taken *before kickoff* when ``kickoffs`` is
+    supplied. That is the real definition: a quote captured after the game
+    started is not a closing line, and grading against one would score the
+    model on information the market already had.
+
+    Without ``kickoffs`` the definition degrades to ``MAX(as_of)``, matching
+    the NBA reference (``scripts/record_nba_outcomes.py``) and
+    ``scripts/backfill_line_accuracy.py``. That fallback existed because
+    ``event_id`` used to hold per-player strings that joined to no game; now
+    that snapshots carry canonical game keys, callers should pass kickoffs.
+
+    A key whose every snapshot is post-kickoff yields no closing row at all,
+    rather than a row silently graded off a stale quote.
 
     Adds ``snapshot_count`` so callers can distinguish a real close from a
-    single-scrape key where CLV is undefined.
+    single-scrape key where CLV is undefined. The count reflects only the
+    pre-kickoff snapshots actually eligible to close.
 
     Args:
         odds_df: Rows from ``weekly_odds``. Must contain ``SNAPSHOT_KEY``,
             ``line``, ``price`` and ``as_of``; ``under_price`` is optional.
+        kickoffs: Optional rows with ``event_id`` and ``kickoff_utc``. Keys
+            with no matching kickoff keep the ``MAX(as_of)`` definition, so a
+            partially-populated schedule degrades per-key rather than wholesale.
 
     Returns:
         One row per key with ``close_line``, ``close_price``,
@@ -80,6 +95,10 @@ def resolve_closing_lines(odds_df: pd.DataFrame) -> pd.DataFrame:
         bad = frame.loc[frame["_as_of_ts"].isna(), "as_of"].unique()[:5]
         raise ValueError(f"weekly_odds.as_of values are not parseable timestamps: {list(bad)}")
 
+    frame = _drop_post_kickoff_snapshots(frame, kickoffs)
+    if frame.empty:
+        return pd.DataFrame(columns=out_columns)
+
     counts = frame.groupby(SNAPSHOT_KEY, dropna=False).size().rename("snapshot_count")
     latest_idx = frame.groupby(SNAPSHOT_KEY, dropna=False)["_as_of_ts"].idxmax()
 
@@ -93,6 +112,37 @@ def resolve_closing_lines(odds_df: pd.DataFrame) -> pd.DataFrame:
     )
     closing = closing.merge(counts.reset_index(), on=SNAPSHOT_KEY, how="left")
     return closing.reset_index(drop=True)[out_columns]
+
+
+def _drop_post_kickoff_snapshots(
+    frame: pd.DataFrame, kickoffs: pd.DataFrame | None
+) -> pd.DataFrame:
+    """Keep only snapshots taken at or before their game's kickoff.
+
+    Keys with no known kickoff are kept unchanged: a missing schedule row must
+    not silently discard a book's whole quote history. ``frame`` is expected to
+    carry the parsed ``_as_of_ts`` column.
+    """
+    if kickoffs is None or kickoffs.empty:
+        return frame
+
+    missing = [c for c in ("event_id", "kickoff_utc") if c not in kickoffs.columns]
+    if missing:
+        raise ValueError(f"kickoffs missing required columns: {missing}")
+
+    schedule = kickoffs[["event_id", "kickoff_utc"]].drop_duplicates(subset="event_id").copy()
+    schedule["_kickoff_ts"] = pd.to_datetime(
+        schedule["kickoff_utc"], errors="coerce", utc=True, format="mixed"
+    )
+    schedule = schedule.loc[schedule["_kickoff_ts"].notna(), ["event_id", "_kickoff_ts"]]
+    if schedule.empty:
+        return frame
+
+    merged = frame.merge(schedule, on="event_id", how="left")
+    # NaT compares False, which is what an unknown kickoff should mean here:
+    # the row is kept rather than judged against a timestamp we do not have.
+    post_kickoff = merged["_kickoff_ts"].notna() & (merged["_as_of_ts"] > merged["_kickoff_ts"])
+    return merged.loc[~post_kickoff].drop(columns="_kickoff_ts")
 
 
 def _fair_prob(

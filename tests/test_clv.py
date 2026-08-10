@@ -314,3 +314,109 @@ def test_resolve_then_compute_end_to_end():
 
     assert result["status"] == STATUS_OK
     assert result["clv_points"] == pytest.approx(-4.0)
+
+
+# ---------------------------------------------------------------------------
+# Kickoff-aware closing line
+# ---------------------------------------------------------------------------
+
+
+def _kickoff_odds(as_of: str, line: float) -> dict:
+    row = _odds_row(as_of, line)
+    row["event_id"] = "2025_13_KC_BUF"
+    return row
+
+
+def _kickoffs(kickoff_utc: str = "2025-11-27T18:00:00+00:00") -> pd.DataFrame:
+    return pd.DataFrame([{"event_id": "2025_13_KC_BUF", "kickoff_utc": kickoff_utc}])
+
+
+def test_closing_line_ignores_snapshots_taken_after_kickoff():
+    """A quote captured mid-game is not a closing line; grading against it
+    would score the model on information the market already had."""
+    odds = pd.DataFrame(
+        [
+            _kickoff_odds("2025-11-27T17:00:00+00:00", 54.5),
+            _kickoff_odds("2025-11-27T21:00:00+00:00", 80.5),  # in-game
+        ]
+    )
+
+    closing = resolve_closing_lines(odds, _kickoffs())
+
+    assert closing.iloc[0]["close_line"] == 54.5
+    # The discarded in-game row must not inflate the count either.
+    assert closing.iloc[0]["snapshot_count"] == 1
+
+
+def test_snapshot_exactly_at_kickoff_still_closes():
+    odds = pd.DataFrame([_kickoff_odds("2025-11-27T18:00:00+00:00", 54.5)])
+
+    closing = resolve_closing_lines(odds, _kickoffs())
+
+    assert closing.iloc[0]["close_line"] == 54.5
+
+
+def test_key_with_only_post_kickoff_snapshots_yields_no_closing_row():
+    """Better to report nothing than to grade off a stale in-game quote."""
+    odds = pd.DataFrame([_kickoff_odds("2025-11-27T23:00:00+00:00", 80.5)])
+
+    assert resolve_closing_lines(odds, _kickoffs()).empty
+
+
+def test_key_with_no_known_kickoff_keeps_the_latest_snapshot():
+    """A partially populated schedule degrades per key, not wholesale."""
+    odds = pd.DataFrame(
+        [
+            _odds_row("2025-11-25T12:00:00+00:00", 50.5),
+            _odds_row("2025-11-27T21:00:00+00:00", 56.5),
+        ]
+    )
+
+    closing = resolve_closing_lines(odds, _kickoffs())
+
+    assert closing.iloc[0]["close_line"] == 56.5
+
+
+def test_unparseable_kickoff_does_not_discard_the_quote_history():
+    odds = pd.DataFrame([_kickoff_odds("2025-11-27T21:00:00+00:00", 56.5)])
+
+    closing = resolve_closing_lines(odds, _kickoffs("not a timestamp"))
+
+    assert closing.iloc[0]["close_line"] == 56.5
+
+
+def test_omitting_kickoffs_preserves_the_max_as_of_definition():
+    odds = pd.DataFrame(
+        [
+            _kickoff_odds("2025-11-27T17:00:00+00:00", 54.5),
+            _kickoff_odds("2025-11-27T21:00:00+00:00", 80.5),
+        ]
+    )
+
+    assert resolve_closing_lines(odds).iloc[0]["close_line"] == 80.5
+
+
+def test_kickoffs_missing_required_columns_fails_loud():
+    odds = pd.DataFrame([_kickoff_odds("2025-11-27T17:00:00+00:00", 54.5)])
+
+    with pytest.raises(ValueError, match="kickoff_utc"):
+        resolve_closing_lines(odds, pd.DataFrame({"event_id": ["2025_13_KC_BUF"]}))
+
+
+def test_kickoff_filter_applies_per_event_not_globally():
+    """One game's kickoff must not truncate another game's quote history."""
+    early = _kickoff_odds("2025-11-27T21:00:00+00:00", 80.5)
+    late = dict(early)
+    late["event_id"] = "2025_13_SF_SEA"
+
+    closing = resolve_closing_lines(
+        pd.DataFrame([early, late]),
+        pd.DataFrame(
+            [
+                {"event_id": "2025_13_KC_BUF", "kickoff_utc": "2025-11-27T18:00:00+00:00"},
+                {"event_id": "2025_13_SF_SEA", "kickoff_utc": "2025-11-28T18:00:00+00:00"},
+            ]
+        ),
+    )
+
+    assert list(closing["event_id"]) == ["2025_13_SF_SEA"]
