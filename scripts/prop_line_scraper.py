@@ -24,6 +24,7 @@ from scripts.simple_cache import simple_cached_client
 from utils.db import execute, get_connection, read_dataframe
 from utils.event_keys import UnresolvableEventError, resolve_event_id
 from utils.player_id_utils import canonicalize_team, make_player_id
+from utils.two_sided_odds import pair_two_sided_prices
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -290,41 +291,11 @@ class NFLPropScraper:
                         if not player_info:
                             continue
 
-                        # Get over/under odds
-                        over_odds = outcome.get("price") if outcome.get("name") == "Over" else None
-                        under_odds = (
-                            outcome.get("price") if outcome.get("name") == "Under" else None
-                        )
-                        line = outcome.get("point", 0)
+                        # Pair on player *and* line; see the weekly path below.
+                        paired = pair_two_sided_prices(outcome, market_data.get("outcomes", []))
 
-                        # Find corresponding under/over
-                        if over_odds is not None:
-                            under_outcome = next(
-                                (
-                                    o
-                                    for o in market_data.get("outcomes", [])
-                                    if o.get("description") == player_name
-                                    and o.get("name") == "Under"
-                                ),
-                                None,
-                            )
-                            if under_outcome:
-                                under_odds = under_outcome.get("price")
-
-                        if under_odds is not None and over_odds is None:
-                            over_outcome = next(
-                                (
-                                    o
-                                    for o in market_data.get("outcomes", [])
-                                    if o.get("description") == player_name
-                                    and o.get("name") == "Over"
-                                ),
-                                None,
-                            )
-                            if over_outcome:
-                                over_odds = over_outcome.get("price")
-
-                        if over_odds is not None and under_odds is not None:
+                        if paired is not None:
+                            line, over_odds, under_odds = paired
                             prop_line = PropLine(
                                 player=player_info["name"],
                                 team=player_info["team"],
@@ -647,39 +618,14 @@ class NFLPropScraper:
                                 info["name"],
                                 info["team"],
                             )
-                            over_odds = (
-                                outcome.get("price") if outcome.get("name") == "Over" else None
-                            )
-                            under_odds = (
-                                outcome.get("price") if outcome.get("name") == "Under" else None
-                            )
-                            line = outcome.get("point", 0.0)
-                            if over_odds is not None and under_odds is None:
-                                uo = next(
-                                    (
-                                        o
-                                        for o in market_data.get("outcomes", [])
-                                        if o.get("description") == player_desc
-                                        and o.get("name") == "Under"
-                                    ),
-                                    None,
-                                )
-                                if uo:
-                                    under_odds = uo.get("price")
-                            if under_odds is not None and over_odds is None:
-                                oo = next(
-                                    (
-                                        o
-                                        for o in market_data.get("outcomes", [])
-                                        if o.get("description") == player_desc
-                                        and o.get("name") == "Over"
-                                    ),
-                                    None,
-                                )
-                                if oo:
-                                    over_odds = oo.get("price")
-                            if over_odds is None or under_odds is None:
+                            # Pair on player *and* line: a book posting
+                            # alternates returns them as separate outcomes
+                            # sharing one description, so matching by name
+                            # alone crosses lines and poisons no-vig.
+                            paired = pair_two_sided_prices(outcome, market_data.get("outcomes", []))
+                            if paired is None:
                                 continue
+                            line, over_odds, under_odds = paired
                             results.append(
                                 {
                                     "event_id": game_key,
