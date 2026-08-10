@@ -198,6 +198,58 @@ def test_materialize_week_returns_exactly_what_it_persists(temp_db, monkeypatch)
     assert np.allclose(merged["kelly_fraction_ret"], merged["kelly_fraction_db"])
 
 
+def test_ungrounded_projections_never_reach_the_view(temp_db):
+    """A projection with no usable history must not become a bet.
+
+    When history cannot be resolved for a player, mu collapses toward zero
+    while sigma stays at its floor. The result looks like a projection and
+    prices like one, but the huge mu-to-line gap manufactures an edge out of
+    nothing. On the 2026 W1 slate this shape covered 556 of 1,396 rows.
+    """
+    with sqlite3.connect(temp_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO weekly_projections
+            (season, week, player_id, team, opponent, market, mu, sigma,
+             model_version, featureset_hash, generated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (2023, 1, "ungrounded_player_team1", "TEAM1", "TEAM2", "rushing_yards",
+             1.6, 37.5, "v1", "hash1", "2023-09-01T00:00:00"),
+        )
+        conn.execute(
+            """
+            INSERT INTO weekly_odds
+            (event_id, season, week, player_id, market, sportsbook, line, price, as_of)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("event1", 2023, 1, "ungrounded_player_team1", "rushing_yards",
+             "TestBook", 40.5, -110, "2023-09-01T00:00:00"),
+        )
+        conn.commit()
+
+    # Self-check: the engine must actually rank the bad row, otherwise this
+    # test would pass without the guard ever running.
+    raw = rank_weekly_value(2023, 1, min_edge=0.0)
+    assert "ungrounded_player_team1" in set(raw["player_id"]), (
+        "fixture no longer produces an ungrounded ranked row"
+    )
+
+    returned = materialize_week(2023, 1, min_edge=0.0)
+
+    with sqlite3.connect(temp_db) as conn:
+        persisted = pd.read_sql_query(
+            "SELECT player_id FROM materialized_value_view WHERE season=? AND week=?",
+            conn,
+            params=(2023, 1),
+        )
+
+    assert "ungrounded_player_team1" not in set(persisted["player_id"])
+    assert "ungrounded_player_team1" not in set(returned["player_id"])
+    # The healthy projection still makes the card — the guard drops rows, not the week.
+    assert "test_player_1_team1" in set(persisted["player_id"])
+
+
 def test_season_week_constraint_not_null(temp_db):
     """Test that season and week constraints are enforced in the database."""
     with sqlite3.connect(temp_db) as conn:

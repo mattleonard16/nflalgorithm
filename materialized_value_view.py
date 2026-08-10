@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -14,6 +15,8 @@ from confidence_engine import score_plays
 from risk_manager import normalize_portfolio_stakes
 from utils.db import _get_backend, execute, executemany, get_connection
 from value_betting_engine import rank_weekly_value
+
+logger = logging.getLogger(__name__)
 
 
 def materialize_week(
@@ -82,6 +85,38 @@ def materialize_week(
         payload = payload[~large_gap_mask]
 
         payload = payload[payload['edge_percentage'].between(-0.5, 0.5)]
+
+        # Drop projections the model had no history to ground.
+        #
+        # A player with no resolvable history falls through to a floor sigma
+        # while mu collapses toward zero, producing rows like mu=1.6 with
+        # sigma=37.5. Those are not projections; they are the absence of one
+        # wearing a projection's shape, and against any real line they
+        # manufacture an edge from noise. On the 2026 W1 slate this shape
+        # covers 556 of 1,396 rows.
+        #
+        # sigma >= mu is the observable signature: for a genuine skill-position
+        # projection the mean exceeds the spread. This lives here, in the
+        # tracked materialization path, rather than in the model, because every
+        # card passes through this chokepoint regardless of which producer
+        # generated it — including deployments whose private model code differs
+        # from this machine's.
+        ungrounded_mask = (
+            payload['mu'].notna()
+            & payload['sigma'].notna()
+            & (payload['sigma'].astype(float) >= payload['mu'].astype(float))
+        )
+        if ungrounded_mask.any():
+            logger.warning(
+                "Dropping %d of %d rows whose sigma >= mu (no usable history)",
+                int(ungrounded_mask.sum()),
+                len(payload),
+            )
+        payload = payload[~ungrounded_mask]
+
+        if payload.empty:
+            conn.commit()
+            return payload
 
         # Compute confidence scores and tiers
         payload = score_plays(payload)
