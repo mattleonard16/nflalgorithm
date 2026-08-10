@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 
 from utils.event_keys import (
     UnresolvableEventError,
     canonical_event_id,
+    event_id_for_team,
     is_canonical_event_id,
+    matchups_by_team,
     resolve_event_id,
 )
 
@@ -104,3 +107,60 @@ class TestResolveEventId:
         # The scraper's synthetic path used "TBD" as an away team.
         with pytest.raises(UnresolvableEventError):
             resolve_event_id(2025, 1, home_team="KC", away_team="TBD")
+
+
+class TestMatchupsByTeam:
+    """Recovering a full matchup from just the player's club."""
+
+    @staticmethod
+    def _schedule(pairs):
+        return pd.DataFrame(pairs, columns=["home_team", "away_team"])
+
+    def test_both_clubs_index_to_the_same_matchup(self):
+        matchups = matchups_by_team(self._schedule([("PHI", "DAL")]))
+        assert matchups["PHI"] == ("PHI", "DAL")
+        assert matchups["DAL"] == ("PHI", "DAL")
+
+    def test_full_club_names_are_canonicalized(self):
+        matchups = matchups_by_team(
+            self._schedule([("Kansas City Chiefs", "Los Angeles Chargers")])
+        )
+        assert matchups["KC"] == ("KC", "LAC")
+
+    def test_row_with_an_unresolvable_club_is_skipped_entirely(self):
+        # Half-resolving would key a real club to a garbage opponent.
+        matchups = matchups_by_team(self._schedule([("KC", "Toronto Argonauts"), ("PHI", "DAL")]))
+        assert "KC" not in matchups
+        assert matchups["PHI"] == ("PHI", "DAL")
+
+    def test_empty_schedule_yields_no_matchups(self):
+        assert matchups_by_team(self._schedule([])) == {}
+
+
+class TestEventIdForTeam:
+    """Resolving a game key when the caller holds only a player's team."""
+
+    MATCHUPS = {"PHI": ("PHI", "DAL"), "DAL": ("PHI", "DAL")}
+
+    def test_home_club_resolves_to_the_away_first_key(self):
+        assert event_id_for_team(2025, 1, "PHI", self.MATCHUPS) == "2025_01_DAL_PHI"
+
+    def test_away_club_resolves_to_the_same_key(self):
+        assert event_id_for_team(2025, 1, "DAL", self.MATCHUPS) == "2025_01_DAL_PHI"
+
+    def test_club_on_bye_fails_loud(self):
+        with pytest.raises(UnresolvableEventError, match="no scheduled game"):
+            event_id_for_team(2025, 1, "KC", self.MATCHUPS)
+
+    def test_unresolvable_club_fails_loud(self):
+        with pytest.raises(UnresolvableEventError, match="unresolvable team code"):
+            event_id_for_team(2025, 1, "not a team", self.MATCHUPS)
+
+    def test_missing_team_fails_loud_rather_than_defaulting(self):
+        with pytest.raises(UnresolvableEventError):
+            event_id_for_team(2025, 1, None, self.MATCHUPS)
+
+    def test_empty_schedule_makes_every_club_unresolvable(self):
+        # A failed schedule load must not silently produce keys.
+        with pytest.raises(UnresolvableEventError):
+            event_id_for_team(2025, 1, "PHI", {})

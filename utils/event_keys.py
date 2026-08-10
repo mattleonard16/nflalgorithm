@@ -26,6 +26,7 @@ Canonical form mirrors nflverse: ``{season}_{week:02d}_{away}_{home}``.
 from __future__ import annotations
 
 import re
+from typing import Any, Dict, Tuple
 
 from utils.player_id_utils import canonicalize_team
 
@@ -108,6 +109,49 @@ def resolve_event_id(
         )
 
     return canonical_event_id(season, week, str(away_team), str(home_team))
+
+
+def matchups_by_team(schedule: Any) -> Dict[str, Tuple[str, str]]:
+    """Index a week's schedule by club, mapping each to its ``(home, away)``.
+
+    Both clubs in a game key to the same pair, so a caller holding only a
+    player's team can recover the full matchup. Rows whose clubs do not
+    canonicalize are skipped rather than half-resolved.
+
+    Args:
+        schedule: Rows with ``home_team`` and ``away_team`` attributes, already
+            narrowed to a single season and week by the caller.
+    """
+    matchups: Dict[str, Tuple[str, str]] = {}
+    for row in schedule.itertuples(index=False):
+        home = canonicalize_team(getattr(row, "home_team", ""))
+        away = canonicalize_team(getattr(row, "away_team", ""))
+        if not home or not away:
+            continue
+        matchups[home] = (home, away)
+        matchups[away] = (home, away)
+    return matchups
+
+
+def event_id_for_team(
+    season: int, week: int, team: object, matchups: Dict[str, Tuple[str, str]]
+) -> str:
+    """Resolve the game key for the club ``team`` plays in that week.
+
+    Raises:
+        UnresolvableEventError: when the club does not canonicalize or has no
+            game that week (bye, or a schedule that failed to load).
+    """
+    code = canonicalize_team(team if isinstance(team, str) else str(team or ""))
+    if not code:
+        raise UnresolvableEventError(f"unresolvable team code: {team!r}")
+
+    matchup = matchups.get(code)
+    if matchup is None:
+        raise UnresolvableEventError(f"no scheduled game for {code} in {season} week {week}")
+
+    home, away = matchup
+    return canonical_event_id(season, week, away, home)
 
 
 def _coerce_int(value: object, field: str) -> int:
