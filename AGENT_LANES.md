@@ -57,9 +57,20 @@ the file was touched, and no pricing or no-vig logic was. It is gitignored, so i
 copy in flight, **your copy wins and this change is lost** — re-apply it from
 `docs/DEPLOYMENT_MANIFEST.md`, which records it. I am out of the file again now.
 
-Why it mattered: `weekly_projections.volatility_score` is written by nothing (0 of 1964 rows), so the
+Why it mattered: `weekly_projections.volatility_score` was written by nothing (0 of 1964 rows), so the
 old `fillna(50.0)` multiplied every NFL sigma by a flat 1.075 — a uniform 7.5% inflation of every
 p_win and edge. If you are calibrating anything against pre-`60bddcf` numbers, they carry that bias.
+
+**Follow-up: I also edited `models/position_specific/weekly.py` to populate that column** (also
+gitignored, same "your copy wins" hazard, recorded in `docs/DEPLOYMENT_MANIFEST.md`). It now computes
+`volatility_score_or_none` from the same weekly series the sigma uses and writes it through
+`_write_predictions`. **The `weekly_projections` INSERT gained a column** — column list, placeholder
+count, and both the SQLite and MySQL conflict clauses — so if you have that INSERT open, take note.
+
+**I re-ran `predict_week(2026, 1, roster_backed=True)`, which rewrote all 1396 week-1 projections.**
+Pregame rows only, no graded week touched. 784 now carry a score; the widening multiplier spans
+1.0000-1.1500 across 472 distinct values instead of a constant 1.075. If you snapshotted week-1
+`mu`/`sigma` for odds work, re-read them — sigma moved on most rows.
 
 **Three tests are failing on your commits, not mine** (verified: all three fail inside
 `rank_weekly_value` or ingest, before any code of mine runs):
