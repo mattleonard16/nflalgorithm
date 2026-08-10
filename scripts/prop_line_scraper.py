@@ -22,7 +22,8 @@ from scripts.api_error_handler import api_error_handler
 # Import simplified caching system and validation
 from scripts.simple_cache import simple_cached_client
 from utils.db import execute, get_connection, read_dataframe
-from utils.player_id_utils import make_player_id
+from utils.event_keys import UnresolvableEventError, resolve_event_id
+from utils.player_id_utils import canonicalize_team, make_player_id
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -340,6 +341,36 @@ class NFLPropScraper:
         return prop_lines
 
     # ------------------------ Weekly odds (Week N) ------------------------
+    @staticmethod
+    def _scheduled_matchups(season: int, week: int) -> Dict[str, tuple[str, str]]:
+        """Map each club playing that week to its ``(home, away)`` matchup.
+
+        Returns an empty mapping when the schedule is unavailable; callers skip
+        the affected rows rather than inventing an opponent.
+        """
+        try:
+            schedule = read_dataframe(
+                "SELECT home_team, away_team FROM games WHERE season = ? AND week = ?",
+                params=(season, week),
+            )
+        except Exception:
+            logger.warning(
+                "Schedule lookup failed for %s week %s; synthetic rows will be skipped",
+                season,
+                week,
+            )
+            return {}
+
+        matchups: Dict[str, tuple[str, str]] = {}
+        for row in schedule.itertuples(index=False):
+            home = canonicalize_team(getattr(row, "home_team", ""))
+            away = canonicalize_team(getattr(row, "away_team", ""))
+            if not home or not away:
+                continue
+            matchups[home] = (home, away)
+            matchups[away] = (home, away)
+        return matchups
+
     def get_upcoming_week_props(
         self,
         week: int,
@@ -408,8 +439,16 @@ class NFLPropScraper:
             stats = ["rushing_yards", "receiving_yards", "passing_yards"]
             rows: List[Dict] = []
             random.seed(42)
+            # Demo rows still carry a real game key, so they exercise the same
+            # kickoff joins as live rows. A team with no scheduled game that
+            # week is skipped rather than paired with a placeholder opponent.
+            matchups = self._scheduled_matchups(season, week)
             for _ in range(50):
                 name, team, pos = random.choice(names)
+                matchup = matchups.get(canonicalize_team(team))
+                if matchup is None:
+                    continue
+                home_team, away_team = matchup
                 stat = random.choice(stats)
                 book = random.choice(books)
                 base = 90 if stat == "receiving_yards" else (75 if stat == "rushing_yards" else 260)
@@ -419,7 +458,9 @@ class NFLPropScraper:
                 under = random.choice([-120, -115, -110, -105, 100, 105])
                 rows.append(
                     {
-                        "event_id": f"{season}_W{week}_{team}_synthetic",
+                        "event_id": resolve_event_id(
+                            season, week, home_team=home_team, away_team=away_team
+                        ),
                         "source_player_id": None,
                         "player_id": make_player_id(name, team),
                         "player": name,
@@ -431,8 +472,8 @@ class NFLPropScraper:
                         "over_odds": over,
                         "under_odds": under,
                         "game_date": now,
-                        "home_team": team,
-                        "away_team": "TBD",
+                        "home_team": home_team,
+                        "away_team": away_team,
                     }
                 )
             return rows
@@ -493,10 +534,23 @@ class NFLPropScraper:
 
         # Fetch props for each event and market
         for event in events:
+            # The provider id addresses the odds endpoint; it is opaque and does
+            # not join to `games`. The game key stored on each row is derived
+            # from the matchup instead.
             event_id = event.get("id")
             home = event.get("home_team", "")
             away = event.get("away_team", "")
             game_date = event.get("commence_time", "")
+            try:
+                game_key = resolve_event_id(season, week, home_team=home, away_team=away)
+            except UnresolvableEventError:
+                logger.warning(
+                    "Skipping event %s: unresolvable matchup away=%r home=%r",
+                    event_id,
+                    away,
+                    home,
+                )
+                continue
 
             for market in markets:
                 url = f"{self.base_url}/sports/americanfootball_nfl/events/{event_id}/odds"
@@ -628,7 +682,7 @@ class NFLPropScraper:
                                 continue
                             results.append(
                                 {
-                                    "event_id": event_id,
+                                    "event_id": game_key,
                                     "source_player_id": outcome.get("id"),
                                     "player_id": make_player_id(info["name"], info["team"]),
                                     "player": info["name"],
@@ -687,12 +741,19 @@ class NFLPropScraper:
             return 0
         as_of = datetime.now(timezone.utc).isoformat()
         saved = 0
+        unresolved = 0
         with get_connection() as conn:
             for r in rows:
                 try:
-                    event_id = r.get("event_id") or (
-                        f"{season}_W{week}_{r.get('away_team', 'TBD')}_at_"
-                        f"{r.get('home_team', r.get('team', 'TBD'))}"
+                    # A key that joins to no game is worse than a rejected row:
+                    # it looks joinable and silently drops out of every kickoff
+                    # join downstream.
+                    event_id = resolve_event_id(
+                        season,
+                        week,
+                        home_team=r.get("home_team"),
+                        away_team=r.get("away_team"),
+                        existing=r.get("event_id"),
                     )
                     execute(
                         """
@@ -716,9 +777,22 @@ class NFLPropScraper:
                         conn=conn,
                     )
                     saved += 1
+                except UnresolvableEventError as e:
+                    unresolved += 1
+                    logger.warning("Dropping odds row for %s: no game key (%s)", r.get("player"), e)
                 except Exception as e:
                     logger.warning("Save weekly odds failed for %s: %s", r.get("player"), e)
             conn.commit()
+        if unresolved:
+            # Systematic key failure drops every row; at per-row warning level
+            # that reads as normal operation.
+            logger.error(
+                "Dropped %s of %s odds rows with no resolvable game key for %s week %s",
+                unresolved,
+                len(rows),
+                season,
+                week,
+            )
         return saved
 
     def run_weekly_update(

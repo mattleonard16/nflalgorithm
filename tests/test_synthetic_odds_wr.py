@@ -41,6 +41,8 @@ def test_weekly_scraper_persists_canonical_timestamped_odds(monkeypatch):
     saved = scraper.save_weekly_odds(
         [
             {
+                # The provider's opaque id must not be persisted: it joins to no
+                # game. The matchup is what identifies the event.
                 "event_id": "event-1",
                 "player_id": "BUF_alpha_receiver",
                 "player": "Alpha Receiver",
@@ -51,6 +53,8 @@ def test_weekly_scraper_persists_canonical_timestamped_odds(monkeypatch):
                 "line": 55.5,
                 "over_odds": -110,
                 "under_odds": -105,
+                "home_team": "BUF",
+                "away_team": "KC",
             }
         ],
         week=1,
@@ -63,7 +67,7 @@ def test_weekly_scraper_persists_canonical_timestamped_odds(monkeypatch):
     assert "INSERT INTO weekly_odds" in query
     assert "weekly_prop_lines" not in query
     assert params[:8] == (
-        "event-1",
+        "2026_01_KC_BUF",
         2026,
         1,
         "BUF_alpha_receiver",
@@ -74,6 +78,53 @@ def test_weekly_scraper_persists_canonical_timestamped_odds(monkeypatch):
     )
     assert params[8] == -105
     assert isinstance(params[9], str)
+
+
+def test_weekly_scraper_drops_rows_with_no_resolvable_game(monkeypatch):
+    """A row that cannot be tied to a game is dropped, not stored under a
+    key that silently joins to nothing."""
+    from scripts import prop_line_scraper
+
+    statements: list[tuple[str, tuple[object, ...]]] = []
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr(prop_line_scraper, "get_connection", lambda: FakeConnection())
+    monkeypatch.setattr(
+        prop_line_scraper,
+        "execute",
+        lambda query, params, conn: statements.append((query, params)),
+    )
+
+    scraper = prop_line_scraper.NFLPropScraper.__new__(prop_line_scraper.NFLPropScraper)
+    saved = scraper.save_weekly_odds(
+        [
+            {
+                "event_id": "event-1",
+                "player_id": "BUF_alpha_receiver",
+                "player": "Alpha Receiver",
+                "team": "BUF",
+                "book": "Book",
+                "stat": "receiving_yards",
+                "line": 55.5,
+                "over_odds": -110,
+                "under_odds": -105,
+            }
+        ],
+        week=1,
+        season=2026,
+    )
+
+    assert saved == 0
+    assert statements == []
 
 
 def test_weekly_event_selection_uses_entire_requested_schedule() -> None:
