@@ -63,6 +63,32 @@ def test_nans_do_not_count_toward_the_minimum():
     assert volatility_score_or_none([50.0, 48.0, 52.0, 47.0]) is not None
 
 
+def test_scored_players_receive_distinguishable_widening():
+    """End-to-end: writer and reader together must vary sigma by player.
+
+    Guards the regression this pair was built to fix. The model that writes
+    volatility_score is gitignored, so CI cannot see the write itself — but
+    it can pin the contract: scoring a mix of steady and boom-bust players
+    and widening them must NOT collapse onto one multiplier the way an
+    all-NULL column plus fillna(50.0) did.
+    """
+    steady = [50.0, 52.0, 48.0, 51.0, 49.0]
+    boom_bust = [5.0, 0.0, 140.0, 3.0, 10.0]
+    unmeasurable = [40.0]
+
+    scores = pd.Series(
+        [volatility_score_or_none(h) for h in (steady, boom_bust, unmeasurable)]
+    )
+    sigma = pd.Series([10.0, 10.0, 10.0])
+
+    widened, missing = apply_volatility_widening(sigma, scores, penalty_weight=0.15)
+
+    assert missing == 1
+    assert widened.iloc[2] == 10.0                    # unmeasurable: untouched
+    assert widened.iloc[1] > widened.iloc[0] > 10.0   # boom-bust widened most
+    assert widened.nunique() == 3                     # not one flat multiplier
+
+
 # ======================================================================
 # Column-wise widening: a missing score is not a middling score
 # ======================================================================
