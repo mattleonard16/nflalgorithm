@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from schema_migrations import MigrationManager
-from utils.db import execute, read_dataframe
+from utils.db import read_dataframe
 
 
 @pytest.fixture()

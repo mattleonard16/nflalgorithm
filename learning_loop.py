@@ -11,11 +11,10 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 
 from config import config
-from utils.db import execute, executemany, get_connection, read_dataframe
+from utils.db import executemany, read_dataframe
 from utils.nfl_markets import MARKET_TO_STAT
 
 logger = logging.getLogger(__name__)

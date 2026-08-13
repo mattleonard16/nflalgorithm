@@ -21,6 +21,36 @@ MAX_PROJECTION_AGE = pd.Timedelta(days=7)
 PROJECTION_KEYS = ("season", "week", "player_id", "market")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
+# Absolute per-position MAE ceilings, in the units of the projected stat.
+# These are yardage-dominated markets, so the ceilings sit far above
+# config.model.target_mae; a position without an entry falls back to it.
+POSITION_MAE_THRESHOLDS = {
+    "QB": 18.0,
+    "RB": 12.0,
+    "WR": 12.0,
+    "TE": 9.0,
+}
+
+# Below this many eligible projections a position MAE is noise. Such positions
+# are reported as skipped, never counted as passing.
+MIN_POSITION_SAMPLE = 30
+
+UNKNOWN_POSITION = "UNKNOWN"
+
+
+def _default_position_threshold() -> float:
+    """Fallback ceiling for a position with no explicit threshold.
+
+    `config` is a gitignored proprietary module, so it is imported lazily:
+    this file's gate logic must remain importable in CI, where config.py is
+    absent.
+    """
+    try:
+        from config import config
+    except ImportError:
+        return 3.0
+    return float(config.model.target_mae)
+
 
 def _timestamps(values: pd.Series) -> pd.Series:
     return pd.to_datetime(values, errors="coerce", utc=True)
@@ -63,6 +93,18 @@ def _metric_group(rows: pd.DataFrame) -> dict[str, Any]:
         "rmse": float(np.sqrt(np.mean(np.square(rows["signed_error"])))),
         "mean_bias": float(rows["signed_error"].mean()),
     }
+
+
+def _player_positions(actuals: pd.DataFrame) -> pd.DataFrame:
+    """Return one position per player-week, for grouping projection errors."""
+    keys = ["season", "week", "player_id"]
+    if actuals.empty or "position" not in actuals.columns:
+        return pd.DataFrame(columns=keys + ["position"])
+    positions = actuals[keys + ["position"]].drop_duplicates(keys, keep="last").copy()
+    positions["position"] = (
+        positions["position"].astype("string").str.upper().fillna(UNKNOWN_POSITION)
+    )
+    return positions
 
 
 def _evaluation_scope(*frames: pd.DataFrame) -> dict[str, Any]:
@@ -166,6 +208,9 @@ def evaluate_projections(
             kickoffs["kickoff_utc"] = _timestamps(kickoffs["kickoff_utc"])
         frame = frame.merge(kickoffs, on=["season", "week", "team"], how="left")
         frame = frame.merge(melt_actuals(actuals), on=list(PROJECTION_KEYS), how="left")
+        # weekly_projections carries no position, so attach it from the same
+        # actuals rows rather than migrating the projections table.
+        frame = frame.merge(_player_positions(actuals), on=["season", "week", "player_id"], how="left")
         frame["freshness_failure"] = frame.apply(_freshness_failure, axis=1)
         failures = Counter(frame["freshness_failure"].dropna().astype(str))
         if failures:
@@ -186,6 +231,7 @@ def evaluate_projections(
         overall = _metric_group(eligible)
         by_market: dict[str, Any] = {}
         by_model_version: dict[str, Any] = {}
+        by_position: dict[str, Any] = {}
     else:
         overall = _metric_group(eligible)
         by_market = {
@@ -195,6 +241,15 @@ def evaluate_projections(
         by_model_version = {
             str(name): _metric_group(group)
             for name, group in eligible.groupby("model_version", dropna=False)
+        }
+        positions = (
+            eligible["position"]
+            if "position" in eligible.columns
+            else pd.Series(pd.NA, index=eligible.index)
+        )
+        by_position = {
+            str(name): _metric_group(group)
+            for name, group in eligible.groupby(positions.fillna(UNKNOWN_POSITION), dropna=False)
         }
 
     return {
@@ -211,7 +266,102 @@ def evaluate_projections(
             **overall,
             "by_market": by_market,
             "by_model_version": by_model_version,
+            "by_position": by_position,
         },
+    }
+
+
+def check_position_mae(
+    report: Mapping[str, Any],
+    thresholds: Mapping[str, float] | None = None,
+    *,
+    min_sample: int = MIN_POSITION_SAMPLE,
+) -> dict[str, Any]:
+    """Fail a candidate whose per-position MAE exceeds its absolute ceiling.
+
+    The `compare` path only asks whether a candidate beats a baseline, so a
+    model can regress for years while still "improving". This is the absolute
+    floor: each position must project within its own ceiling.
+
+    Positions with fewer than `min_sample` eligible projections are reported in
+    `skipped` — too little data to judge, and never silently counted as a pass.
+    A position present with a missing MAE is a blocker, not a skip.
+
+    Args:
+        report: An `evaluate_projections` report.
+        thresholds: Per-position MAE ceilings. Defaults to
+            POSITION_MAE_THRESHOLDS; positions absent from it fall back to
+            `config.model.target_mae`.
+        min_sample: Minimum eligible projections for a position to be judged.
+
+    Returns:
+        `{"passed", "blockers", "skipped", "by_position"}`.
+    """
+    ceilings = dict(POSITION_MAE_THRESHOLDS if thresholds is None else thresholds)
+    fallback = _default_position_threshold()
+
+    metrics = report.get("metrics")
+    by_position = metrics.get("by_position") if isinstance(metrics, Mapping) else None
+
+    blockers: list[str] = []
+    skipped: list[dict[str, Any]] = []
+    results: dict[str, Any] = {}
+
+    if not isinstance(by_position, Mapping) or not by_position:
+        return {
+            "schema_version": 1,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "passed": False,
+            "blockers": ["evaluation report has no per-position metrics"],
+            "skipped": skipped,
+            "by_position": results,
+        }
+
+    for position in sorted(by_position):
+        group = by_position[position]
+        if not isinstance(group, Mapping):
+            blockers.append(f"{position} metrics are malformed")
+            continue
+
+        threshold = float(ceilings.get(position, fallback))
+        count = int(group.get("projection_count") or 0)
+        mae = group.get("mae")
+
+        if count < min_sample:
+            skipped.append(
+                {
+                    "position": position,
+                    "projection_count": count,
+                    "reason": f"below minimum sample of {min_sample}",
+                }
+            )
+            continue
+
+        if mae is None:
+            blockers.append(f"{position} MAE is missing")
+            continue
+
+        results[position] = {
+            "mae": float(mae),
+            "threshold": threshold,
+            "projection_count": count,
+        }
+        if float(mae) > threshold:
+            blockers.append(
+                f"{position} MAE {float(mae):.2f} exceeds threshold {threshold:.2f} "
+                f"over {count} projections"
+            )
+
+    if not results and not blockers:
+        blockers.append("no position met the minimum sample size to be evaluated")
+
+    return {
+        "schema_version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "passed": not blockers,
+        "blockers": blockers,
+        "skipped": skipped,
+        "by_position": results,
     }
 
 
@@ -337,7 +487,7 @@ def _load_inputs(season: int, weeks: Iterable[int]) -> tuple[pd.DataFrame, ...]:
     )
     actual_columns = ", ".join(sorted(set(MARKET_TO_STAT.values())))
     actuals = read_dataframe(
-        f"SELECT season, week, player_id, {actual_columns} "
+        f"SELECT season, week, player_id, position, {actual_columns} "
         f"FROM player_stats_enhanced WHERE {where}",
         params=params,
     )
@@ -371,6 +521,10 @@ def main() -> None:
     compare.add_argument("--min-improvement-pct", type=float, default=1.0)
     compare.add_argument("--max-market-regression-pct", type=float, default=5.0)
     compare.add_argument("--output", type=Path, required=True)
+    mae_gate = subparsers.add_parser("mae-gate")
+    mae_gate.add_argument("--season", type=int, required=True)
+    mae_gate.add_argument("--week", type=int, required=True)
+    mae_gate.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
     if args.command == "evaluate":
@@ -378,6 +532,20 @@ def main() -> None:
             *_load_inputs(args.season, args.weeks),
             candidate_sha=_git_sha(),
         )
+    elif args.command == "mae-gate":
+        evaluation = evaluate_projections(
+            *_load_inputs(args.season, [args.week]),
+            candidate_sha=_git_sha(),
+        )
+        report = check_position_mae(evaluation)
+        # The evaluation's own blockers (provenance, freshness, coverage) gate
+        # the numbers the MAE check reads, so they must fail the gate too.
+        if evaluation["passed"] is not True:
+            report["blockers"] = [
+                *(f"evaluation blocker: {item}" for item in evaluation["blockers"]),
+                *report["blockers"],
+            ]
+            report["passed"] = False
     else:
         report = compare_reports(
             json.loads(args.baseline.read_text(encoding="utf-8")),
@@ -385,7 +553,8 @@ def main() -> None:
             min_improvement_pct=args.min_improvement_pct,
             max_market_regression_pct=args.max_market_regression_pct,
         )
-    _write(args.output, report)
+    if args.output is not None:
+        _write(args.output, report)
     print(json.dumps(report, indent=2, default=str))
     if not report["passed"]:
         raise SystemExit(1)

@@ -25,18 +25,9 @@ function ExposureBar({
       <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden relative">
         <div
           className={`h-full rounded-full transition-all ${
-            isOver
-              ? "bg-gradient-to-r from-red-500 to-red-400"
-              : pct > 70
-                ? "bg-gradient-to-r from-amber-500 to-amber-400"
-                : "bg-gradient-to-r from-emerald-500 to-emerald-400"
+            isOver ? "bg-red-500" : "bg-slate-500"
           }`}
           style={{ width: `${pct}%` }}
-        />
-        {/* Limit indicator line */}
-        <div
-          className="absolute top-0 bottom-0 w-px bg-slate-400/50"
-          style={{ left: "100%" }}
         />
       </div>
       <span
@@ -114,34 +105,24 @@ export function RiskPanel({
           {correlations.correlation_groups.map((group) => (
             <div
               key={group.group}
-              className="rounded border border-slate-700/40 bg-slate-800/20 p-2"
+              className="border-l-2 border-slate-700/60 pl-3 py-0.5"
             >
-              <div className="flex items-center gap-2 mb-1">
-                <span
-                  className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
-                    group.type === "pos"
-                      ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                      : group.type === "neg"
-                        ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
-                        : "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                  }`}
-                >
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
                   {group.type === "pos"
-                    ? "POS CORR"
+                    ? "Pos Corr"
                     : group.type === "neg"
-                      ? "NEG CORR"
-                      : "SAME TEAM"}
+                      ? "Neg Corr"
+                      : "Same Team"}
                 </span>
                 <span className="text-[10px] text-slate-500 font-[family-name:var(--font-jetbrains)]">
                   {group.combined_stake.toFixed(2)}u combined
                 </span>
               </div>
-              <div className="flex flex-wrap gap-1">
+              <div className="text-[11px] text-slate-300 leading-relaxed">
                 {group.players.map((p, i) => (
-                  <span
-                    key={`${p.player_id}-${p.market}-${i}`}
-                    className="text-[11px] text-slate-300 bg-slate-700/30 px-1.5 py-0.5 rounded"
-                  >
+                  <span key={`${p.player_id}-${p.market}-${i}`}>
+                    {i > 0 && <span className="text-slate-600">{" · "}</span>}
                     {p.player_name ?? p.player_id}{" "}
                     <span className="text-slate-500">
                       ({p.market?.replace(/_/g, " ")})
@@ -165,7 +146,7 @@ export function RiskPanel({
               key={`${w.player_id}-${i}`}
               className="flex items-center gap-2 text-[11px]"
             >
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+              <span className="text-red-400 font-medium">
                 {w.player_name ?? w.player_id}
               </span>
               <span className="text-slate-500">{w.warning}</span>

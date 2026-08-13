@@ -91,6 +91,42 @@ def test_weekly_fetch_propagates_missing_historical_feed(monkeypatch) -> None:
         ingest_real_nfl_data.fetch_weekly_stats([2025])
 
 
+def test_offseason_season_guard_is_treated_as_unpublished_feed() -> None:
+    """Offseason: stats-year loaders reject the upcoming season with a range
+    ValueError before any fetch. That is 'not published yet', not a crash."""
+    calls: list[list[int]] = []
+
+    def fake_loader(seasons: list[int]) -> _PandasResult:
+        calls.append(seasons)
+        season = seasons[0]
+        if season == 2026:
+            raise ValueError("Season must be between 2002 and 2025")
+        return _PandasResult(pd.DataFrame({"season": [season], "week": [1]}))
+
+    frame = ingest_real_nfl_data._load_nflverse_by_season(
+        fake_loader,
+        [2025, 2026],
+        "weekly rosters",
+        optional_missing_seasons=[2026],
+    )
+
+    assert calls == [[2025], [2026]]
+    assert frame["season"].tolist() == [2025]
+
+
+def test_weekly_fetch_propagates_season_guard_for_history_season(monkeypatch) -> None:
+    """The same range ValueError on a non-optional (history) season still fails loud."""
+
+    def fail_history(seasons: list[int]) -> _PandasResult:
+        raise ValueError("Season must be between 2002 and 2025")
+
+    monkeypatch.setattr(ingest_real_nfl_data.nfl, "get_current_season", lambda roster: 2026)
+    monkeypatch.setattr(ingest_real_nfl_data.nfl, "load_player_stats", fail_history)
+
+    with pytest.raises(ValueError, match="Season must be between"):
+        ingest_real_nfl_data.fetch_weekly_stats([2024])
+
+
 def test_schedule_fetch_propagates_current_season_outage(monkeypatch) -> None:
     def fail_schedule_fetch(seasons: list[int]) -> _PandasResult:
         raise ConnectionError("schedule service unavailable")
@@ -228,6 +264,15 @@ def test_ingest_seasons_persists_preseason_context_without_weekly_rows(monkeypat
         "kickoff_utc": "2026-09-11T00:20:00+00:00",
         "game_date": "2026-09-10",
         "venue": "Highmark Stadium",
+        # This fixture's schedule carries no market or weather columns, so the
+        # context columns come through null rather than failing the ingest.
+        "spread_line": None,
+        "total_line": None,
+        "temp": None,
+        "wind": None,
+        "roof": None,
+        "surface": None,
+        "div_game": None,
     }
     assert persisted["roster"].iloc[0]["gsis_id"] == "00-0039999"
 
@@ -339,6 +384,78 @@ def test_schedule_context_leaves_tba_kickoff_empty() -> None:
     games = ingest_real_nfl_data.create_games_from_schedule(schedule, through_week=1)
 
     assert games.iloc[0]["kickoff_utc"] is None
+
+
+def test_schedule_context_carries_market_and_conditions() -> None:
+    schedule = pd.DataFrame(
+        {
+            "season": [2026],
+            "week": [1],
+            "home_team": ["BUF"],
+            "away_team": ["BAL"],
+            "gameday": ["2026-09-10"],
+            "spread_line": [2.5],
+            "total_line": [48.0],
+            "temp": [68.0],
+            "wind": [9.0],
+            "roof": ["outdoors"],
+            "surface": ["grass"],
+            "div_game": [0],
+        }
+    )
+
+    row = ingest_real_nfl_data.create_games_from_schedule(schedule, through_week=1).iloc[0]
+
+    assert row["spread_line"] == 2.5
+    assert row["total_line"] == 48.0
+    assert row["temp"] == 68.0
+    assert row["wind"] == 9.0
+    assert row["roof"] == "outdoors"
+    assert row["div_game"] == 0
+
+
+def test_schedule_context_leaves_indoor_weather_null() -> None:
+    """A dome has no outdoor temperature. Imputing one would teach the model
+    that domes are cold and windy."""
+    schedule = pd.DataFrame(
+        {
+            "season": [2026],
+            "week": [1],
+            "home_team": ["DET"],
+            "away_team": ["CHI"],
+            "gameday": ["2026-09-10"],
+            "spread_line": [-1.0],
+            "total_line": [45.0],
+            "temp": [None],
+            "wind": [None],
+            "roof": ["dome"],
+        }
+    )
+
+    row = ingest_real_nfl_data.create_games_from_schedule(schedule, through_week=1).iloc[0]
+
+    assert pd.isna(row["temp"])
+    assert pd.isna(row["wind"])
+    assert row["spread_line"] == -1.0
+
+
+def test_schedule_context_tolerates_a_feed_without_context_columns() -> None:
+    """Older seasons omit these; a missing optional feature must not fail the
+    whole ingest."""
+    schedule = pd.DataFrame(
+        {
+            "season": [2026],
+            "week": [1],
+            "home_team": ["BUF"],
+            "away_team": ["BAL"],
+            "gameday": ["2026-09-10"],
+        }
+    )
+
+    games = ingest_real_nfl_data.create_games_from_schedule(schedule, through_week=1)
+
+    assert pd.isna(games.iloc[0]["spread_line"])
+    assert games.iloc[0]["home_team"] == "BUF"
 
 
 def test_nonempty_schedule_with_missing_contract_fails_closed() -> None:

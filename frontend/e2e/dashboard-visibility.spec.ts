@@ -20,8 +20,9 @@ test.describe("Value Dashboard", () => {
 
     await expect(page.getByRole("heading", { name: "Value Dashboard", level: 1 })).toBeVisible();
 
-    await expect(page.getByText(/Season \d{4}/)).toBeVisible();
-    await expect(page.getByText(/Week \d+/)).toBeVisible();
+    // Target the header subtitle specifically — "Week N" also appears in the
+    // sidebar performance widget, which would trip strict mode.
+    await expect(page.getByText(/Season \d{4} · Week \d+/)).toBeVisible();
 
     await expect(page.locator("body")).toBeVisible();
 

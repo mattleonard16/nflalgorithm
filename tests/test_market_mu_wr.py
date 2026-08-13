@@ -10,7 +10,6 @@ Issue 3: Ensure WRs produce non-zero mu using:
 from types import SimpleNamespace
 
 import pandas as pd
-import pytest
 
 from data_pipeline import DataPipeline
 

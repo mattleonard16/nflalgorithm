@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import shutil
 import sqlite3
-import tempfile
 from pathlib import Path
 
 import joblib
@@ -562,7 +560,9 @@ class TestTrainAndPredict:
             "_load_player_history_for_rolling",
             lambda current, season, week: pd.DataFrame(),
         )
-        monkeypatch.setattr(weekly_module, "compute_player_sigma", lambda history, market: 10.0)
+        monkeypatch.setattr(
+            weekly_module, "compute_player_sigma", lambda history, market, **kwargs: 10.0
+        )
         monkeypatch.setattr(weekly_module, "get_defense_multiplier", lambda **kwargs: 1.0)
         monkeypatch.setattr(weekly_module, "_write_predictions", lambda *args: None)
 

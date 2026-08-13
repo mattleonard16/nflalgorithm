@@ -10,14 +10,12 @@ Covers:
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
 from agents import AgentReport, VALID_RECOMMENDATIONS, validate_report
-from agents.base_agent import BaseAgent
 from agents.coordinator import (
     CONSENSUS_THRESHOLD,
     _group_reports,
@@ -25,12 +23,10 @@ from agents.coordinator import (
     run_all_agents,
 )
 from agents.odds_agent import (
-    OddsAgent,
     _best_prices,
     _detect_steam_moves,
 )
 from agents.model_diagnostics_agent import (
-    ModelDiagnosticsAgent,
     _flag_suspicious,
 )
 

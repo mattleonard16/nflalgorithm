@@ -19,7 +19,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from schema_migrations import MigrationManager
-from utils.db import execute, executemany, read_dataframe
+from utils.db import executemany, read_dataframe
 
 
 # ---------------------------------------------------------------------------

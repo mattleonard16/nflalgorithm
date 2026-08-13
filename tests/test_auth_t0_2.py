@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 import tempfile
 from pathlib import Path
 
-import bcrypt
 import pytest
 from fastapi.testclient import TestClient
 

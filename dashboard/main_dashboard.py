@@ -17,7 +17,6 @@ import streamlit as st
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
 
-from config import config
 from utils.db import read_dataframe
 from materialized_value_view import materialize_week
 from utils.player_id_utils import canonicalize_team

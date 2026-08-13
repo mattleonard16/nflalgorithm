@@ -24,6 +24,14 @@ jobs:
         env:
           DB_BACKEND: sqlite
           SQLITE_DB_PATH: nfl_data.db
+      # Gate logic only. CI has no projection data, so the real-data run lives in
+      # `make mae-gate`; this asserts the thresholds and skip rules stay correct.
+      - name: Check model quality gate logic
+        run: |
+          uv run python -m pytest tests/test_nfl_projection_evaluation.py -q
+        env:
+          DB_BACKEND: sqlite
+          SQLITE_DB_PATH: nfl_data.db
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:

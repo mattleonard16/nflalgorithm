@@ -7,7 +7,6 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 from config import config
@@ -70,7 +69,7 @@ def temp_db():
 
 
 def test_rank_weekly_value_emits_side_column(temp_db):
-    df = rank_weekly_value(2024, 1, min_edge=0.0, place=False)
+    df = rank_weekly_value(2024, 1, min_edge=0.0)
     assert "side" in df.columns
     assert (df["side"] == "over").all()
 
@@ -126,6 +125,30 @@ def test_materialized_view_pk_allows_both_sides(temp_db):
             "SELECT COUNT(*) FROM materialized_value_view WHERE event_id='evt3'"
         ).fetchone()[0]
     assert count == 2
+
+
+def test_materialize_week_return_matches_persisted_side_and_stake(temp_db):
+    """Return contract: the frame handed back carries side/confidence and the
+    same per-row stakes the view persisted."""
+    returned = materialize_week(2024, 1, min_edge=0.0)
+    assert not returned.empty
+    assert "side" in returned.columns
+    assert "confidence_score" in returned.columns
+    assert "confidence_tier" in returned.columns
+
+    with sqlite3.connect(temp_db) as conn:
+        rows = conn.execute(
+            "SELECT sportsbook, side, stake FROM materialized_value_view "
+            "WHERE season=? AND week=?",
+            (2024, 1),
+        ).fetchall()
+
+    assert len(rows) == len(returned)
+    persisted = {(r[0], r[1]): r[2] for r in rows}
+    for _, row in returned.iterrows():
+        assert persisted[(row["sportsbook"], row["side"])] == pytest.approx(
+            row["stake"]
+        )
 
 
 def test_grade_bet_under_pathway_works():

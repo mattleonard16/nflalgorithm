@@ -87,6 +87,15 @@ class TestMonteCarlDrawdown:
         r2 = monte_carlo_drawdown(*args, iterations=100)
         assert r1 == r2
 
+    def test_high_kelly_produces_larger_drawdown(self):
+        from utils.risk_utils import monte_carlo_drawdown
+
+        probs = np.array([0.55, 0.55])
+        odds = np.array([-110, -110])
+        low = monte_carlo_drawdown(np.array([0.01, 0.01]), probs, odds, iterations=500)
+        high = monte_carlo_drawdown(np.array([0.10, 0.10]), probs, odds, iterations=500)
+        assert high["mean_drawdown"] > low["mean_drawdown"]
+
 
 class TestRiskAdjustedKelly:
     def test_no_drawdown_returns_original(self):

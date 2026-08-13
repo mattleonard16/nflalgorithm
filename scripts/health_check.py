@@ -6,7 +6,6 @@ import argparse
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Dict
-import json
 
 from config import config
 from scripts.monitoring import system_monitor, daily_reporter

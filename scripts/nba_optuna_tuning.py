@@ -38,7 +38,6 @@ from models.nba.stat_model import (
 )
 from models.nba.minutes_model import (
     FEATURE_COLS as MINUTES_FEATURE_COLS,
-    _build_model as _build_minutes_model,
     _engineer_features as _engineer_minutes_features,
     _load_game_logs as _load_minutes_game_logs,
     _lookup_opp_pace,

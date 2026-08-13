@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight doctor doctor-production doctor-season migrate test lint format validate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade production-run health health-check
+.PHONY: help list-targets install install-uv install-venv runtime-preflight doctor doctor-production doctor-season migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade production-run health health-check
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -199,6 +199,15 @@ validate:
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
 	echo "Evaluation complete in $${duration}s."
+
+# Absolute per-position MAE gate. Exits non-zero when a position regresses past
+# its ceiling, so this is safe to chain into a release check.
+mae-gate:
+	$(call require_season_week)
+	@echo "Checking per-position MAE for season=$(SEASON) week=$(WEEK) with $(ENV_TYPE)..."
+	$(DB_ENV) $(PYTHON) -m scripts.evaluate_nfl_projections mae-gate \
+		--season $(SEASON) --week $(WEEK) \
+		--output logs/metrics/nfl-mae-gate-$(SEASON)-w$(WEEK).json
 
 # Hyperparameter optimization with environment detection
 optimize:

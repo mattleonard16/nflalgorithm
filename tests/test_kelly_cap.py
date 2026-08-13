@@ -1,12 +1,13 @@
 """Tests for T1 #13: Kelly cap in NFL ranking path.
 
-NFR-6 gate: behavior must be off by default and toggle via
-`config.features.kelly_cap_enabled` (env NFL_FEATURE_KELLY_CAP).
+The cap toggles via `config.features.kelly_cap_enabled`
+(env NFL_FEATURE_KELLY_CAP). Originally gated default-off under NFR-6;
+flipped to default-ON as a user-approved behavior change (uncapped full
+Kelly oversized real cards, e.g. 2025 W22).
 """
 
 from __future__ import annotations
 
-import os
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -103,11 +104,33 @@ def test_kelly_cap_flag_on_stake_reflects_capped_fraction(temp_db_high_edge, mon
     assert row["stake"] == pytest.approx(row["kelly_fraction"] * config.betting.bankroll, abs=1e-9)
 
 
-def test_kelly_cap_default_off(monkeypatch):
-    """NFR-6 gate: flag must default to False when env is unset."""
+def test_kelly_cap_default_on(monkeypatch):
+    """Flag defaults to True when env is unset.
+
+    Deliberate, user-approved flip of the original NFR-6 default-off gate:
+    uncapped full Kelly oversized real cards (2025 W22 staked 3233u on a
+    1000u bankroll). NFL_FEATURE_KELLY_CAP=0 still disables the cap.
+
+    Mirrored in tests/test_risk_manager.py::TestKellyCapFlagDefault so CI
+    still covers it (conftest skips this file) — update both together.
+    """
     import importlib.util
 
     monkeypatch.delenv("NFL_FEATURE_KELLY_CAP", raising=False)
+
+    cfg_path = Path(__file__).parent.parent / "config" / "runtime.py"
+    spec = importlib.util.spec_from_file_location("_config_under_test", cfg_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.config.features.kelly_cap_enabled is True
+
+
+def test_kelly_cap_env_can_disable(monkeypatch):
+    """NFL_FEATURE_KELLY_CAP=0 turns the cap off."""
+    import importlib.util
+
+    monkeypatch.setenv("NFL_FEATURE_KELLY_CAP", "0")
 
     cfg_path = Path(__file__).parent.parent / "config" / "runtime.py"
     spec = importlib.util.spec_from_file_location("_config_under_test", cfg_path)

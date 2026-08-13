@@ -12,13 +12,13 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from agents.coordinator import run_all_agents
-from confidence_engine import compute_confidence_score, score_plays
+from confidence_engine import score_plays
 from config import config
 from risk_manager import assess_risk
 from utils.db import read_dataframe

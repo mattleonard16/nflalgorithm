@@ -181,47 +181,56 @@ def compute_exposure(df: pd.DataFrame, bankroll: float) -> pd.DataFrame:
     )
 
 
-# ── Historical correlation matrix ─────────────────────────────────────
+# ── Portfolio-level stake normalization ──────────────────────────────────────
 
-def build_correlation_matrix(
-    season: int,
-    week: Optional[int] = None,
+def normalize_portfolio_stakes(
+    df: pd.DataFrame,
+    bankroll: float,
+    max_total_fraction: float = 1.0,
 ) -> pd.DataFrame:
-    """Compute correlation matrix of stat columns from player_stats_enhanced.
+    """Scale stakes so total stake <= bankroll * max_total_fraction.
 
-    Uses historical data up to (but not including) *week* so we only look
-    at information that was available before prediction time.
+    Per-bet Kelly capping bounds each bet individually, but a large card can
+    still sum past the bankroll. When it does, every ``stake`` (and the
+    stake-derived ``kelly_fraction``, when present) is multiplied by the same
+    factor so the total lands exactly on the limit — relative sizing across
+    the card is preserved. Cards at or under the limit are returned
+    unchanged, as are empty or zero-stake frames. Stakes must be
+    non-negative and non-NaN; anything else raises ValueError, because a
+    proportional scale over mixed-sign or NaN stakes cannot guarantee the
+    cap holds per bet.
+
+    This is a global constraint on the whole card: it must run after all
+    rows for the week have been ranked, never per-row. Returns a *new*
+    DataFrame; the caller's frame is not mutated.
     """
-    stat_cols = [
-        "rushing_yards",
-        "receiving_yards",
-        "receptions",
-        "targets",
-        "air_yards",
-    ]
-    col_str = ", ".join(stat_cols)
-
-    if week is not None:
-        query = (
-            f"SELECT {col_str} FROM player_stats_enhanced "
-            f"WHERE season = ? AND week < ?"
+    if bankroll <= 0:
+        raise ValueError(f"bankroll must be positive, got {bankroll}")
+    if max_total_fraction <= 0:
+        raise ValueError(
+            f"max_total_fraction must be positive, got {max_total_fraction}"
         )
-        params: tuple = (season, week)
-    else:
-        query = (
-            f"SELECT {col_str} FROM player_stats_enhanced WHERE season = ?"
-        )
-        params = (season,)
-
-    try:
-        df = read_dataframe(query, params=params)
-    except Exception:
-        return pd.DataFrame()
-
     if df.empty:
-        return pd.DataFrame()
+        return df.copy()
 
-    return df[stat_cols].corr()
+    stakes = df["stake"].astype(float)
+    invalid = stakes.isna() | (stakes < 0)
+    if invalid.any():
+        raise ValueError(
+            "stakes must be non-negative and non-NaN to enforce the "
+            f"portfolio cap; offending values: {stakes[invalid].tolist()}"
+        )
+
+    total = float(stakes.sum())
+    limit = bankroll * max_total_fraction
+    if total <= 0 or total <= limit:
+        return df.copy()
+
+    scale = limit / total
+    scaled = {"stake": stakes * scale}
+    if "kelly_fraction" in df.columns:
+        scaled["kelly_fraction"] = df["kelly_fraction"].astype(float) * scale
+    return df.assign(**scaled)
 
 
 # ── Integration entry point ───────────────────────────────────────────

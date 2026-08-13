@@ -6,15 +6,14 @@ All NBA.com calls are mocked — no network required.
 
 from __future__ import annotations
 
-import sys
 from datetime import date, timedelta
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
 
 from schema_migrations import MigrationManager
-from utils.db import execute, read_dataframe
+from utils.db import read_dataframe
 
 
 @pytest.fixture()

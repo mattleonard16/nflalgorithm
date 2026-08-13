@@ -39,8 +39,8 @@ export function PerformanceWidget({ collapsed = false }: PerformanceWidgetProps)
         return (
             <div className="px-4 py-3">
                 <div className="animate-pulse space-y-2">
-                    <div className="h-4 bg-zinc-800 rounded w-3/4"></div>
-                    <div className="h-3 bg-zinc-800 rounded w-1/2"></div>
+                    <div className="h-4 bg-slate-800 rounded w-3/4"></div>
+                    <div className="h-3 bg-slate-800 rounded w-1/2"></div>
                 </div>
             </div>
         );
@@ -55,7 +55,7 @@ export function PerformanceWidget({ collapsed = false }: PerformanceWidgetProps)
             {/* Header */}
             <button
                 onClick={() => setExpanded(!expanded)}
-                className="flex items-center justify-between w-full px-3 py-2 text-xs font-medium text-zinc-500 uppercase tracking-wider hover:text-zinc-400 transition-colors"
+                className="flex items-center justify-between w-full px-3 py-2 text-xs font-medium text-slate-500 uppercase tracking-wider hover:text-slate-400 transition-colors"
             >
                 <span>Recent Performance</span>
                 {expanded ? (
@@ -80,13 +80,15 @@ export function PerformanceWidget({ collapsed = false }: PerformanceWidgetProps)
 }
 
 function WeekCard({ week }: { week: WeeklySummaryItem }) {
-    const hasResults = week.wins + week.losses > 0;
+    const decided = week.wins + week.losses;
+    const hasResults = decided > 0;
+    const winRate = hasResults ? (week.wins / decided) * 100 : 0;
     const isPositive = week.roi_pct > 0;
 
     return (
-        <div className="px-3 py-2 rounded-lg bg-zinc-900/50 border border-zinc-800">
+        <div className="px-3 py-2 rounded-lg bg-slate-900/50 border border-slate-800">
             <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium text-zinc-200">
+                <span className="text-sm font-medium text-slate-200">
                     Week {week.week}
                 </span>
                 {hasResults ? (
@@ -105,37 +107,33 @@ function WeekCard({ week }: { week: WeeklySummaryItem }) {
                         {week.roi_pct.toFixed(1)}%
                     </span>
                 ) : (
-                    <span className="text-xs text-zinc-500">Pending</span>
+                    <span className="text-xs text-slate-500">Pending</span>
                 )}
             </div>
 
             {hasResults ? (
                 <>
-                    <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                    <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
                         <span>
                             {week.wins}-{week.losses}
                             {week.pushes > 0 && `-${week.pushes}`}
                         </span>
-                        <span>{week.win_rate.toFixed(0)}% win</span>
+                        <span>{winRate.toFixed(0)}% win</span>
                     </div>
                     {/* Progress bar */}
-                    <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
                         <div
                             className={cn(
                                 "h-full rounded-full transition-all",
-                                week.win_rate >= 60
-                                    ? "bg-emerald-500"
-                                    : week.win_rate >= 50
-                                        ? "bg-yellow-500"
-                                        : "bg-red-500"
+                                winRate >= 50 ? "bg-emerald-500" : "bg-red-500"
                             )}
-                            style={{ width: `${Math.min(week.win_rate, 100)}%` }}
+                            style={{ width: `${Math.min(winRate, 100)}%` }}
                         />
                     </div>
                 </>
             ) : (
-                <div className="text-xs text-zinc-500">
-                    {week.total_picks} picks awaiting results
+                <div className="text-xs text-slate-500">
+                    {week.total_bets} picks awaiting results
                 </div>
             )}
         </div>
@@ -147,7 +145,7 @@ function EdgeTierSummary({ weeks }: { weeks: WeeklySummaryItem[] }) {
     const tierStats = new Map<string, { wins: number; losses: number }>();
 
     for (const week of weeks) {
-        for (const tier of week.by_edge_tier) {
+        for (const tier of week.by_edge_tier ?? []) {
             const existing = tierStats.get(tier.tier) || { wins: 0, losses: 0 };
             tierStats.set(tier.tier, {
                 wins: existing.wins + tier.wins,
@@ -173,27 +171,23 @@ function EdgeTierSummary({ weeks }: { weeks: WeeklySummaryItem[] }) {
     }
 
     return (
-        <div className="mt-3 px-3 py-2 rounded-lg bg-zinc-900/30 border border-zinc-800/50">
-            <div className="text-xs font-medium text-zinc-500 mb-2">By Edge Tier</div>
+        <div className="mt-3 px-3 py-2 rounded-lg bg-slate-900/30 border border-slate-800/50">
+            <div className="text-xs font-medium text-slate-500 mb-2">By Edge Tier</div>
             <div className="space-y-1">
                 {tiers.map((tier) => (
                     <div
                         key={tier.tier}
                         className="flex items-center justify-between text-xs"
                     >
-                        <span className="text-zinc-400">{tier.tier}</span>
+                        <span className="text-slate-400">{tier.tier}</span>
                         <div className="flex items-center gap-2">
-                            <span className="text-zinc-300">
+                            <span className="text-slate-300">
                                 {tier.wins}-{tier.losses}
                             </span>
                             <span
                                 className={cn(
                                     "font-medium",
-                                    tier.winRate >= 60
-                                        ? "text-emerald-400"
-                                        : tier.winRate >= 50
-                                            ? "text-yellow-400"
-                                            : "text-red-400"
+                                    tier.winRate >= 50 ? "text-emerald-400" : "text-red-400"
                                 )}
                             >
                                 {tier.winRate.toFixed(0)}%

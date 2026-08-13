@@ -25,7 +25,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import numpy as np
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 

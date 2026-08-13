@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import Sequence
 
 import numpy as np
+import pandas as pd
 
 from config import config
 
@@ -107,6 +108,38 @@ def compute_volatility_score(
     return round(min(max(raw * 100, 0.0), 100.0), 2)
 
 
+MIN_WEEKS_FOR_VOLATILITY = 4
+
+
+def volatility_score_or_none(
+    weekly_yards: Sequence[float],
+    *,
+    min_weeks: int = MIN_WEEKS_FOR_VOLATILITY,
+) -> float | None:
+    """Score a player's boom-bust profile, or None when it cannot be measured.
+
+    This is the writer-side counterpart to :func:`apply_volatility_widening`.
+    ``compute_volatility_score`` answers 50.0 for a short series, which is a
+    reasonable neutral for a display but wrong for storage: persisted as a
+    score it is indistinguishable from a player genuinely measured at 50, and
+    the value engine would widen sigma by 7.5% on the strength of no evidence.
+
+    Returning None keeps "not measured" distinguishable from "measured as
+    middling" all the way to the database, where it lands as NULL.
+
+    A handful of games cannot separate a boom-bust player from a steady one,
+    so the bar is a partial season rather than the bare two points the
+    variance math needs.
+    """
+    arr = np.asarray(list(weekly_yards), dtype=float)
+    arr = arr[~np.isnan(arr)]
+
+    if len(arr) < max(2, min_weeks):
+        return None
+
+    return compute_volatility_score(arr)
+
+
 def widen_sigma_for_volatility(
     sigma: float,
     volatility_score: float,
@@ -125,3 +158,47 @@ def widen_sigma_for_volatility(
         )
     multiplier = 1.0 + penalty_weight * (volatility_score / 100.0)
     return sigma * multiplier
+
+
+def apply_volatility_widening(
+    sigma: pd.Series,
+    volatility_score: pd.Series | None,
+    *,
+    penalty_weight: float | None = None,
+) -> tuple[pd.Series, int]:
+    """Widen a column of sigmas, treating an absent score as no information.
+
+    Returns the widened sigmas and the number of rows that had no score.
+
+    The distinction this encodes: a *measured* score of 50 means the player
+    really is middling-volatile and has earned a 7.5% penalty. A *missing*
+    score means nothing was measured, and inflating sigma for it prices
+    ignorance as if it were risk. Both cases previously collapsed onto the
+    same ``fillna(50.0)``.
+
+    That mattered more than it looks: ``weekly_projections.volatility_score``
+    has never been written by the NFL model (0 of 1964 rows), so every NFL
+    sigma was being multiplied by a constant 1.075 — a uniform inflation of
+    every p_win and edge, dressed up as risk sensitivity. Rows with no score
+    are now left untouched, and the caller is told how many there were so a
+    silently unpopulated column cannot masquerade as a calibrated one.
+    """
+    sigma_numeric = pd.to_numeric(sigma, errors="coerce")
+
+    if volatility_score is None:
+        return sigma_numeric, len(sigma_numeric)
+
+    scores = pd.to_numeric(volatility_score, errors="coerce")
+    missing = scores.isna()
+
+    widened = sigma_numeric * (
+        1.0
+        + _resolve_penalty_weight(penalty_weight) * (scores.fillna(0.0) / 100.0)
+    )
+    return widened, int(missing.sum())
+
+
+def _resolve_penalty_weight(penalty_weight: float | None) -> float:
+    if penalty_weight is not None:
+        return penalty_weight
+    return getattr(config.betting, "volatility_penalty_weight", 0.15)

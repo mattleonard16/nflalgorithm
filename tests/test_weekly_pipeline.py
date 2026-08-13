@@ -38,6 +38,43 @@ def test_kelly_fraction_bounds():
     assert kelly_fraction(0.4, -110) == 0
 
 
+def _seed_schedule(db_path: str, season: int, weeks: range) -> None:
+    """Give the seeded players a game to belong to.
+
+    Odds snapshots are keyed by game, so a club with no scheduled game gets no
+    line at all. The pipeline seeds its own players but not a schedule, so
+    without this the roundtrip generates zero odds and every later assertion
+    is vacuously empty.
+    """
+    # Every club _seed_baseline_stats uses, so no seeded player is left without
+    # a game. A club missing here silently loses its odds rows.
+    clubs = [
+        "KC", "BUF", "PHI", "SF", "DAL", "MIA", "CIN", "DET",
+        "BAL", "MIN", "ATL", "CLE", "DEN", "JAX", "NYG", "SEA",
+    ]  # fmt: skip
+    pairs = [(clubs[i], clubs[i + 1]) for i in range(0, len(clubs), 2)]
+    # Plain INSERT, not INSERT OR IGNORE: a constraint failure here means the
+    # fixture is wrong, and silently seeding nothing would make every later
+    # assertion pass vacuously.
+    with sqlite3.connect(db_path) as conn:
+        for week in weeks:
+            for home, away in pairs:
+                conn.execute(
+                    "INSERT INTO games "
+                    "(game_id, season, week, home_team, away_team, game_date) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        f"{season}_{week:02d}_{away}_{home}",
+                        season,
+                        week,
+                        home,
+                        away,
+                        f"{season}-09-{min(week, 28):02d}",
+                    ),
+                )
+        conn.commit()
+
+
 def test_weekly_roundtrip_pipeline():
     tmp_db = with_temp_database()
     original_path = config.database.path
@@ -47,6 +84,7 @@ def test_weekly_roundtrip_pipeline():
     config.database.path = tmp_db
     try:
         MigrationManager(tmp_db).run()
+        _seed_schedule(tmp_db, 2023, range(1, 14))
         # The causal model needs prior weeks to derive pregame role estimates;
         # a single realized week is intentionally insufficient for training.
         for week in range(1, 14):
@@ -59,7 +97,7 @@ def test_weekly_roundtrip_pipeline():
         predictions = predict_week(2023, 13)
         assert not predictions.empty
 
-        ranked = rank_weekly_value(2023, 13, min_edge=0.0, place=False)
+        ranked = rank_weekly_value(2023, 13, min_edge=0.0)
         assert not ranked.empty
 
         materialize_week(2023, 13)

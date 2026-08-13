@@ -66,10 +66,52 @@ TEAM_ALIASES = {
     "LARAMS": "LAR",
     "LOSANGELESRAMS": "LAR",
     "STL": "LAR",
+    # nflverse schedules abbreviate the Rams as "LA"; the Chargers are always
+    # "LAC" there, so this is unambiguous for that source.
+    "LA": "LAR",
     "WSH": "WAS",
     "WFT": "WAS",
     "HST": "HOU",
     "HOUSTON": "HOU",
+    # Full club names, as sent by The Odds API ("Kansas City Chiefs"). The
+    # caller strips punctuation and spacing before lookup, so keys are the
+    # squashed uppercase form. Relocated clubs keep their former names so a
+    # historical feed still resolves.
+    "ARIZONACARDINALS": "ARI",
+    "ATLANTAFALCONS": "ATL",
+    "BALTIMORERAVENS": "BAL",
+    "BUFFALOBILLS": "BUF",
+    "CAROLINAPANTHERS": "CAR",
+    "CHICAGOBEARS": "CHI",
+    "CINCINNATIBENGALS": "CIN",
+    "CLEVELANDBROWNS": "CLE",
+    "DALLASCOWBOYS": "DAL",
+    "DENVERBRONCOS": "DEN",
+    "DETROITLIONS": "DET",
+    "GREENBAYPACKERS": "GB",
+    "HOUSTONTEXANS": "HOU",
+    "INDIANAPOLISCOLTS": "IND",
+    "JACKSONVILLEJAGUARS": "JAX",
+    "KANSASCITYCHIEFS": "KC",
+    "LASVEGASRAIDERS": "LV",
+    "OAKLANDRAIDERS": "LV",
+    "MIAMIDOLPHINS": "MIA",
+    "MINNESOTAVIKINGS": "MIN",
+    "NEWENGLANDPATRIOTS": "NE",
+    "NEWORLEANSSAINTS": "NO",
+    "NEWYORKGIANTS": "NYG",
+    "NEWYORKJETS": "NYJ",
+    "PHILADELPHIAEAGLES": "PHI",
+    "PITTSBURGHSTEELERS": "PIT",
+    "SANDIEGOCHARGERS": "LAC",
+    "SANFRANCISCO49ERS": "SF",
+    "SEATTLESEAHAWKS": "SEA",
+    "STLOUISRAMS": "LAR",
+    "TAMPABAYBUCCANEERS": "TB",
+    "TENNESSEETITANS": "TEN",
+    "WASHINGTONCOMMANDERS": "WAS",
+    "WASHINGTONFOOTBALLTEAM": "WAS",
+    "WASHINGTONREDSKINS": "WAS",
 }
 
 

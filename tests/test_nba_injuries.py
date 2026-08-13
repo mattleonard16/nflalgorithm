@@ -19,10 +19,9 @@ if "config" not in sys.modules:
     _mock_config.config.database.path = ":memory:"
     sys.modules["config"] = _mock_config
 
-from unittest.mock import patch, call
+from unittest.mock import patch
 
 import pandas as pd
-import pytest
 
 
 # ---------------------------------------------------------------------------

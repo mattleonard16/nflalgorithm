@@ -5,7 +5,13 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from scripts.evaluate_nfl_projections import compare_reports, evaluate_projections
+from scripts.evaluate_nfl_projections import (
+    MIN_POSITION_SAMPLE,
+    POSITION_MAE_THRESHOLDS,
+    check_position_mae,
+    compare_reports,
+    evaluate_projections,
+)
 
 
 def _inputs(
@@ -219,3 +225,79 @@ def test_candidate_comparison_requires_positive_improvement_threshold() -> None:
 
     assert comparison["passed"] is False
     assert "minimum improvement must be greater than zero" in comparison["blockers"]
+
+
+def _position_report(by_position: dict) -> dict:
+    """Minimal report shaped like evaluate_projections output."""
+    return {"schema_version": 1, "metrics": {"by_position": by_position}}
+
+
+def test_position_gate_passes_when_every_position_is_within_ceiling() -> None:
+    report = _position_report(
+        {
+            "WR": {"mae": 9.5, "projection_count": 120},
+            "RB": {"mae": 11.0, "projection_count": 90},
+        }
+    )
+
+    gate = check_position_mae(report)
+
+    assert gate["passed"] is True
+    assert gate["blockers"] == []
+    assert gate["by_position"]["WR"]["threshold"] == POSITION_MAE_THRESHOLDS["WR"]
+
+
+def test_position_gate_blocks_position_above_threshold() -> None:
+    report = _position_report(
+        {
+            "TE": {"mae": 14.25, "projection_count": 70},
+            "WR": {"mae": 9.5, "projection_count": 120},
+        }
+    )
+
+    gate = check_position_mae(report)
+
+    assert gate["passed"] is False
+    assert "TE MAE 14.25 exceeds threshold 9.00 over 70 projections" in gate["blockers"]
+
+
+def test_position_gate_skips_thin_samples_without_passing_them() -> None:
+    """A position below the sample floor is unjudged, not silently green."""
+    report = _position_report({"FB": {"mae": 99.0, "projection_count": 4}})
+
+    gate = check_position_mae(report)
+
+    assert gate["skipped"] == [
+        {
+            "position": "FB",
+            "projection_count": 4,
+            "reason": f"below minimum sample of {MIN_POSITION_SAMPLE}",
+        }
+    ]
+    assert gate["by_position"] == {}
+    # Nothing was actually evaluated, so this must not read as a pass.
+    assert gate["passed"] is False
+    assert "no position met the minimum sample size to be evaluated" in gate["blockers"]
+
+
+def test_position_gate_honors_per_position_threshold_overrides() -> None:
+    report = _position_report({"QB": {"mae": 16.0, "projection_count": 40}})
+
+    assert check_position_mae(report)["passed"] is True
+    assert check_position_mae(report, {"QB": 15.0})["passed"] is False
+
+
+def test_position_gate_blocks_report_without_position_metrics() -> None:
+    gate = check_position_mae({"schema_version": 1, "metrics": {}})
+
+    assert gate["passed"] is False
+    assert "evaluation report has no per-position metrics" in gate["blockers"]
+
+
+def test_position_gate_blocks_missing_mae_rather_than_skipping() -> None:
+    report = _position_report({"WR": {"mae": None, "projection_count": 120}})
+
+    gate = check_position_mae(report)
+
+    assert gate["passed"] is False
+    assert "WR MAE is missing" in gate["blockers"]

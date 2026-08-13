@@ -10,7 +10,6 @@ import re
 
 import pytest
 
-from schema_migrations import MigrationManager
 from utils.db import execute, fetchall
 
 

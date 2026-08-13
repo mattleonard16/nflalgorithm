@@ -312,16 +312,19 @@ export interface EdgeTierPerformance {
   win_rate: number;
 }
 
+// Mirrors a weekly_performance row from /api/weekly-summary.
 export interface WeeklySummaryItem {
   season: number;
   week: number;
-  total_picks: number;
+  total_bets: number;
   wins: number;
   losses: number;
   pushes: number;
-  win_rate: number;
+  profit_units: number;
   roi_pct: number;
-  by_edge_tier: EdgeTierPerformance[];
+  avg_edge: number;
+  // Not yet emitted by the API; consumers must tolerate its absence.
+  by_edge_tier?: EdgeTierPerformance[];
 }
 
 export interface WeeklySummaryResponse {

@@ -31,7 +31,6 @@ from sklearn.model_selection import TimeSeriesSplit
 
 from models.position_specific.weekly import (
     MARKET_CONFIGS,
-    _MARKET_STATS,
     _engineer_rolling_features,
     _load_training_data,
     get_nfl_feature_cols,

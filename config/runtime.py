@@ -144,7 +144,10 @@ confidence = SimpleNamespace(
 
 features = SimpleNamespace(
     no_vig_enabled=env_flag("NFL_FEATURE_NO_VIG"),
-    kelly_cap_enabled=env_flag("NFL_FEATURE_KELLY_CAP"),
+    # Default ON (user-approved flip from the NFR-6 default-off gate):
+    # uncapped full Kelly oversizes real cards. Set NFL_FEATURE_KELLY_CAP=0
+    # to disable.
+    kelly_cap_enabled=env_flag("NFL_FEATURE_KELLY_CAP", True),
 )
 
 config = SimpleNamespace(

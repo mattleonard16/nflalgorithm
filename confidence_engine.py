@@ -12,7 +12,7 @@ volatility scoring.  Assigns plays to one of four tiers:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Union
 
 import pandas as pd
 

@@ -33,6 +33,7 @@ from utils.db import (
     is_sqlite_connection,
     read_dataframe,
 )
+from utils.game_context import CONTEXT_COLUMNS, extract_game_context
 from utils.player_id_utils import canonicalize_team, make_player_id
 
 logging.basicConfig(
@@ -49,6 +50,15 @@ GAME_COLUMNS = (
     "kickoff_utc",
     "game_date",
     "venue",
+    # Pregame context the schedule feed already carries. See
+    # utils.game_context for the conventions these follow.
+    "spread_line",
+    "total_line",
+    "temp",
+    "wind",
+    "roof",
+    "surface",
+    "div_game",
 )
 
 # A season feed must represent essentially the whole league before it can
@@ -151,6 +161,14 @@ def _load_nflverse_by_season(
 def _is_missing_feed_error(exc: Exception) -> bool:
     """Return whether nflreadpy failed because a season artifact is not published yet."""
     if isinstance(exc, FileNotFoundError):
+        return True
+
+    # During the offseason, roster-year loaders accept the upcoming season but
+    # stats-year loaders (load_rosters_weekly, load_injuries, load_player_stats)
+    # reject it with a range ValueError before any fetch. For a season already
+    # declared optional-missing, that rejection means "not published yet", not a
+    # caller bug — history seasons are never optional, so they still fail loud.
+    if isinstance(exc, ValueError) and "Season must be between" in str(exc):
         return True
 
     current: BaseException | None = exc
@@ -745,6 +763,15 @@ def create_games_from_schedule(schedule: pd.DataFrame, through_week: int) -> pd.
 
     venue_col = next((name for name in ("stadium", "venue") if name in games.columns), None)
     games["venue"] = games[venue_col] if venue_col else None
+
+    # Market and conditions ride along on the same rows already in hand.
+    # extract_game_context tolerates columns an older season omits, so a
+    # feed missing `wind` yields a null column rather than failing the ingest.
+    context = extract_game_context(games)
+    for column in CONTEXT_COLUMNS:
+        if column in GAME_COLUMNS:
+            games[column] = context[column]
+
     return (
         games[list(GAME_COLUMNS)]
         .drop_duplicates(subset=["game_id"], keep="last")

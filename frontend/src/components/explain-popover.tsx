@@ -14,7 +14,7 @@ function MiniBar({ value, max = 100, label }: { value: number | null; max?: numb
       <span className="text-[10px] text-slate-500 w-16 shrink-0">{label}</span>
       <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
         <div
-          className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all"
+          className="h-full rounded-full bg-slate-400 transition-all"
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -37,10 +37,10 @@ export function ExplainPopover({
   const decision = why.agents?.decision;
   const decisionColor =
     decision === "APPROVED"
-      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+      ? "text-emerald-400"
       : decision === "REJECTED"
-        ? "bg-red-500/20 text-red-300 border-red-500/30"
-        : "bg-slate-700/20 text-slate-400 border-slate-600/30";
+        ? "text-red-400"
+        : "text-slate-400";
 
   return (
     <Popover>
@@ -114,12 +114,12 @@ export function ExplainPopover({
               Risk Flags
             </h4>
             {why.risk?.correlation_group && (
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 mr-1">
+              <span className="text-[10px] text-primary mr-2">
                 {why.risk.correlation_group}
               </span>
             )}
             {why.risk?.exposure_warning && (
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-red-500/10 text-red-400 border border-red-500/20">
+              <span className="text-[10px] text-red-400">
                 {why.risk.exposure_warning}
               </span>
             )}
@@ -133,9 +133,7 @@ export function ExplainPopover({
               Agent Verdict
             </h4>
             <div className="flex items-center gap-2">
-              <span
-                className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold border ${decisionColor}`}
-              >
+              <span className={`text-[10px] font-bold ${decisionColor}`}>
                 {why.agents.decision}
               </span>
               {why.agents.merged_confidence != null && (

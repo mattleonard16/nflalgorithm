@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from scripts.ingest_real_nfl_data import (
     _merge_age_from_rosters,

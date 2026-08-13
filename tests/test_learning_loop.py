@@ -11,11 +11,9 @@ Covers:
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import numpy as np
 import pandas as pd
-import pytest
 
 from learning_loop import (
     MARKET_TO_STAT,
@@ -24,7 +22,6 @@ from learning_loop import (
     attribute_outcome,
     batch_attribute_outcomes,
     generate_learning_report,
-    get_agent_accuracy_summary,
     recommend_threshold_updates,
     update_agent_performance,
 )
