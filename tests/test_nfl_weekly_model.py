@@ -20,6 +20,7 @@ from models.position_specific.weekly import (
     _eligible_role_mask,
     _engineer_rolling_features,
     _iter_chronological_week_folds,
+    _prefer_richer_role_estimate,
     _load_player_history_for_rolling,
     _load_training_data,
     get_nfl_feature_cols,
@@ -292,6 +293,28 @@ class TestCausalTrainingWindows:
         assert _eligible_role_mask(df, "receiving_yards").tolist() == [False, True, True]
         assert _eligible_role_mask(df, "rushing_yards").tolist() == [False, True, True]
         assert _eligible_role_mask(df, "passing_yards").tolist() == [False, True, True]
+
+    def test_snapshot_depth_penalty_does_not_hide_wr2_history(self):
+        explicit = pd.Series([1.5, np.nan])
+        fallback = pd.Series([6.0, 4.0])
+        blended = _prefer_richer_role_estimate(explicit, fallback)
+        assert blended.tolist() == [6.0, 4.0]
+
+        df = pd.DataFrame(
+            {
+                "player_id": ["KC_xavier_worthy", "KC_xavier_worthy"],
+                "season": [2025, 2026],
+                "week": [18, 1],
+                "targets": [8.0, 0.0],
+                "receptions": [5.0, 0.0],
+                "receiving_yards": [70.0, 0.0],
+                "expected_targets": [1.5, 1.5],
+            }
+        )
+        engineered = _engineer_rolling_features(df, "receiving_yards")
+        week_one = engineered[(engineered["season"] == 2026) & (engineered["week"] == 1)]
+        assert float(week_one["expected_targets"].iloc[0]) >= 2.0
+        assert _eligible_role_mask(week_one, "receiving_yards").tolist() == [True]
 
     def test_chronological_folds_keep_future_weeks_out_of_training(self):
         rows = []

@@ -1263,8 +1263,13 @@ def build_player_context_snapshots(
             prior_source = "new_team_history"
 
         def expected(column: str) -> float:
-            value = _latest_ewm(player_history, column, prior[column])
-            return max(0.0, value * role_factor * new_team_factor * availability_factor)
+            # History already reflects role. Multiplying it by depth_rank
+            # double-penalizes WR2/WR3s and drops them under usage floors.
+            if player_history.empty:
+                value = prior[column] * role_factor
+            else:
+                value = _latest_ewm(player_history, column, prior[column])
+            return max(0.0, value * new_team_factor * availability_factor)
 
         expected_snap_percentage = expected("snap_percentage")
         uncertainty = availability_uncertainty

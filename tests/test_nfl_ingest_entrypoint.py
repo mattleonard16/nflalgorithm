@@ -650,6 +650,10 @@ def test_player_context_snapshot_combines_role_availability_and_priors() -> None
     assert veteran["practice_status"] == "Limited Participation in Practice"
     assert veteran["expected_targets"] > 0
     assert veteran["uncertainty_multiplier"] > 1.0
+    # Depth-2 factor is 0.70. History EWM of 8/10 targets times new-team
+    # 0.85 and questionable 0.75 is ~5.7 without the depth multiplier and
+    # ~4.0 with it. Keep the historical estimate.
+    assert veteran["expected_targets"] >= 5.0
 
 
 def test_player_context_excludes_depth_rows_after_target_week_cutoff() -> None:
