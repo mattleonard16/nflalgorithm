@@ -316,6 +316,37 @@ class TestCausalTrainingWindows:
         assert float(week_one["expected_targets"].iloc[0]) >= 2.0
         assert _eligible_role_mask(week_one, "receiving_yards").tolist() == [True]
 
+    def test_week1_role_uses_seventy_thirty_season_prior(self):
+        rows = []
+        for season, targets in ((2024, 8.0), (2025, 6.0)):
+            for week in range(1, 11):
+                rows.append(
+                    {
+                        "player_id": "KC_xavier_worthy",
+                        "season": season,
+                        "week": week,
+                        "targets": targets,
+                        "receptions": 4.0,
+                        "receiving_yards": 50.0,
+                        "expected_targets": 1.5,
+                    }
+                )
+        rows.append(
+            {
+                "player_id": "KC_xavier_worthy",
+                "season": 2026,
+                "week": 1,
+                "targets": 0.0,
+                "receptions": 0.0,
+                "receiving_yards": 0.0,
+                "expected_targets": 1.5,
+            }
+        )
+        week_one = _engineer_rolling_features(pd.DataFrame(rows), "receiving_yards")
+        week_one = week_one[(week_one["season"] == 2026) & (week_one["week"] == 1)]
+        assert float(week_one["expected_targets"].iloc[0]) == 0.70 * 6.0 + 0.30 * 8.0
+        assert "last_season_targets_pg" in get_nfl_feature_cols("receiving_yards")
+
     def test_chronological_folds_keep_future_weeks_out_of_training(self):
         rows = []
         for week in range(1, 7):

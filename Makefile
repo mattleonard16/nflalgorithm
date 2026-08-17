@@ -508,7 +508,7 @@ nba-full:
 # Train NFL weekly models for all markets (StackingRegressor ensemble)
 nfl-train:
 	@echo "Training NFL weekly models for all markets..."
-	$(DB_ENV) $(PYTHON) -c "from models.position_specific.weekly import train_weekly_models; from utils.db import read_dataframe; df = read_dataframe('SELECT DISTINCT season, week FROM player_stats_enhanced ORDER BY season DESC, week DESC LIMIT 20'); train_weekly_models(list(df.itertuples(index=False, name=None)))"
+	$(DB_ENV) $(PYTHON) -c "from models.position_specific.weekly import train_weekly_models; from utils.db import read_dataframe; from utils.season_priors import regular_season_training_weeks; df = read_dataframe('SELECT DISTINCT season, week FROM player_stats_enhanced'); train_weekly_models(regular_season_training_weeks(df))"
 
 # Optuna hyperparameter tuning for NFL stat models (writes best_params_{market}.json)
 nfl-tune:

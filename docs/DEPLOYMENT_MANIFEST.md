@@ -8,7 +8,7 @@ This file records what the tracked code now *expects* the private modules to do.
 when the private modules are restored from a backup or another machine, verify each item below and
 re-apply anything missing.
 
-Last verified: 2026-08-16, including live-odds selection and kickoff-aware production CLV.
+Last verified: 2026-08-16, including live-odds selection, kickoff-aware production CLV, and season priors.
 
 ---
 
@@ -27,6 +27,7 @@ committed half gets the new modules sitting inert — no error, no warning, just
 | Public value-row visibility | `api/value_visibility.py`, `config/runtime.py` | `api/server.py` imports and applies `value_visibility_scope` to public value-data queries | Legacy unpublished, unjoinable, and `SimBook` rows appear in metadata, bets, analytics, risk, exports, and review inputs. |
 | Live-odds stale filter | `utils/live_odds.py` | `value_betting_engine.rank_weekly_value` | Ranking takes SQL `MAX(as_of)` and can price an in-game quote. |
 | Kickoff-aware production CLV | `utils/clv.py`, `utils/live_odds.py` | `scripts/record_outcomes.py` `compute_and_save_clv` | Closing line is `MAX(as_of)`, including post-kickoff scrapes. |
+| Early-season 70/30 role prior | `utils/season_priors.py` | `weekly.py` `_engineer_rolling_features` and `get_nfl_feature_cols` | Week 1 expected_* stays last-6 EWM; last_season_*_pg features are missing so a restored private weekly.py ignores the new helper. |
 
 ## Required state of each private module
 

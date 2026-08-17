@@ -41,7 +41,7 @@ the reason on the job, run, and interrupted stage.
    ```
 4. Train or refresh rolling models if needed:
    ```bash
-   python -c "from models.position_specific import train_weekly_models; train_weekly_models([(2023, 10), (2023, 11), (2023, 12)])"
+   make nfl-train
    ```
 5. Queue the durable production run and let the worker execute it:
    ```bash
