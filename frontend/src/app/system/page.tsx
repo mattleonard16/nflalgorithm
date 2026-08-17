@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Activity,
   Archive,
@@ -8,6 +9,7 @@ import {
   CircleAlert,
   Clock3,
   Database,
+  Lock,
   RefreshCw,
   RotateCcw,
   Server,
@@ -24,6 +26,7 @@ import {
   getHealth,
   retryPipelineRun,
 } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import type { ArchitectureStatus, HealthResponse, PipelineRun } from "@/lib/types";
 
 const statusStyles: Record<string, string> = {
@@ -79,17 +82,19 @@ function Metric({
 function RunRow({
   run,
   busy,
+  canControl,
   onCancel,
   onRetry,
 }: {
   run: PipelineRun;
   busy: string | null;
+  canControl: boolean;
   onCancel: (runId: string) => void;
   onRetry: (runId: string) => void;
 }) {
   const progress = run.stages_requested > 0 ? Math.min(100, (run.stages_completed / run.stages_requested) * 100) : 0;
-  const canCancel = ["queued", "running", "cancelling"].includes(run.status);
-  const canRetry = run.status === "failed";
+  const canCancel = canControl && ["queued", "running", "cancelling"].includes(run.status);
+  const canRetry = canControl && run.status === "failed";
 
   return (
     <div className="grid gap-3 border-t border-slate-800/60 px-4 py-3.5 first:border-t-0 lg:grid-cols-[1.2fr_.7fr_.6fr_1fr_auto] lg:items-center">
@@ -148,7 +153,26 @@ function RunRow({
   );
 }
 
+function OperatorGate({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
+      <span className="grid h-9 w-9 place-items-center rounded-xl border border-amber-400/25 bg-amber-400/[0.06] text-amber-300">
+        <Lock className="h-4 w-4" />
+      </span>
+      <p className="text-sm text-slate-400">{title}</p>
+      <p className="max-w-md text-[11px] leading-relaxed text-slate-600">{children}</p>
+      <Link
+        href="/login"
+        className="mt-1 rounded-lg border border-slate-700/70 bg-[#0d1624] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-300 transition-colors hover:border-amber-400/40 hover:text-amber-300"
+      >
+        Sign in
+      </Link>
+    </div>
+  );
+}
+
 export default function SystemPage() {
+  const { user, loading: authLoading } = useAuth();
   const [architecture, setArchitecture] = useState<ArchitectureStatus | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -156,27 +180,47 @@ export default function SystemPage() {
   const [error, setError] = useState<string | null>(null);
   const refreshInFlight = useRef(false);
 
-  const refresh = useCallback(async (showLoading = true) => {
-    if (refreshInFlight.current) return;
-    refreshInFlight.current = true;
-    if (showLoading) setLoading(true);
-    setError(null);
-    try {
-      const [architectureData, healthData] = await Promise.all([
-        getArchitectureStatus(),
-        getHealth().catch(() => null),
-      ]);
-      setArchitecture(architectureData);
-      setHealth(healthData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load system state");
-    } finally {
-      if (showLoading) setLoading(false);
-      refreshInFlight.current = false;
-    }
-  }, []);
+  const signedIn = Boolean(user);
+
+  const refresh = useCallback(
+    async (showLoading = true) => {
+      if (refreshInFlight.current) return;
+      refreshInFlight.current = true;
+      if (showLoading) setLoading(true);
+      try {
+        // Health is public and architecture is operator-gated. They are fetched
+        // independently so a 401 on the control plane cannot erase the feed
+        // freshness a signed-out visitor is entitled to see.
+        const healthResult = await getHealth().catch(() => null);
+        setHealth(healthResult);
+
+        if (!signedIn) {
+          setArchitecture(null);
+          setError(null);
+          return;
+        }
+        try {
+          setArchitecture(await getArchitectureStatus());
+          setError(null);
+        } catch (err) {
+          setArchitecture(null);
+          const message = err instanceof Error ? err.message : "Unable to load pipeline state";
+          setError(
+            message.includes("401")
+              ? "Your operator session expired. Sign in again to view live jobs."
+              : message
+          );
+        }
+      } finally {
+        if (showLoading) setLoading(false);
+        refreshInFlight.current = false;
+      }
+    },
+    [signedIn]
+  );
 
   useEffect(() => {
+    if (authLoading) return;
     let cancelled = false;
     let timeout: number | undefined;
     const poll = async (showLoading: boolean) => {
@@ -188,7 +232,7 @@ export default function SystemPage() {
       cancelled = true;
       if (timeout) window.clearTimeout(timeout);
     };
-  }, [refresh]);
+  }, [authLoading, refresh]);
 
   const activeRun = useMemo(
     () => architecture?.recent_runs.find((run) => ["queued", "running", "cancelling"].includes(run.status)) ?? architecture?.recent_runs[0] ?? null,
@@ -211,6 +255,8 @@ export default function SystemPage() {
 
   const queueDepth = (architecture?.queue.queued ?? 0) + (architecture?.queue.retry_scheduled ?? 0);
   const dbName = architecture?.database_backend === "sqlite" ? "SQLite / WAL" : architecture?.database_backend ?? "Unknown";
+  const controlPlaneDetail = signedIn ? "awaiting pipeline state" : "operator sign-in required";
+  const controlMetric = (value: number) => (architecture ? formatNumber(value) : loading ? "…" : "—");
 
   return (
     <div className="space-y-5 pb-10">
@@ -255,34 +301,59 @@ export default function SystemPage() {
         <Metric
           label="API"
           value={health ? "Online" : loading ? "…" : "Offline"}
-          detail={health?.status === "ACTIVE" ? "feeds healthy" : "read path available"}
+          detail={health ? (health.status === "ACTIVE" ? "feeds healthy" : "read path available") : "health check failed"}
           icon={Server}
           state={health ? "good" : "warn"}
         />
         <Metric
           label="Queue depth"
-          value={formatNumber(queueDepth)}
-          detail={queueDepth === 1 ? "job waiting" : "jobs waiting"}
+          value={controlMetric(queueDepth)}
+          detail={architecture ? (queueDepth === 1 ? "job waiting" : "jobs waiting") : controlPlaneDetail}
           icon={Clock3}
-          state={queueDepth > 0 ? "warn" : "good"}
+          state={architecture ? (queueDepth > 0 ? "warn" : "good") : "neutral"}
         />
         <Metric
           label="Workers"
-          value={formatNumber(architecture?.workers_active ?? 0)}
-          detail="active claims"
+          value={controlMetric(architecture?.workers_active ?? 0)}
+          detail={architecture ? "active claims" : controlPlaneDetail}
           icon={Activity}
           state={(architecture?.workers_active ?? 0) > 0 ? "good" : "neutral"}
         />
-        <Metric label="Decisions" value={formatNumber(architecture?.decision_count ?? 0)} detail="persisted reviews" icon={CheckCircle2} />
-        <Metric label="Read models" value={formatNumber(architecture?.read_model_rows ?? 0)} detail="dashboard rows" icon={Database} />
-        <Metric label="Artifacts" value={formatNumber(architecture?.artifact_count ?? 0)} detail={dbName} icon={Archive} />
+        <Metric
+          label="Decisions"
+          value={controlMetric(architecture?.decision_count ?? 0)}
+          detail={architecture ? "persisted reviews" : controlPlaneDetail}
+          icon={CheckCircle2}
+        />
+        <Metric
+          label="Read models"
+          value={controlMetric(architecture?.read_model_rows ?? 0)}
+          detail={architecture ? "dashboard rows" : controlPlaneDetail}
+          icon={Database}
+        />
+        <Metric
+          label="Artifacts"
+          value={controlMetric(architecture?.artifact_count ?? 0)}
+          detail={architecture ? dbName : controlPlaneDetail}
+          icon={Archive}
+        />
       </section>
 
       {architecture ? (
         <PipelineArchitecture levels={architecture.levels} activeRun={activeRun} />
       ) : (
         <div className="grid min-h-[460px] place-items-center rounded-2xl border border-slate-800/60 bg-[#07111d]/80 text-sm text-slate-500">
-          {loading ? "Loading architecture state…" : "Architecture state unavailable"}
+          {loading || authLoading ? (
+            "Loading architecture state…"
+          ) : signedIn ? (
+            "Architecture state unavailable"
+          ) : (
+            <OperatorGate title="Sign in with an operator account to view live jobs.">
+              Live topology reads the durable job queue, worker leases, and stage state. Those are
+              authenticated reads — the pipeline never exposes run diagnostics publicly. Feed
+              freshness below is public and stays visible either way.
+            </OperatorGate>
+          )}
         </div>
       )}
 
@@ -295,7 +366,7 @@ export default function SystemPage() {
             </h2>
           </div>
           <span className="font-[family-name:var(--font-jetbrains)] text-[10px] text-slate-600">
-            {architecture?.recent_runs.length ?? 0} visible
+            {architecture ? `${architecture.recent_runs.length} visible` : "locked"}
           </span>
         </div>
         {architecture?.recent_runs.length ? (
@@ -304,13 +375,45 @@ export default function SystemPage() {
               key={run.run_id}
               run={run}
               busy={busyRun}
+              canControl={signedIn}
               onCancel={(runId) => void mutateRun(runId, "cancel")}
               onRetry={(runId) => void mutateRun(runId, "retry")}
             />
           ))
-        ) : (
+        ) : architecture ? (
           <div className="border-t border-slate-800/60 px-4 py-10 text-center text-sm text-slate-500">
-            No durable runs yet. Trigger one from the betting dashboard, CLI, or scheduler.
+            No durable runs yet. Publish a card with Refresh on{" "}
+            <Link href="/bets" className="text-sky-400 hover:text-sky-300">
+              Bets
+            </Link>
+            , or queue one from the CLI with{" "}
+            <code className="font-[family-name:var(--font-jetbrains)] text-[11px] text-slate-400">
+              make production-run
+            </code>{" "}
+            — the pipeline worker executes it. Projections alone live on the{" "}
+            <Link href="/" className="text-sky-400 hover:text-sky-300">
+              Slate
+            </Link>
+            .
+          </div>
+        ) : (
+          <div className="border-t border-slate-800/60">
+            {loading || authLoading ? (
+              <p className="px-4 py-10 text-center text-sm text-slate-500">Loading execution ledger…</p>
+            ) : signedIn ? (
+              <p className="px-4 py-10 text-center text-sm text-slate-500">
+                Execution ledger unavailable.
+              </p>
+            ) : (
+              <OperatorGate title="Sign in with an operator account to view live jobs.">
+                Durable runs, worker ownership, and cancel/retry controls require an operator
+                session. Runs are queued from Refresh on Bets or{" "}
+                <code className="font-[family-name:var(--font-jetbrains)] text-[11px] text-slate-500">
+                  make production-run
+                </code>
+                .
+              </OperatorGate>
+            )}
           </div>
         )}
       </section>
