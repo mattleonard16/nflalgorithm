@@ -280,6 +280,19 @@ class TestCausalTrainingWindows:
 
         assert _eligible_role_mask(df, "receiving_yards").tolist() == [False, True]
 
+    def test_role_eligibility_requires_rotation_level_volume(self):
+        df = pd.DataFrame(
+            {
+                "expected_targets": [0.4, 2.0, 6.0],
+                "expected_rushing_attempts": [0.2, 3.0, 12.0],
+                "expected_passing_attempts": [4.0, 12.0, 30.0],
+            }
+        )
+
+        assert _eligible_role_mask(df, "receiving_yards").tolist() == [False, True, True]
+        assert _eligible_role_mask(df, "rushing_yards").tolist() == [False, True, True]
+        assert _eligible_role_mask(df, "passing_yards").tolist() == [False, True, True]
+
     def test_chronological_folds_keep_future_weeks_out_of_training(self):
         rows = []
         for week in range(1, 7):
@@ -403,6 +416,11 @@ class TestTrainAndPredict:
         history["position"] = "WR"
         history["season"] = 2025
         history["week"] = [17, 18]
+        history.loc[history["week"] == 17, ["targets", "receptions", "receiving_yards"]] = [
+            8.0,
+            5.0,
+            70.0,
+        ]
         history.loc[history["week"] == 18, ["targets", "receptions", "receiving_yards"]] = 0
         reserve_history = history.copy()
         reserve_history["player_id"] = "LV_reserve_player"
@@ -454,7 +472,7 @@ class TestTrainAndPredict:
             }
         ]
         assert frame.iloc[0]["targets"] == 0
-        assert frame.iloc[0]["expected_targets"] > 0
+        assert frame.iloc[0]["expected_targets"] >= MARKET_CONFIGS["receiving_yards"]["min_value"]
         with sqlite3.connect(tmp_db) as conn:
             target_rows = conn.execute(
                 "SELECT COUNT(*) FROM player_stats_enhanced WHERE season = 2026 AND week = 1"
