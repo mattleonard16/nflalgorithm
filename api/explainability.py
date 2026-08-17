@@ -10,18 +10,20 @@ import json
 import logging
 from typing import Any, Dict, List
 
+from api.value_visibility import value_visibility_scope
 from utils.db import fetchone
 
 logger = logging.getLogger(__name__)
 
 
-def build_why_payload(
-    season: int, week: int, player_id: str, market: str
-) -> Dict[str, Any]:
+def build_why_payload(season: int, week: int, player_id: str, market: str) -> Dict[str, Any]:
     """Build a structured explainability payload for a single bet.
 
     Returns dict with keys: model, volume, volatility, confidence, risk, agents.
     """
+    if not _is_public_value_row(season, week, player_id, market):
+        return _empty_why_payload()
+
     payload: Dict[str, Any] = {}
 
     # Model section from weekly_projections
@@ -45,6 +47,49 @@ def build_why_payload(
     return payload
 
 
+def _is_public_value_row(season: int, week: int, player_id: str, market: str) -> bool:
+    visibility_sql, visibility_params = value_visibility_scope()
+    return (
+        fetchone(
+            f"""
+            SELECT 1
+            FROM materialized_value_view v
+            WHERE {visibility_sql}
+              AND v.season = ? AND v.week = ? AND v.player_id = ? AND v.market = ?
+            LIMIT 1
+            """,
+            params=(*visibility_params, season, week, player_id, market),
+        )
+        is not None
+    )
+
+
+def _empty_why_payload() -> Dict[str, Any]:
+    return {
+        "model": {"mu": None, "sigma": None, "context_sensitivity": None},
+        "volume": {"target_share": None},
+        "volatility": {"score": None},
+        "confidence": {
+            "total": None,
+            "edge_score": None,
+            "stability_score": None,
+            "volume_score": None,
+            "volatility_score": None,
+        },
+        "risk": {
+            "correlation_group": None,
+            "exposure_warning": None,
+            "risk_adjusted_kelly": None,
+        },
+        "agents": {
+            "decision": None,
+            "merged_confidence": None,
+            "votes": None,
+            "top_rationale": None,
+        },
+    }
+
+
 def build_why_payloads_batch(
     season: int, week: int, bets: List[Dict[str, Any]]
 ) -> Dict[str, Dict[str, Any]]:
@@ -65,9 +110,7 @@ def build_why_payloads_batch(
     return result
 
 
-def _get_model_section(
-    season: int, week: int, player_id: str, market: str
-) -> Dict[str, Any]:
+def _get_model_section(season: int, week: int, player_id: str, market: str) -> Dict[str, Any]:
     row = fetchone(
         """
         SELECT mu, sigma, context_sensitivity
@@ -85,9 +128,7 @@ def _get_model_section(
     }
 
 
-def _get_volume_section(
-    season: int, week: int, player_id: str, market: str
-) -> Dict[str, Any]:
+def _get_volume_section(season: int, week: int, player_id: str, market: str) -> Dict[str, Any]:
     row = fetchone(
         """
         SELECT target_share
@@ -101,9 +142,7 @@ def _get_volume_section(
     return {"target_share": row[0]}
 
 
-def _get_volatility_section(
-    season: int, week: int, player_id: str, market: str
-) -> Dict[str, Any]:
+def _get_volatility_section(season: int, week: int, player_id: str, market: str) -> Dict[str, Any]:
     row = fetchone(
         """
         SELECT volatility_score
@@ -117,17 +156,17 @@ def _get_volatility_section(
     return {"score": row[0]}
 
 
-def _get_confidence_section(
-    season: int, week: int, player_id: str, market: str
-) -> Dict[str, Any]:
+def _get_confidence_section(season: int, week: int, player_id: str, market: str) -> Dict[str, Any]:
+    visibility_sql, visibility_params = value_visibility_scope()
     row = fetchone(
-        """
-        SELECT confidence_score, confidence_tier, edge_percentage, p_win
-        FROM materialized_value_view
-        WHERE season = ? AND week = ? AND player_id = ? AND market = ?
+        f"""
+        SELECT v.confidence_score, v.confidence_tier, v.edge_percentage, v.p_win
+        FROM materialized_value_view v
+        WHERE {visibility_sql}
+          AND v.season = ? AND v.week = ? AND v.player_id = ? AND v.market = ?
         LIMIT 1
         """,
-        params=(season, week, player_id, market),
+        params=(*visibility_params, season, week, player_id, market),
     )
     if not row:
         return {
@@ -145,9 +184,7 @@ def _get_confidence_section(
     }
 
 
-def _get_risk_section(
-    season: int, week: int, player_id: str, market: str
-) -> Dict[str, Any]:
+def _get_risk_section(season: int, week: int, player_id: str, market: str) -> Dict[str, Any]:
     row = fetchone(
         """
         SELECT correlation_group, exposure_warning, risk_adjusted_kelly
@@ -170,9 +207,7 @@ def _get_risk_section(
     }
 
 
-def _get_agents_section(
-    season: int, week: int, player_id: str, market: str
-) -> Dict[str, Any]:
+def _get_agents_section(season: int, week: int, player_id: str, market: str) -> Dict[str, Any]:
     row = fetchone(
         """
         SELECT decision, merged_confidence, votes, rationale

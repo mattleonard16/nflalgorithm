@@ -75,10 +75,12 @@ def test_odds_safety_requirements_are_environment_configurable(tmp_path: Path) -
         "NFL_ODDS_MIN_MARKET_COVERAGE": "0.90",
         "NFL_ODDS_MIN_SPORTSBOOKS_PER_EVENT_MARKET": "3",
         "NFL_ODDS_REQUIRED_MARKETS": "player_pass_yds,player_rec_yds",
+        "DEMO_MODE": "false",
     }
     command = (
         "import json; from config import config; "
         "print(json.dumps({'age': config.pipeline.odds_max_age_seconds, "
+        "'demo': config.api.demo_mode, "
         "'events': config.pipeline.odds_min_event_coverage, "
         "'markets': config.pipeline.odds_min_market_coverage, "
         "'sportsbooks': config.pipeline.odds_min_sportsbooks_per_event_market, "
@@ -96,6 +98,7 @@ def test_odds_safety_requirements_are_environment_configurable(tmp_path: Path) -
 
     assert json.loads(completed.stdout) == {
         "age": 120,
+        "demo": False,
         "events": 0.95,
         "markets": 0.9,
         "sportsbooks": 3,

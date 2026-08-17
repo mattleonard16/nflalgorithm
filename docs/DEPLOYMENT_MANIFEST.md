@@ -8,7 +8,7 @@ This file records what the tracked code now *expects* the private modules to do.
 when the private modules are restored from a backup or another machine, verify each item below and
 re-apply anything missing.
 
-Last verified: 2026-08-09, against the Tier A money-path work (`aae89c6`..`cce88e0`).
+Last verified: 2026-08-15, including the season-readiness public-data visibility work.
 
 ---
 
@@ -24,6 +24,7 @@ committed half gets the new modules sitting inert — no error, no warning, just
 | Portfolio stake cap | `risk_manager.normalize_portfolio_stakes`, called from `materialized_value_view.py:105` | — (fully tracked) | None. This one is safe. |
 | Position-keyed sigma | `utils/nfl_sigma.py` | `weekly.py:977` passes `position=position` | Falls back to the `(market, None)` legacy floors. Dispersion silently reverts to the old miscalibrated values (WR/TE rushing ~2.5x too wide). |
 | Matching guards | `utils/matching.py` | `prop_integration.py:36-42` imports and wiring | Guards never run. Cross-position name collisions (QB/DB Lamar Jackson, WR/LB Justin Jefferson) merge again, and stale odds snapshots fan out into duplicate rows. |
+| Public value-row visibility | `api/value_visibility.py`, `config/runtime.py` | `api/server.py` imports and applies `value_visibility_scope` to public value-data queries | Legacy unpublished, unjoinable, and `SimBook` rows appear in metadata, bets, analytics, risk, exports, and review inputs. |
 
 ## Required state of each private module
 
@@ -92,6 +93,27 @@ and `command grep -n "fillna(50.0)" value_betting_engine.py` returns nothing.
 - `compute_player_volatility` deleted (was never wired to anything).
 - The unused `import requests` removed. **If restoring an older copy, the import may return — it is
   harmless, but `tests/test_basic.py` no longer patches it.**
+
+### `api/server.py`
+
+- Declares `PUBLIC_VALUE_VISIBILITY_CONTRACT = "publication-safe-v1"`. Preflight rejects missing
+  or stale deployment copies before services start.
+- Requires pipeline operator authentication for review requests and authenticated reader access for
+  review status.
+
+- Imports `value_visibility_scope` from `api.value_visibility`.
+- Applies that predicate before filtering or aggregation in `/api/meta`, `/api/value-bets`,
+  value-derived analytics, correlation, risk, CSV and bundle exports, and agent-review inputs.
+- Includes `config.api.demo_mode` in the value-bet cache key so demo and production results cannot
+  share an entry.
+- Rejects agent review when the requested run has no reviewable published bets. Demo mode may still
+  review fixture rows explicitly.
+
+Verify with `DEMO_MODE=false`: `uv run pytest tests/test_api_visibility.py -q` must pass. Then run
+the same focused API contract tests listed in the season-readiness plan. Production startup and
+the production doctor commands pass `--require-demo-mode-off` and must fail while fixture visibility
+is enabled. A tracked-only deploy is not complete until the deployment copy of `api/server.py` has
+this wiring.
 
 ### Trained model artifacts
 

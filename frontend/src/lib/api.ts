@@ -339,7 +339,7 @@ export async function requestAgentReview(
   season: number,
   week: number
 ): Promise<{ run_id: string; review_status: string; message: string }> {
-  return fetchAPI(`/api/run/${runId}/review?season=${season}&week=${week}`, {
+  return fetchAPIAuth(`/api/run/${runId}/review?season=${season}&week=${week}`, {
     method: "POST",
   });
 }
@@ -352,7 +352,7 @@ export async function getAgentReviewStatus(
   season: number,
   week: number
 ): Promise<AgentReviewStatus> {
-  return fetchAPI<AgentReviewStatus>(
+  return fetchAPIAuth<AgentReviewStatus>(
     `/api/run/${runId}/review-status?season=${season}&week=${week}`
   );
 }

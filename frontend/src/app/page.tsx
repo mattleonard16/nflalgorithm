@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -52,7 +52,9 @@ import type {
   RiskSummary,
   WhyPayload,
   AgentReviewStatus,
+  AvailableWeek,
 } from "@/lib/types";
+import { useAuth } from "@/lib/auth-context";
 import { ExplainPopover } from "@/components/explain-popover";
 import { RiskPanel } from "@/components/risk-panel";
 import { AddToSlipModal } from "@/components/add-to-slip-modal";
@@ -358,6 +360,7 @@ function BetsTable({ bets, tier, season, week }: { bets: ValueBet[]; tier: strin
 
 /* ─── Main Dashboard ─── */
 export default function DashboardPage() {
+  const { user } = useAuth();
   const [meta, setMeta] = useState<MetaResponse | null>(null);
   const [bets, setBets] = useState<ValueBet[]>([]);
   const [performance, setPerformance] = useState<PerformanceResponse | null>(
@@ -378,23 +381,39 @@ export default function DashboardPage() {
   // Agent review state
   const [reviewStatus, setReviewStatus] = useState<AgentReviewStatus | null>(null);
   const [reviewRequesting, setReviewRequesting] = useState(false);
+  const reviewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reviewGenerationRef = useRef(0);
 
-  const [filters, setFilters] = useState<DashboardFilters>({
-    season: 2025,
-    week: 13,
+  const [selectedWeek, setSelectedWeek] = useState<AvailableWeek | null>(null);
+  const [filterOptions, setFilterOptions] = useState({
     minEdge: 0.05,
     bestLineOnly: true,
   });
+  const filters = useMemo<DashboardFilters | null>(
+    () =>
+      selectedWeek
+        ? {
+            season: selectedWeek.season,
+            week: selectedWeek.week,
+            ...filterOptions,
+          }
+        : null,
+    [selectedWeek, filterOptions]
+  );
 
   // Stop polling on unmount
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      if (reviewTimeoutRef.current) clearTimeout(reviewTimeoutRef.current);
+      reviewGenerationRef.current += 1;
     };
   }, []);
 
   // Poll pipeline run status
   const startPolling = useCallback((runId: string) => {
+    if (!filters) return;
+    const activeFilters = filters;
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
@@ -405,7 +424,7 @@ export default function DashboardPage() {
           pollRef.current = null;
           setRefreshing(false);
           if (run.status === "completed") {
-            const betsData = await getValueBets(filters, false);
+            const betsData = await getValueBets(activeFilters, false);
             setBets(betsData.bets);
           }
         }
@@ -419,6 +438,7 @@ export default function DashboardPage() {
 
   // Trigger refresh
   const handleRefresh = async () => {
+    if (!filters || !user) return;
     setRefreshing(true);
     try {
       const run = await triggerPipelineRun(filters.season, filters.week, true, false);
@@ -435,52 +455,90 @@ export default function DashboardPage() {
     getMeta()
       .then((data) => {
         setMeta(data);
-        if (data.available_weeks.length > 0) {
-          setFilters((f) => ({
-            ...f,
-            season: data.available_weeks[0].season,
-            week: data.available_weeks[0].week,
-          }));
-        }
+        setSelectedWeek(data.available_weeks[0] ?? null);
+        if (data.available_weeks.length === 0) setLoading(false);
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => {
+        setError(err.message);
+        setLoading(false);
+      });
   }, []);
 
-  // Fetch bets, performance, risk, and correlations when filters change
+  // Fetch public data only after metadata resolves a real season/week.
   useEffect(() => {
+    if (!filters) return;
+    const activeFilters = filters;
+    let cancelled = false;
+
     async function loadData() {
       setLoading(true);
       setError(null);
 
       try {
-        const [betsData, perfData, corrData, riskData, latestRun] = await Promise.all([
-          getValueBets(filters, false),
-          getPerformance(filters.season),
-          getCorrelationAnalysis(filters.season, filters.week).catch(() => null),
-          getRiskSummary(filters.season, filters.week).catch(() => null),
-          getLatestRun(filters.season, filters.week).catch(() => null),
+        const [betsData, perfData, corrData, riskData] = await Promise.all([
+          getValueBets(activeFilters, false),
+          getPerformance(activeFilters.season),
+          getCorrelationAnalysis(activeFilters.season, activeFilters.week).catch(() => null),
+          getRiskSummary(activeFilters.season, activeFilters.week).catch(() => null),
         ]);
+        if (cancelled) return;
         setBets(betsData.bets);
         setPerformance(perfData);
         setCorrelations(corrData);
         setRiskSummary(riskData);
-        if (latestRun) {
-          setPipelineRun(latestRun);
-          try {
-            const review = await getAgentReviewStatus(latestRun.run_id, filters.season, filters.week);
-            setReviewStatus(review);
-          } catch {
-            setReviewStatus(null);
-          }
-        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load data");
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load data");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
     loadData();
+    return () => {
+      cancelled = true;
+    };
   }, [filters]);
+
+  // Operational diagnostics require an authenticated reader.
+  useEffect(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    setPipelineRun(null);
+    setReviewStatus(null);
+    setRefreshing(false);
+    setReviewRequesting(false);
+    reviewGenerationRef.current += 1;
+    if (reviewTimeoutRef.current) {
+      clearTimeout(reviewTimeoutRef.current);
+      reviewTimeoutRef.current = null;
+    }
+
+    if (!selectedWeek || !user) return;
+    const activeWeek = selectedWeek;
+
+    let cancelled = false;
+    async function loadRunStatus() {
+      const latestRun = await getLatestRun(
+        activeWeek.season,
+        activeWeek.week
+      ).catch(() => null);
+      if (cancelled || !latestRun) return;
+      setPipelineRun(latestRun);
+      const review = await getAgentReviewStatus(
+        latestRun.run_id,
+        activeWeek.season,
+        activeWeek.week
+      ).catch(() => null);
+      if (!cancelled) setReviewStatus(review);
+    }
+    loadRunStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedWeek, user]);
 
   // Group bets by tier
   const premiumBets = bets.filter((b) => b.confidence_tier === "Premium");
@@ -512,11 +570,21 @@ export default function DashboardPage() {
             Value Dashboard
           </h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Season {filters.season} &middot; Week {filters.week} &middot;{" "}
-            <span className="font-[family-name:var(--font-jetbrains)] tabular-nums">
-              {bets.length}
-            </span>{" "}
-            projections
+            {selectedWeek ? (
+              <>
+                Season {selectedWeek.season} &middot; Week {selectedWeek.week} &middot;{" "}
+                <span className="font-[family-name:var(--font-jetbrains)] tabular-nums">
+                  {bets.length}
+                </span>{" "}
+                projections
+              </>
+            ) : error ? (
+              "Published weeks unavailable"
+            ) : meta ? (
+              "No published NFL card is available yet"
+            ) : (
+              "Loading published weeks..."
+            )}
           </p>
         </div>
         <div className="text-right">
@@ -544,10 +612,13 @@ export default function DashboardPage() {
               Season
             </Label>
             <Select
-              value={filters.season.toString()}
-              onValueChange={(v) =>
-                setFilters((f) => ({ ...f, season: parseInt(v) }))
-              }
+              value={selectedWeek?.season.toString() ?? ""}
+              disabled={!selectedWeek}
+              onValueChange={(value) => {
+                const season = parseInt(value);
+                const firstWeek = meta?.available_weeks.find((item) => item.season === season);
+                if (firstWeek) setSelectedWeek(firstWeek);
+              }}
             >
               <SelectTrigger className="w-28 h-9 bg-[#0d1220] border-slate-700/60 text-slate-200 text-sm font-[family-name:var(--font-jetbrains)]">
                 <SelectValue />
@@ -555,7 +626,7 @@ export default function DashboardPage() {
               <SelectContent className="bg-[#111827] border-slate-700">
                 {[
                   ...new Set(
-                    meta?.available_weeks.map((w) => w.season) || [2025]
+                    meta?.available_weeks.map((w) => w.season) || []
                   ),
                 ].map((s) => (
                   <SelectItem
@@ -575,10 +646,15 @@ export default function DashboardPage() {
               Week
             </Label>
             <Select
-              value={filters.week.toString()}
-              onValueChange={(v) =>
-                setFilters((f) => ({ ...f, week: parseInt(v) }))
-              }
+              value={selectedWeek?.week.toString() ?? ""}
+              disabled={!selectedWeek}
+              onValueChange={(value) => {
+                const week = parseInt(value);
+                const selection = meta?.available_weeks.find(
+                  (item) => item.season === selectedWeek?.season && item.week === week
+                );
+                if (selection) setSelectedWeek(selection);
+              }}
             >
               <SelectTrigger className="w-20 h-9 bg-[#0d1220] border-slate-700/60 text-slate-200 text-sm font-[family-name:var(--font-jetbrains)]">
                 <SelectValue />
@@ -586,8 +662,8 @@ export default function DashboardPage() {
               <SelectContent className="bg-[#111827] border-slate-700">
                 {(
                   meta?.available_weeks
-                    .filter((w) => w.season === filters.season)
-                    .map((w) => w.week) || [1]
+                    .filter((w) => w.season === selectedWeek?.season)
+                    .map((w) => w.week) || []
                 ).map((w) => (
                   <SelectItem
                     key={w}
@@ -605,13 +681,13 @@ export default function DashboardPage() {
             <Label className="text-[11px] text-slate-500 uppercase tracking-wider">
               Min Edge{" "}
               <span className="text-primary/80 font-[family-name:var(--font-jetbrains)]">
-                {(filters.minEdge * 100).toFixed(0)}%
+                {(filterOptions.minEdge * 100).toFixed(0)}%
               </span>
             </Label>
             <Slider
-              value={[filters.minEdge * 100]}
+              value={[filterOptions.minEdge * 100]}
               onValueChange={(v) =>
-                setFilters((f) => ({ ...f, minEdge: v[0] / 100 }))
+                setFilterOptions((current) => ({ ...current, minEdge: v[0] / 100 }))
               }
               min={0}
               max={30}
@@ -623,9 +699,9 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2 pb-0.5">
             <Switch
               id="best-line"
-              checked={filters.bestLineOnly}
+              checked={filterOptions.bestLineOnly}
               onCheckedChange={(v) =>
-                setFilters((f) => ({ ...f, bestLineOnly: v }))
+                setFilterOptions((current) => ({ ...current, bestLineOnly: v }))
               }
             />
             <Label
@@ -637,62 +713,79 @@ export default function DashboardPage() {
           </div>
 
           <div className="ml-auto pb-0.5 flex items-center gap-2">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <a
-                    href={getExportCsvUrl(filters.season, filters.week, filters.minEdge)}
-                    download
-                    className="inline-flex items-center justify-center h-9 w-9 rounded-md border bg-[#0d1220] border-slate-700/60 text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                  </a>
-                </TooltipTrigger>
-                <TooltipContent className="bg-[#0d1220] border-slate-700/60 text-slate-300 text-[11px]">
-                  Export CSV
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            {filters && (
+              <>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <a
+                        href={getExportCsvUrl(filters.season, filters.week, filters.minEdge)}
+                        download
+                        className="inline-flex items-center justify-center h-9 w-9 rounded-md border bg-[#0d1220] border-slate-700/60 text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </a>
+                    </TooltipTrigger>
+                    <TooltipContent className="bg-[#0d1220] border-slate-700/60 text-slate-300 text-[11px]">
+                      Export CSV
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
 
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <a
-                    href={getExportBundleUrl(filters.season, filters.week)}
-                    download
-                    className="inline-flex items-center justify-center h-9 w-9 rounded-md border bg-[#0d1220] border-slate-700/60 text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors"
-                  >
-                    <FileJson className="h-3.5 w-3.5" />
-                  </a>
-                </TooltipTrigger>
-                <TooltipContent className="bg-[#0d1220] border-slate-700/60 text-slate-300 text-[11px]">
-                  Export JSON Bundle
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <a
+                        href={getExportBundleUrl(filters.season, filters.week)}
+                        download
+                        className="inline-flex items-center justify-center h-9 w-9 rounded-md border bg-[#0d1220] border-slate-700/60 text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors"
+                      >
+                        <FileJson className="h-3.5 w-3.5" />
+                      </a>
+                    </TooltipTrigger>
+                    <TooltipContent className="bg-[#0d1220] border-slate-700/60 text-slate-300 text-[11px]">
+                      Export JSON Bundle
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </>
+            )}
 
-            {pipelineRun && pipelineRun.status === "completed" && (
+            {user && filters && pipelineRun && pipelineRun.status === "completed" && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={async () => {
                   if (!pipelineRun) return;
+                  const activeRunId = pipelineRun.run_id;
+                  const activeSeason = filters.season;
+                  const activeWeek = filters.week;
+                  const generation = ++reviewGenerationRef.current;
                   setReviewRequesting(true);
                   try {
-                    await requestAgentReview(pipelineRun.run_id, filters.season, filters.week);
+                    await requestAgentReview(activeRunId, activeSeason, activeWeek);
+                    if (generation !== reviewGenerationRef.current) return;
                     // Poll for review completion
                     const checkReview = async () => {
-                      const status = await getAgentReviewStatus(pipelineRun.run_id, filters.season, filters.week);
+                      const status = await getAgentReviewStatus(
+                        activeRunId,
+                        activeSeason,
+                        activeWeek
+                      );
+                      if (generation !== reviewGenerationRef.current) return;
                       setReviewStatus(status);
                       if (!status.reviewed) {
-                        setTimeout(checkReview, 3000);
+                        reviewTimeoutRef.current = setTimeout(checkReview, 3000);
                       } else {
                         setReviewRequesting(false);
+                        reviewTimeoutRef.current = null;
                       }
                     };
-                    setTimeout(checkReview, 2000);
+                    reviewTimeoutRef.current = setTimeout(checkReview, 2000);
                   } catch {
-                    setReviewRequesting(false);
+                    if (generation === reviewGenerationRef.current) {
+                      setReviewRequesting(false);
+                    }
                   }
                 }}
                 disabled={reviewRequesting || reviewStatus?.reviewed === true}
@@ -703,18 +796,20 @@ export default function DashboardPage() {
               </Button>
             )}
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefresh}
-              disabled={refreshing}
-              className="h-9 bg-[#0d1220] border-slate-700/60 text-slate-300 hover:text-slate-100 hover:border-slate-600"
-            >
-              <RefreshCw
-                className={`h-3.5 w-3.5 mr-1.5 ${refreshing ? "animate-spin" : ""}`}
-              />
-              {refreshing ? "Running..." : "Refresh"}
-            </Button>
+            {user && filters && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className="h-9 bg-[#0d1220] border-slate-700/60 text-slate-300 hover:text-slate-100 hover:border-slate-600"
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 mr-1.5 ${refreshing ? "animate-spin" : ""}`}
+                />
+                {refreshing ? "Running..." : "Refresh"}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -834,7 +929,16 @@ export default function DashboardPage() {
             Loading projections...
           </span>
         </div>
-      ) : (
+      ) : !filters && meta ? (
+        <div className="rounded-lg border border-slate-800/60 bg-[#111827]/50 px-6 py-14 text-center">
+          <p className="text-sm font-medium text-slate-300">
+            No published NFL card is available yet
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            The dashboard will populate after a validated weekly run publishes a card.
+          </p>
+        </div>
+      ) : !filters ? null : (
         <Tabs defaultValue="all" className="space-y-4">
           <TabsList className="bg-[#111827]/80 border border-slate-800/60 p-0.5 h-auto">
             <TabsTrigger

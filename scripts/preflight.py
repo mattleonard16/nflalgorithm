@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -24,6 +25,7 @@ REQUIRED_API_TABLES = (
     "users",
 )
 PRIVATE_API_FILE = "api/server.py"
+PRIVATE_API_VISIBILITY_CONTRACT = "publication-safe-v1"
 PRIVATE_NFL_FILES = (
     "data_pipeline.py",
     "prop_integration.py",
@@ -209,15 +211,58 @@ def check_odds_key(config: Any, *, required: bool) -> Diagnostic:
     )
 
 
+def check_demo_mode(config: Any, *, production: bool) -> Diagnostic:
+    enabled = bool(getattr(config.api, "demo_mode", False))
+    if not enabled:
+        return _result("demo_mode", "pass", "DEMO_MODE is disabled.")
+    return _result(
+        "demo_mode",
+        "fail" if production else "warn",
+        "DEMO_MODE exposes fixture and unpublished value rows.",
+        "Set DEMO_MODE=false before running production checks.",
+    )
+
+
 def check_private_api(root: Path = PROJECT_ROOT) -> Diagnostic:
     api_file = root / PRIVATE_API_FILE
-    if api_file.is_file():
-        return _result("private_api", "pass", "Deployment-supplied API module is available.")
+    if not api_file.is_file():
+        return _result(
+            "private_api",
+            "fail",
+            f"Private API module is unavailable: {PRIVATE_API_FILE}",
+            "Install the deployment-supplied API module before starting API services.",
+        )
+
+    try:
+        module = ast.parse(api_file.read_text(encoding="utf-8"), filename=str(api_file))
+    except (OSError, SyntaxError) as exc:
+        return _result(
+            "private_api",
+            "fail",
+            f"Private API module cannot be validated: {type(exc).__name__}: {exc}",
+            "Replace the deployment-supplied API module with a valid release copy.",
+        )
+
+    contract = None
+    for node in module.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "PUBLIC_VALUE_VISIBILITY_CONTRACT"
+            for target in node.targets
+        ):
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                contract = node.value.value
+            break
+    if contract != PRIVATE_API_VISIBILITY_CONTRACT:
+        return _result(
+            "private_api",
+            "fail",
+            "Deployment-supplied API module does not implement the current public visibility contract.",
+            f"Install api/server.py with PUBLIC_VALUE_VISIBILITY_CONTRACT={PRIVATE_API_VISIBILITY_CONTRACT!r}.",
+        )
     return _result(
         "private_api",
-        "fail",
-        f"Private API module is unavailable: {PRIVATE_API_FILE}",
-        "Install the deployment-supplied API module before starting API services.",
+        "pass",
+        f"Deployment-supplied API module implements {PRIVATE_API_VISIBILITY_CONTRACT}.",
     )
 
 
@@ -524,6 +569,7 @@ def collect_diagnostics(
     check_frontend_dependencies: bool = False,
     require_live_odds: bool = False,
     require_private_modules: bool = False,
+    require_demo_mode_off: bool = False,
     season: int | None = None,
     week: int | None = None,
     season_phase: str = "pre-run",
@@ -535,6 +581,7 @@ def collect_diagnostics(
         database_diagnostics = check_database(config, check_schema=check_schema)
         diagnostics.extend(database_diagnostics)
         diagnostics.append(check_odds_key(config, required=require_live_odds))
+        diagnostics.append(check_demo_mode(config, production=require_demo_mode_off))
         if (
             season is not None
             and week is not None
@@ -590,6 +637,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Fail if deployment-supplied NFL modules are missing",
     )
+    parser.add_argument(
+        "--require-demo-mode-off",
+        action="store_true",
+        help="Fail if fixture visibility is enabled",
+    )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable diagnostics")
     return parser.parse_args(argv)
 
@@ -604,6 +656,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         check_frontend_dependencies=args.check_frontend,
         require_live_odds=args.require_live_odds,
         require_private_modules=args.require_private_modules,
+        require_demo_mode_off=args.require_demo_mode_off,
         season=args.season,
         week=args.week,
         season_phase=args.season_phase,
