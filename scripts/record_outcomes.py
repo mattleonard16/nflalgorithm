@@ -19,6 +19,7 @@ from config import config
 from utils.clv import STATUS_OK, compute_clv, resolve_closing_lines
 from utils.db import execute, executemany, get_connection, read_dataframe
 from utils.grading import calculate_profit_units, get_confidence_tier, grade_bet
+from utils.live_odds import kickoffs_from_games
 from utils.nfl_markets import MARKET_TO_STAT
 
 
@@ -182,9 +183,8 @@ def grade_bets(season: int, week: int) -> List[Dict]:
 def compute_and_save_clv(season: int, week: int, outcomes: List[Dict]) -> Optional[float]:
     """Compute closing-line value per bet and persist it to clv_weekly.
 
-    Closing is `MAX(as_of)` per (event_id, player_id, market, sportsbook) —
-    the `games` table has no populated kickoff, so "last line before kickoff"
-    is not expressible yet.
+    Closing is the last snapshot at or before kickoff when the week's games
+    rows have ``kickoff_utc``. Keys with no schedule row keep ``MAX(as_of)``.
 
     Args:
         season: NFL season year
@@ -211,7 +211,15 @@ def compute_and_save_clv(season: int, week: int, outcomes: List[Dict]) -> Option
         print(f"No weekly_odds snapshots for {season} Week {week} — CLV unavailable")
         return None
 
-    closing = resolve_closing_lines(odds)
+    games = read_dataframe(
+        """
+        SELECT game_id, kickoff_utc
+        FROM games
+        WHERE season = ? AND week = ?
+        """,
+        params=(season, week),
+    )
+    closing = resolve_closing_lines(odds, kickoffs_from_games(games))
     close_by_key = {
         (row["event_id"], row["player_id"], row["market"], row["sportsbook"]): row
         for row in closing.to_dict("records")
