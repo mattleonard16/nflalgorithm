@@ -219,7 +219,8 @@ export async function getAnalyticsByMarket(
  * Get weekly summary for sidebar widget
  */
 export async function getWeeklySummary(weeks: number = 4): Promise<WeeklySummaryResponse> {
-  return fetchAPI<WeeklySummaryResponse>(`/api/weekly-summary?weeks=${weeks}`);
+  const raw = await fetchAPI<WeeklySummaryResponse>(`/api/weekly-summary?weeks=${weeks}`);
+  return { weeks: raw.weeks ?? [] };
 }
 
 // ============================================================================
