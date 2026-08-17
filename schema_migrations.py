@@ -1502,6 +1502,16 @@ class MigrationManager:
                     "idx_materialized_value_view_lookup",
                     "season, week, edge_percentage",
                 ),
+                (
+                    "nfl_player_context_snapshots",
+                    "idx_nfl_context_player",
+                    "season, week, player_id, captured_at",
+                ),
+                (
+                    "nfl_roster_players",
+                    "idx_roster_players_player",
+                    "season, player_id",
+                ),
             ):
                 # Existence is keyed on index name, so an index whose column set
                 # was widened later would otherwise keep its stale definition
@@ -1567,6 +1577,16 @@ class MigrationManager:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_roster_players_team ON nfl_roster_players(season, team, position)"
+        )
+        # Slate reads join rosters and snapshots by player_id; the snapshot PK
+        # is (season, week, gsis_id), so both need their own player_id path.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_roster_players_player "
+            "ON nfl_roster_players(season, player_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_nfl_context_player "
+            "ON nfl_player_context_snapshots(season, week, player_id, captured_at)"
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_nfl_context_team "
