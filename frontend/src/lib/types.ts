@@ -250,6 +250,41 @@ export interface AvailableWeek {
   week: number;
 }
 
+export interface ProjectionPick {
+  player_id: string;
+  player_name: string;
+  position: string | null;
+  team: string | null;
+  opponent: string | null;
+  home_team?: string | null;
+  away_team?: string | null;
+  is_home?: boolean | null;
+  market: string;
+  market_label: string;
+  /** Null when the viewer is not signed in — projected values are gated. */
+  mu: number | null;
+  sigma: number | null;
+  model_version: string;
+  generated_at: string;
+  depth_rank?: number | null;
+  is_starter?: boolean;
+  injury_status?: string | null;
+  roster_status?: string | null;
+}
+
+export interface ProjectionWeeksResponse {
+  available_weeks: AvailableWeek[];
+}
+
+export interface ProjectionsResponse {
+  season: number;
+  week: number;
+  total_count: number;
+  /** False when the viewer is signed out; picks then carry null mu/sigma. */
+  values_visible: boolean;
+  picks: ProjectionPick[];
+}
+
 export interface MetaResponse {
   available_weeks: AvailableWeek[];
   sportsbooks: string[];
