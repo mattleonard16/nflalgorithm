@@ -125,6 +125,26 @@ def test_pregame_readiness_requires_schedule_roster_and_history() -> None:
     }
 
 
+def test_pregame_readiness_fails_closed_on_unscoped_history() -> None:
+    diagnostics = evaluate_nfl_week_readiness(
+        2026,
+        1,
+        phase="pre-run",
+        counts={
+            "games": 16,
+            "games_with_kickoff": 16,
+            "roster_players": 1800,
+            "history_rows": 10000,
+            "history_empty_team_rows": 224,
+            "history_incomplete_franchise_seasons": 1,
+        },
+    )
+    assert {item.name for item in diagnostics if item.status == "fail"} == {
+        "nfl_history_team_scope",
+        "nfl_history_franchises",
+    }
+
+
 def test_postrun_readiness_requires_persisted_worker_evidence() -> None:
     diagnostics = evaluate_nfl_week_readiness(
         2026,

@@ -563,6 +563,13 @@ def transform_to_enhanced_stats(
     df["name"] = df["player_display_name"].fillna(df["player_name"])
     df["team"] = df[team_col].apply(canonicalize_team)
     df["opponent"] = df["opponent_team"].apply(canonicalize_team)
+    unscoped = df["team"].fillna("").astype(str).str.strip() == ""
+    if unscoped.any():
+        logger.warning(
+            "Dropping %s player-week rows whose team did not canonicalize",
+            int(unscoped.sum()),
+        )
+        df = df.loc[~unscoped].copy()
 
     # Stats mapping - handle both nflreadpy and nfl_data_py column names
     df["rushing_yards"] = df["rushing_yards"].fillna(0).astype(float)
@@ -657,6 +664,35 @@ def transform_to_enhanced_stats(
     result = df[final_cols].copy()
     logger.info(f"Transformed {len(result)} rows for player_stats_enhanced")
     return result
+
+
+def purge_unscoped_player_stats(seasons: Sequence[int]) -> int:
+    """Delete leftover rows whose team never canonicalized.
+
+    Re-ingest writes a new ``TEAM_``-scoped ``player_id``, so ``INSERT OR REPLACE``
+    cannot replace an orphan such as ``m_stafford`` from the pre-``LA``→``LAR``
+    ingest. Empty team is never valid for skill stats and those rows also lack
+    ``gsis_id``, so 2026 roster history joins miss the entire club.
+    """
+    unique_seasons = list(dict.fromkeys(int(season) for season in seasons))
+    if not unique_seasons:
+        return 0
+    placeholders = ", ".join(["?"] * len(unique_seasons))
+    deleted = execute(
+        f"""
+        DELETE FROM player_stats_enhanced
+        WHERE season IN ({placeholders})
+          AND (team IS NULL OR TRIM(team) = '')
+        """,
+        params=tuple(unique_seasons),
+    )
+    if deleted:
+        logger.info(
+            "Purged %s unscoped player-stat rows for seasons %s",
+            deleted,
+            unique_seasons,
+        )
+    return int(deleted)
 
 
 def upsert_player_stats(df: pd.DataFrame) -> int:
@@ -1484,6 +1520,7 @@ def ingest_seasons(
     logger.info("Weeks: %s", sorted(enhanced["week"].unique()))
 
     count = upsert_player_stats(enhanced)
+    purge_unscoped_player_stats(seasons)
     _refresh_context_and_log(roster_context, depth_charts, injuries, through_week)
     logger.info("=== Ingestion Complete: %s player-weeks ===", count)
     return count

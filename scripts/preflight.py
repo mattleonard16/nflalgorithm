@@ -346,6 +346,47 @@ def evaluate_nfl_week_readiness(
             )
         )
 
+    empty_team_rows = counts.get("history_empty_team_rows", 0)
+    if empty_team_rows > 0:
+        diagnostics.append(
+            _result(
+                "nfl_history_team_scope",
+                "fail",
+                f"{empty_team_rows} historical player-stat rows have an empty team for {scope}.",
+                "Re-ingest prior seasons through week 22 so LA/Rams rows canonicalize to LAR.",
+            )
+        )
+    else:
+        diagnostics.append(
+            _result(
+                "nfl_history_team_scope",
+                "pass",
+                f"Historical player-stat rows are team-scoped for {scope}.",
+            )
+        )
+
+    incomplete_franchise_seasons = counts.get("history_incomplete_franchise_seasons", 0)
+    if incomplete_franchise_seasons > 0:
+        diagnostics.append(
+            _result(
+                "nfl_history_franchises",
+                "fail",
+                (
+                    f"{incomplete_franchise_seasons} prior season(s) are missing a full "
+                    f"32-team skill-stat slate for {scope}."
+                ),
+                "Re-ingest 2024 and 2025; empty-team Rams rows previously hid an entire club.",
+            )
+        )
+    else:
+        diagnostics.append(
+            _result(
+                "nfl_history_franchises",
+                "pass",
+                f"Prior seasons include all 32 franchises for {scope}.",
+            )
+        )
+
     if phase == "pre-run":
         return diagnostics
 
@@ -447,6 +488,28 @@ def _collect_nfl_week_counts(connection: Any, season: int, week: int) -> dict[st
             WHERE season < ? OR (season = ? AND week < ?)
             """,
             (season, season, week),
+        ),
+        "history_empty_team_rows": scalar(
+            """
+            SELECT COUNT(*) FROM player_stats_enhanced
+            WHERE (season < ? OR (season = ? AND week < ?))
+              AND (team IS NULL OR TRIM(team) = '')
+            """,
+            (season, season, week),
+        ),
+        "history_incomplete_franchise_seasons": scalar(
+            """
+            SELECT COUNT(*) FROM (
+                SELECT season
+                FROM player_stats_enhanced
+                WHERE season < ?
+                GROUP BY season
+                HAVING COUNT(DISTINCT CASE
+                    WHEN team IS NOT NULL AND TRIM(team) <> '' THEN team
+                END) < 32
+            ) incomplete
+            """,
+            (season,),
         ),
         "context_rows": scalar(
             "SELECT COUNT(*) FROM nfl_player_context_snapshots WHERE season = ? AND week = ?",

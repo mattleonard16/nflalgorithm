@@ -201,6 +201,7 @@ def test_ingest_seasons_filters_week_and_returns_upsert_count(monkeypatch) -> No
 
     monkeypatch.setattr(ingest_real_nfl_data, "transform_to_enhanced_stats", fake_transform)
     monkeypatch.setattr(ingest_real_nfl_data, "upsert_player_stats", lambda df: len(df))
+    monkeypatch.setattr(ingest_real_nfl_data, "purge_unscoped_player_stats", lambda seasons: 0)
 
     count = ingest_real_nfl_data.ingest_seasons([2026], through_week=1)
 
