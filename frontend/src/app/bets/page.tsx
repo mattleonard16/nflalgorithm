@@ -1,16 +1,33 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckCircle2, XCircle, MinusCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getPerformance, getOutcomes, getUserBets, getUserStats } from "@/lib/api";
+import {
+  getPerformance,
+  getOutcomes,
+  getProjectionWeeks,
+  getUserBets,
+  getUserStats,
+} from "@/lib/api";
 import { getNbaPerformance, getNbaOutcomes } from "@/lib/nba-api";
-import type { BetOutcome, WeeklyPerformance, UserBet, UserStats } from "@/lib/types";
+import type {
+  AvailableWeek,
+  BetOutcome,
+  WeeklyPerformance,
+  UserBet,
+  UserStats,
+} from "@/lib/types";
 import type { NbaBetOutcome, NbaDailyPerformance } from "@/lib/nba-types";
+import { ValueCard } from "@/components/value-card";
+import { WatchedPicksTable } from "@/components/watched-picks";
+import { filterForWeek, latestWatchedWeek, useWatchlist } from "@/lib/slate-watchlist";
 
 type Sport = "nfl" | "nba";
+type BetsTab = "card" | "watching" | "my-slip" | "history";
 type ResultFilter = "all" | "WIN" | "LOSS" | "PUSH";
 
 const SPORT_TABS: { value: Sport; label: string }[] = [
@@ -131,6 +148,68 @@ function LoadingSkeleton() {
       <Card className="bg-[#0d1220] border-slate-800/50">
         <CardContent className="py-12 text-center text-slate-600 text-sm">
           Loading…
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Watching: algorithm picks starred on the Slate (localStorage only) ──────
+
+function WatchingTab() {
+  const { watchlist } = useWatchlist();
+  const [slateWeek, setSlateWeek] = useState<AvailableWeek | null>(null);
+  const [resolved, setResolved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getProjectionWeeks()
+      .then((data) => {
+        if (!cancelled) setSlateWeek(data.available_weeks[0] ?? null);
+      })
+      .catch(() => {
+        // No slate endpoint is not fatal here — fall back to what is stored.
+      })
+      .finally(() => {
+        if (!cancelled) setResolved(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const target = slateWeek ?? latestWatchedWeek(watchlist);
+  const picks = target ? filterForWeek(watchlist, target.season, target.week) : [];
+
+  return (
+    <div className="space-y-4">
+      <Card className="bg-[#0d1220] border-slate-800/50">
+        <CardHeader className="pb-3">
+          <div className="flex items-baseline justify-between gap-3 flex-wrap">
+            <CardTitle className="text-sm font-medium text-slate-400 uppercase tracking-wider">
+              Watching ({picks.length})
+            </CardTitle>
+            {target && (
+              <span className="text-xs text-slate-600 font-[family-name:var(--font-jetbrains)]">
+                Season {target.season} · Week {target.week}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 pt-1">
+            Algorithm picks you are tracking — not placed bets, and not part of your slip
+            or P/L. Change the set on the{" "}
+            <Link href="/" className="text-amber-400/80 hover:text-amber-300 transition-colors">
+              Slate
+            </Link>
+            .
+          </p>
+        </CardHeader>
+        <CardContent>
+          {!resolved ? (
+            <div className="px-6 py-10 text-center text-slate-600 text-sm">Loading…</div>
+          ) : (
+            <WatchedPicksTable picks={picks} />
+          )}
         </CardContent>
       </Card>
     </div>
@@ -707,6 +786,7 @@ function NbaOutcomesTable({ outcomes }: { outcomes: NbaBetOutcome[] }) {
 
 export default function BetsPage() {
   const [sport, setSport] = useState<Sport>("nfl");
+  const [tab, setTab] = useState<BetsTab>("card");
 
   return (
     <div className="p-6 space-y-6">
@@ -714,7 +794,7 @@ export default function BetsPage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-100">Bet Tracking</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Manage your slip and review historical outcomes</p>
+          <p className="text-sm text-slate-500 mt-0.5">Published card, your slip, and graded history</p>
         </div>
 
         {/* Sport tabs */}
@@ -736,8 +816,24 @@ export default function BetsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="my-slip" className="space-y-6">
+      <Tabs
+        value={tab}
+        onValueChange={(value) => setTab(value as BetsTab)}
+        className="space-y-6"
+      >
         <TabsList className="bg-slate-900/60 border border-slate-800/50 p-1 h-auto">
+          <TabsTrigger
+            value="card"
+            className="text-xs data-[state=active]:bg-slate-700 data-[state=active]:text-slate-100 text-slate-500 px-4 py-1.5"
+          >
+            Published Card
+          </TabsTrigger>
+          <TabsTrigger
+            value="watching"
+            className="text-xs data-[state=active]:bg-slate-700 data-[state=active]:text-slate-100 text-slate-500 px-4 py-1.5"
+          >
+            Watching
+          </TabsTrigger>
           <TabsTrigger
             value="my-slip"
             className="text-xs data-[state=active]:bg-slate-700 data-[state=active]:text-slate-100 text-slate-500 px-4 py-1.5"
@@ -751,6 +847,22 @@ export default function BetsPage() {
             History
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="card" className="mt-0">
+          {sport === "nfl" ? (
+            <ValueCard />
+          ) : (
+            <Card className="bg-[#0d1220] border-slate-800/50">
+              <CardContent className="py-12 text-center text-slate-600 text-sm">
+                The published card is NFL-only. Switch the sport toggle to NFL to see it.
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="watching" className="mt-0">
+          <WatchingTab />
+        </TabsContent>
 
         <TabsContent value="my-slip" className="mt-0">
           <MySlipTab />

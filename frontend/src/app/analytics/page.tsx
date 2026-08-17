@@ -20,11 +20,20 @@ import {
 } from "@/components/ui/table";
 import {
   getMeta,
+  getProjectionWeeks,
   getEdgeDistribution,
   getAnalyticsByPosition,
   getAnalyticsByMarket,
 } from "@/lib/api";
-import type { MetaResponse, PositionStats, MarketStats, EdgeDistribution } from "@/lib/types";
+import type {
+  AvailableWeek,
+  MetaResponse,
+  PositionStats,
+  MarketStats,
+  EdgeDistribution,
+} from "@/lib/types";
+import { filterForWeek, useWatchlist } from "@/lib/slate-watchlist";
+import { WatchedPicksTable } from "@/components/watched-picks";
 import {
   BarChart,
   Bar,
@@ -49,6 +58,7 @@ const FALLBACK_COLORS = ["#d4a84b", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", 
 
 export default function AnalyticsPage() {
   const [meta, setMeta] = useState<MetaResponse | null>(null);
+  const [slateWeeks, setSlateWeeks] = useState<AvailableWeek[]>([]);
   const [season, setSeason] = useState(2025);
   const [week, setWeek] = useState(13);
   const [edgeDist, setEdgeDist] = useState<EdgeDistribution | null>(null);
@@ -57,18 +67,45 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch metadata
+  const { watchlist } = useWatchlist();
+  const watchedThisWeek = filterForWeek(watchlist, season, week);
+
+  // Resolve the week to show. Published cards win; otherwise fall back to the
+  // algorithm slate so the watched picks land on a week that actually exists.
   useEffect(() => {
-    getMeta()
-      .then((data) => {
-        setMeta(data);
-        if (data.available_weeks.length > 0) {
-          setSeason(data.available_weeks[0].season);
-          setWeek(data.available_weeks[0].week);
-        }
-      })
-      .catch((err) => setError(err.message));
+    let cancelled = false;
+
+    async function resolveWeek() {
+      const metaData = await getMeta().catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load metadata");
+        return null;
+      });
+      if (cancelled) return;
+      if (metaData) setMeta(metaData);
+      if (metaData && metaData.available_weeks.length > 0) {
+        setSeason(metaData.available_weeks[0].season);
+        setWeek(metaData.available_weeks[0].week);
+        return;
+      }
+
+      const slate = await getProjectionWeeks().catch(() => null);
+      if (cancelled || !slate || slate.available_weeks.length === 0) return;
+      setSlateWeeks(slate.available_weeks);
+      setSeason(slate.available_weeks[0].season);
+      setWeek(slate.available_weeks[0].week);
+    }
+
+    resolveWeek();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  // Week options: published weeks when they exist, otherwise the slate's weeks.
+  const weekOptions: AvailableWeek[] =
+    meta && meta.available_weeks.length > 0 ? meta.available_weeks : slateWeeks;
+  const seasonOptions = [...new Set(weekOptions.map((w) => w.season))];
+  const weekNumbers = weekOptions.filter((w) => w.season === season).map((w) => w.week);
 
   // Fetch analytics data when season/week changes
   useEffect(() => {
@@ -130,7 +167,7 @@ export default function AnalyticsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-zinc-800 border-zinc-700">
-                  {[...new Set(meta?.available_weeks.map((w) => w.season) || [2025])].map((s) => (
+                  {(seasonOptions.length > 0 ? seasonOptions : [season]).map((s) => (
                     <SelectItem key={s} value={s.toString()} className="text-zinc-100">
                       {s}
                     </SelectItem>
@@ -149,7 +186,7 @@ export default function AnalyticsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-zinc-800 border-zinc-700">
-                  {(meta?.available_weeks.filter((w) => w.season === season).map((w) => w.week) || [1]).map((w) => (
+                  {(weekNumbers.length > 0 ? weekNumbers : [week]).map((w) => (
                     <SelectItem key={w} value={w.toString()} className="text-zinc-100">
                       {w}
                     </SelectItem>
@@ -166,6 +203,30 @@ export default function AnalyticsPage() {
           {error}
         </div>
       )}
+
+      {/* Watched slate: the model picks the user is tracking, card or no card */}
+      <Card className="bg-zinc-900 border-zinc-800">
+        <CardHeader>
+          <div className="flex items-baseline justify-between gap-3 flex-wrap">
+            <CardTitle className="text-zinc-100">Watched Slate</CardTitle>
+            <p className="text-xs text-zinc-500">
+              Algorithm picks you are tracking for Season {season} &middot; Week {week}
+              {watchedThisWeek.length > 0 && (
+                <>
+                  {" "}
+                  &middot;{" "}
+                  <span className="font-[family-name:var(--font-jetbrains)] tabular-nums text-amber-400/80">
+                    {watchedThisWeek.length}
+                  </span>
+                </>
+              )}
+            </p>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <WatchedPicksTable picks={watchedThisWeek} />
+        </CardContent>
+      </Card>
 
       {loading ? (
         <div className="flex items-center justify-center h-64">
