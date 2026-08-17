@@ -94,6 +94,8 @@ class TestOpenAPIContract:
             "/api/export/bundle",
             "/api/run/{run_id}/review",
             "/api/run/{run_id}/review-status",
+            "/api/projections",
+            "/api/projections/weeks",
         ]
         for path in expected_paths:
             assert path in paths, f"Missing path: {path}"
