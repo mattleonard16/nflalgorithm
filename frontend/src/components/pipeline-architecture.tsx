@@ -1,6 +1,6 @@
 "use client";
 
-import type { ArchitectureLevel, PipelineRun } from "@/lib/types";
+import type { ArchitectureLevel, PipelineRun, PipelineStageRun } from "@/lib/types";
 import {
   Activity,
   Bot,
@@ -74,12 +74,27 @@ const stageByNode: Record<string, string> = {
   "Final Betting Card": "materialize",
 };
 
+/**
+ * The API returns one stage row per attempt, oldest first. Only the newest
+ * attempt describes the current state — a stage that failed on attempt 1 and
+ * succeeded on the retry must not render as failed.
+ */
+function latestAttempt(stages: PipelineStageRun[], stageName: string): PipelineStageRun | null {
+  let latest: PipelineStageRun | null = null;
+  for (const stage of stages) {
+    if (stage.name !== stageName) continue;
+    if (!latest || stage.attempt >= latest.attempt) latest = stage;
+  }
+  return latest;
+}
+
 function nodeState(node: string, run: PipelineRun | null) {
   if (!run) return "idle";
   if (node === "Job Queue" && run.status === "queued") return "active";
   if (node === "NFL Worker" && ["running", "cancelling"].includes(run.status)) return "active";
   const stageName = stageByNode[node];
-  const stage = run.stages.find((item) => item.name === stageName);
+  if (!stageName) return "idle";
+  const stage = latestAttempt(run.stages ?? [], stageName);
   if (!stage) return "idle";
   if (stage.status === "running") return "active";
   if (stage.status === "failed") return "failed";
