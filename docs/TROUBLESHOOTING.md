@@ -19,6 +19,7 @@ make doctor-production
 | `DB_BACKEND=mysql requires DB_URL` | MySQL was selected without credentials | Set `DB_URL=mysql+pymysql://user:pass@host:3306/database` in the secret store; do not commit it |
 | `Database connection failed` | Bad credentials, unreachable host, missing database, or unwritable SQLite path | Verify `DB_BACKEND`, `DB_URL`/`SQLITE_DB_PATH`, DNS/firewall, and filesystem permissions |
 | `ODDS_API_KEY is not configured` | Live odds cannot be fetched | Set the key in `.env` locally or the deployment secret store. The NFL live pipeline intentionally fails closed without it |
+| `nfl_history_team_scope` or `nfl_history_franchises` fail | Historical stats have empty `team` (legacy `LA` Rams rows) or fewer than 32 clubs | `make ingest-nfl NFL_SEASONS=2024,2025 THROUGH_WEEK=22` then `make doctor-preseason SEASON=2026 WEEK=1`. Do not use `doctor-season` until a live-odds key exists |
 | `Private NFL execution modules are unavailable` | This checkout lacks deployment-supplied model modules | Read-only API/UI work remains available. Install the private modules before starting production workers |
 | `Node.js ... is too old` | Next.js 16 requires Node 20.9+ | Upgrade Node, then run `make frontend-install` |
 | `Frontend dependencies are not installed` | `frontend/node_modules` is absent | Run `make frontend-install` (`npm ci`) |
