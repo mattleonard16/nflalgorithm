@@ -35,24 +35,24 @@ function KPICard({
   trend?: "up" | "down" | "neutral";
 }) {
   const trendColors = {
-    up: "text-green-400",
+    up: "text-emerald-400",
     down: "text-red-400",
-    neutral: "text-zinc-400",
+    neutral: "text-slate-400",
   };
 
   return (
-    <Card className="bg-zinc-900 border-zinc-800">
+    <Card className="bg-[#111827] border-slate-800/60">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-zinc-400">
+        <CardTitle className="text-sm font-medium text-slate-400">
           {title}
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className={`text-2xl font-bold ${trend ? trendColors[trend] : "text-zinc-100"}`}>
+        <div className={`text-2xl font-bold ${trend ? trendColors[trend] : "text-slate-100"}`}>
           {value}
         </div>
         {subtitle && (
-          <p className="text-xs text-zinc-500 mt-1">{subtitle}</p>
+          <p className="text-xs text-slate-500 mt-1">{subtitle}</p>
         )}
       </CardContent>
     </Card>
@@ -65,7 +65,7 @@ function ResultIcon({ result }: { result: string | null }) {
   } else if (result === "LOSS") {
     return <XCircle className="h-5 w-5 text-red-400" />;
   } else {
-    return <MinusCircle className="h-5 w-5 text-zinc-500" />;
+    return <MinusCircle className="h-5 w-5 text-slate-500" />;
   }
 }
 
@@ -102,7 +102,7 @@ export default function PerformancePage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <p className="text-zinc-400">Loading performance data...</p>
+        <p className="text-slate-400">Loading performance data...</p>
       </div>
     );
   }
@@ -119,12 +119,14 @@ export default function PerformancePage() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-100">Performance</h1>
-          <p className="text-zinc-400 mt-1">Historical betting performance and outcomes</p>
+          <h1 className="text-4xl font-bold text-slate-100 tracking-tight font-display uppercase">
+            Performance
+          </h1>
+          <p className="text-sm text-slate-500 mt-0.5">Graded results after kickoff</p>
         </div>
-        <Card className="bg-zinc-900 border-zinc-800">
-          <CardContent className="py-12 text-center text-zinc-400">
-            No performance data yet. Run <code className="bg-zinc-800 px-2 py-1 rounded">make week-grade</code> after games complete to record outcomes.
+        <Card className="bg-[#111827] border-slate-800/60">
+          <CardContent className="py-12 text-center text-slate-400">
+            No performance data yet. Run <code className="bg-slate-800 px-2 py-1 rounded">make week-grade</code> after games complete to record outcomes.
           </CardContent>
         </Card>
       </div>
@@ -150,8 +152,10 @@ export default function PerformancePage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-zinc-100">Performance</h1>
-        <p className="text-zinc-400 mt-1">Historical betting performance and outcomes</p>
+        <h1 className="text-4xl font-bold text-slate-100 tracking-tight font-display uppercase">
+          Performance
+        </h1>
+        <p className="text-sm text-slate-500 mt-0.5">Graded results after kickoff</p>
       </div>
 
       {/* KPI Cards */}
@@ -175,31 +179,31 @@ export default function PerformancePage() {
       </div>
 
       {/* Profit Chart */}
-      <Card className="bg-zinc-900 border-zinc-800">
+      <Card className="bg-[#111827] border-slate-800/60">
         <CardHeader>
-          <CardTitle className="text-zinc-100">Cumulative Profit</CardTitle>
+          <CardTitle className="text-slate-100">Cumulative Profit</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
-                <XAxis dataKey="week" stroke="#a1a1aa" fontSize={12} />
-                <YAxis stroke="#a1a1aa" fontSize={12} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                <XAxis dataKey="week" stroke="#64748b" fontSize={12} />
+                <YAxis stroke="#64748b" fontSize={12} />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "#18181b",
-                    border: "1px solid #3f3f46",
+                    backgroundColor: "#0d1220",
+                    border: "1px solid #1e293b",
                     borderRadius: "8px",
                   }}
-                  labelStyle={{ color: "#fafafa" }}
+                  labelStyle={{ color: "#e2e8f0" }}
                 />
                 <Line
                   type="monotone"
                   dataKey="cumulative"
-                  stroke="#22c55e"
+                  stroke="#d4a84b"
                   strokeWidth={2}
-                  dot={{ fill: "#22c55e", strokeWidth: 0 }}
+                  dot={{ fill: "#d4a84b", strokeWidth: 0 }}
                   name="Cumulative Profit"
                 />
               </LineChart>
@@ -209,16 +213,16 @@ export default function PerformancePage() {
       </Card>
 
       {/* Bet-by-Bet Details */}
-      <Card className="bg-zinc-900 border-zinc-800">
+      <Card className="bg-[#111827] border-slate-800/60">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-zinc-100">Bet Details</CardTitle>
+          <CardTitle className="text-slate-100">Bet Details</CardTitle>
           <select
             value={selectedWeek ? `${selectedWeek.season}-${selectedWeek.week}` : ""}
             onChange={(e) => {
               const [season, week] = e.target.value.split("-").map(Number);
               setSelectedWeek({ season, week });
             }}
-            className="bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1 text-sm text-zinc-100"
+            className="bg-[#0d1220] border border-slate-700 rounded-md px-3 py-1 text-sm text-slate-100"
           >
             {performance.weeks.map((w) => (
               <option key={`${w.season}-${w.week}`} value={`${w.season}-${w.week}`}>
@@ -229,35 +233,35 @@ export default function PerformancePage() {
         </CardHeader>
         <CardContent>
           {outcomes.length === 0 ? (
-            <p className="text-zinc-500 text-center py-4">No bet outcomes for this week</p>
+            <p className="text-slate-500 text-center py-4">No bet outcomes for this week</p>
           ) : (
             <Table>
               <TableHeader>
-                <TableRow className="border-zinc-800 hover:bg-zinc-900/50">
-                  <TableHead className="text-zinc-400 w-12"></TableHead>
-                  <TableHead className="text-zinc-400">Player</TableHead>
-                  <TableHead className="text-zinc-400">Market</TableHead>
-                  <TableHead className="text-zinc-400 text-right">Line</TableHead>
-                  <TableHead className="text-zinc-400 text-right">Actual</TableHead>
-                  <TableHead className="text-zinc-400 text-right">Profit</TableHead>
+                <TableRow className="border-slate-800/60 hover:bg-slate-800/20">
+                  <TableHead className="text-slate-400 w-12"></TableHead>
+                  <TableHead className="text-slate-400">Player</TableHead>
+                  <TableHead className="text-slate-400">Market</TableHead>
+                  <TableHead className="text-slate-400 text-right">Line</TableHead>
+                  <TableHead className="text-slate-400 text-right">Actual</TableHead>
+                  <TableHead className="text-slate-400 text-right">Profit</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {outcomes.map((bet) => (
-                  <TableRow key={bet.bet_id} className="border-zinc-800 hover:bg-zinc-900/50">
+                  <TableRow key={bet.bet_id} className="border-slate-800/60 hover:bg-slate-800/20">
                     <TableCell>
                       <ResultIcon result={bet.result} />
                     </TableCell>
-                    <TableCell className="text-zinc-100 font-medium">
+                    <TableCell className="text-slate-100 font-medium">
                       {bet.player_name || "Unknown"}
                     </TableCell>
-                    <TableCell className="text-zinc-400">
+                    <TableCell className="text-slate-400">
                       {bet.market.replace("_", " ")}
                     </TableCell>
-                    <TableCell className="text-right text-zinc-300">
+                    <TableCell className="text-right text-slate-300">
                       O {bet.line}
                     </TableCell>
-                    <TableCell className="text-right text-zinc-100 font-medium">
+                    <TableCell className="text-right text-slate-100 font-medium">
                       {bet.actual_result?.toFixed(0) ?? "-"}
                     </TableCell>
                     <TableCell className={`text-right font-medium ${(bet.profit_units ?? 0) >= 0 ? "text-green-400" : "text-red-400"
@@ -276,30 +280,30 @@ export default function PerformancePage() {
       </Card>
 
       {/* Weekly Breakdown Table */}
-      <Card className="bg-zinc-900 border-zinc-800">
+      <Card className="bg-[#111827] border-slate-800/60">
         <CardHeader>
-          <CardTitle className="text-zinc-100">Week-by-Week Summary</CardTitle>
+          <CardTitle className="text-slate-100">Week-by-Week Summary</CardTitle>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
-              <TableRow className="border-zinc-800 hover:bg-zinc-900/50">
-                <TableHead className="text-zinc-400">Season</TableHead>
-                <TableHead className="text-zinc-400">Week</TableHead>
-                <TableHead className="text-zinc-400 text-right">Bets</TableHead>
-                <TableHead className="text-zinc-400 text-right">Wins</TableHead>
-                <TableHead className="text-zinc-400 text-right">Losses</TableHead>
-                <TableHead className="text-zinc-400 text-right">Profit</TableHead>
-                <TableHead className="text-zinc-400 text-right">ROI</TableHead>
-                <TableHead className="text-zinc-400">Best Bet</TableHead>
+              <TableRow className="border-slate-800/60 hover:bg-slate-800/20">
+                <TableHead className="text-slate-400">Season</TableHead>
+                <TableHead className="text-slate-400">Week</TableHead>
+                <TableHead className="text-slate-400 text-right">Bets</TableHead>
+                <TableHead className="text-slate-400 text-right">Wins</TableHead>
+                <TableHead className="text-slate-400 text-right">Losses</TableHead>
+                <TableHead className="text-slate-400 text-right">Profit</TableHead>
+                <TableHead className="text-slate-400 text-right">ROI</TableHead>
+                <TableHead className="text-slate-400">Best Bet</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {performance.weeks.map((week) => (
-                <TableRow key={`${week.season}-${week.week}`} className="border-zinc-800 hover:bg-zinc-900/50">
-                  <TableCell className="text-zinc-300">{week.season}</TableCell>
-                  <TableCell className="text-zinc-300">{week.week}</TableCell>
-                  <TableCell className="text-right text-zinc-300">{week.total_bets}</TableCell>
+                <TableRow key={`${week.season}-${week.week}`} className="border-slate-800/60 hover:bg-slate-800/20">
+                  <TableCell className="text-slate-300">{week.season}</TableCell>
+                  <TableCell className="text-slate-300">{week.week}</TableCell>
+                  <TableCell className="text-right text-slate-300">{week.total_bets}</TableCell>
                   <TableCell className="text-right text-green-400">{week.wins}</TableCell>
                   <TableCell className="text-right text-red-400">{week.losses}</TableCell>
                   <TableCell className={`text-right font-medium ${week.profit_units >= 0 ? "text-green-400" : "text-red-400"}`}>
@@ -308,7 +312,7 @@ export default function PerformancePage() {
                   <TableCell className={`text-right ${week.roi_pct >= 0 ? "text-green-400" : "text-red-400"}`}>
                     {week.roi_pct >= 0 ? "+" : ""}{week.roi_pct.toFixed(1)}%
                   </TableCell>
-                  <TableCell className="text-zinc-400">{week.best_bet || "-"}</TableCell>
+                  <TableCell className="text-slate-400">{week.best_bet || "-"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

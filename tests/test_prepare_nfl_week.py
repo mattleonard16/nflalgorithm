@@ -80,6 +80,7 @@ def test_prepare_week_refreshes_history_roster_schedule_and_predictions(monkeypa
     monkeypatch.setattr(prepare_nfl_week, "_count_scheduled_teams", lambda season, week: 32)
     monkeypatch.setattr(prepare_nfl_week, "_count_players_with_history", lambda season: 45)
     monkeypatch.setattr(prepare_nfl_week, "run_migrations", lambda: None)
+    monkeypatch.setattr(prepare_nfl_week, "_history_is_usable", lambda seasons: True)
 
     result = prepare_nfl_week.prepare_week(
         season=2026,
@@ -153,7 +154,7 @@ def test_prepare_week_reuses_existing_gsis_history_by_default(monkeypatch) -> No
         lambda season, week, roster_backed: pd.DataFrame({"player_id": ["BUF_season_ready"]}),
     )
 
-    monkeypatch.setattr(prepare_nfl_week, "_has_gsis_history", lambda seasons: True)
+    monkeypatch.setattr(prepare_nfl_week, "_history_is_usable", lambda seasons: True)
     monkeypatch.setattr(prepare_nfl_week, "_count_roster_players", lambda season: 53)
     monkeypatch.setattr(prepare_nfl_week, "_count_roster_teams", lambda season: 32)
     monkeypatch.setattr(prepare_nfl_week, "_count_prediction_eligible_roster", lambda season: 48)

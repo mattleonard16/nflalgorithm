@@ -13,8 +13,10 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setenv("SQLITE_DB_PATH", db_path)
 
     import config as cfg
+
     monkeypatch.setattr(cfg.config.database, "path", db_path)
     monkeypatch.setattr(cfg.config.database, "backend", "sqlite")
+    monkeypatch.setattr(cfg.config.api, "demo_mode", True)
 
     MigrationManager(db_path).run()
     return db_path
@@ -23,7 +25,9 @@ def db(tmp_path, monkeypatch):
 @pytest.fixture()
 def client(db):
     from fastapi.testclient import TestClient
+
     from api.server import app
+
     return TestClient(app)
 
 

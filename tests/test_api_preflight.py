@@ -75,6 +75,8 @@ def test_api_targets_run_preflight_before_uvicorn(target: str, tmp_path: Path) -
     )
 
     assert result.stdout.index("scripts.run_migrations") < result.stdout.index("uvicorn")
+    if target == "api-prod":
+        assert "--require-demo-mode-off" in result.stdout
 
 
 def test_fullstack_stops_when_preflight_fails(tmp_path: Path) -> None:

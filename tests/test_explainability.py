@@ -2,9 +2,9 @@
 
 import pytest
 
+from api.explainability import build_why_payload, build_why_payloads_batch
 from schema_migrations import MigrationManager
 from utils.db import execute
-from api.explainability import build_why_payload, build_why_payloads_batch
 
 
 @pytest.fixture()
@@ -14,8 +14,10 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setenv("SQLITE_DB_PATH", db_path)
 
     import config as cfg
+
     monkeypatch.setattr(cfg.config.database, "path", db_path)
     monkeypatch.setattr(cfg.config.database, "backend", "sqlite")
+    monkeypatch.setattr(cfg.config.api, "demo_mode", True)
 
     MigrationManager(db_path).run()
     return db_path
@@ -96,12 +98,14 @@ class TestBuildWhyPayload:
 
     def test_model_section(self, db):
         _seed_projection(db)
+        _seed_value_view(db)
         why = build_why_payload(2025, 22, "P001", "receiving_yards")
         assert why["model"]["mu"] == 85.0
         assert why["model"]["sigma"] == 8.0
         assert why["model"]["context_sensitivity"] == 0.3
 
     def test_risk_section(self, db):
+        _seed_value_view(db)
         _seed_risk(db)
         why = build_why_payload(2025, 22, "P001", "receiving_yards")
         assert why["risk"]["correlation_group"] == "same_team_1"
@@ -109,6 +113,7 @@ class TestBuildWhyPayload:
         assert why["risk"]["risk_adjusted_kelly"] == 0.018
 
     def test_agents_section(self, db):
+        _seed_value_view(db)
         _seed_agent_decision(db)
         why = build_why_payload(2025, 22, "P001", "receiving_yards")
         assert why["agents"]["decision"] == "APPROVED"
@@ -123,13 +128,30 @@ class TestBuildWhyPayload:
 
     def test_volume_section(self, db):
         _seed_projection(db)
+        _seed_value_view(db)
         why = build_why_payload(2025, 22, "P001", "receiving_yards")
         assert why["volume"]["target_share"] == 0.22
 
     def test_volatility_section(self, db):
         _seed_projection(db)
+        _seed_value_view(db)
         why = build_why_payload(2025, 22, "P001", "receiving_yards")
         assert why["volatility"]["score"] == 0.65
+
+    def test_hidden_value_row_does_not_leak_related_sections(self, db, monkeypatch):
+        _seed_projection(db)
+        _seed_value_view(db)
+        _seed_risk(db)
+        _seed_agent_decision(db)
+        import config as cfg
+
+        monkeypatch.setattr(cfg.config.api, "demo_mode", False)
+
+        why = build_why_payload(2025, 22, "P001", "receiving_yards")
+
+        assert why["model"]["mu"] is None
+        assert why["risk"]["correlation_group"] is None
+        assert why["agents"]["decision"] is None
 
 
 class TestBuildWhyBatch:

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from schema_migrations import MigrationManager
 from scripts.preflight import (
     check_database,
+    check_demo_mode,
     check_odds_key,
     check_private_api,
     check_private_modules,
@@ -55,12 +56,37 @@ def test_missing_odds_key_warns_locally_and_fails_when_required() -> None:
     assert "fail closed" in production.message
 
 
+def test_demo_mode_is_allowed_locally_and_rejected_for_production() -> None:
+    config = SimpleNamespace(api=SimpleNamespace(demo_mode=True))
+
+    local = check_demo_mode(config, production=False)
+    production = check_demo_mode(config, production=True)
+
+    assert local.status == "warn"
+    assert production.status == "fail"
+    assert production.action == "Set DEMO_MODE=false before running production checks."
+
+
 def test_missing_private_api_blocks_startup(tmp_path) -> None:
     diagnostic = check_private_api(tmp_path)
 
     assert diagnostic.status == "fail"
     assert "api/server.py" in diagnostic.message
     assert "before starting API services" in (diagnostic.action or "")
+
+
+def test_stale_private_api_visibility_contract_blocks_startup(tmp_path) -> None:
+    api_dir = tmp_path / "api"
+    api_dir.mkdir()
+    (api_dir / "server.py").write_text(
+        'PUBLIC_VALUE_VISIBILITY_CONTRACT = "legacy"\n', encoding="utf-8"
+    )
+
+    diagnostic = check_private_api(tmp_path)
+
+    assert diagnostic.status == "fail"
+    assert "current public visibility contract" in diagnostic.message
+    assert "publication-safe-v1" in (diagnostic.action or "")
 
 
 def test_missing_private_modules_explain_read_only_mode(tmp_path) -> None:
@@ -96,6 +122,26 @@ def test_pregame_readiness_requires_schedule_roster_and_history() -> None:
         "nfl_schedule",
         "nfl_roster",
         "nfl_history",
+    }
+
+
+def test_pregame_readiness_fails_closed_on_unscoped_history() -> None:
+    diagnostics = evaluate_nfl_week_readiness(
+        2026,
+        1,
+        phase="pre-run",
+        counts={
+            "games": 16,
+            "games_with_kickoff": 16,
+            "roster_players": 1800,
+            "history_rows": 10000,
+            "history_empty_team_rows": 224,
+            "history_incomplete_franchise_seasons": 1,
+        },
+    )
+    assert {item.name for item in diagnostics if item.status == "fail"} == {
+        "nfl_history_team_scope",
+        "nfl_history_franchises",
     }
 
 

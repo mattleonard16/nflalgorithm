@@ -39,8 +39,9 @@ def _has_gsis_history(history_seasons: list[int]) -> bool:
         f"""
         SELECT season,
                COUNT(DISTINCT player_id) AS total_players,
-               COUNT(DISTINCT CASE WHEN gsis_id IS NOT NULL THEN player_id END)
-                   AS linked_players
+               COUNT(DISTINCT CASE
+                   WHEN gsis_id IS NOT NULL AND TRIM(gsis_id) <> '' THEN player_id
+               END) AS linked_players
         FROM player_stats_enhanced
         WHERE season IN ({placeholders})
         GROUP BY season
@@ -54,6 +55,51 @@ def _has_gsis_history(history_seasons: list[int]) -> bool:
     }
     return all(
         coverage_by_season.get(season, 0) >= MIN_GSIS_HISTORY_COVERAGE for season in history_seasons
+    )
+
+
+def _has_unscoped_team_history(history_seasons: list[int]) -> bool:
+    if not history_seasons:
+        return False
+    placeholders = ", ".join(["?"] * len(history_seasons))
+    return (
+        _count_rows(
+            f"""
+            SELECT COUNT(*) AS n FROM player_stats_enhanced
+            WHERE season IN ({placeholders})
+              AND (team IS NULL OR TRIM(team) = '')
+            """,
+            tuple(history_seasons),
+        )
+        > 0
+    )
+
+
+def _history_covers_all_franchises(history_seasons: list[int]) -> bool:
+    if not history_seasons:
+        return False
+    placeholders = ", ".join(["?"] * len(history_seasons))
+    rows = fetchall(
+        f"""
+        SELECT season,
+               COUNT(DISTINCT CASE
+                   WHEN team IS NOT NULL AND TRIM(team) <> '' THEN team
+               END) AS teams
+        FROM player_stats_enhanced
+        WHERE season IN ({placeholders})
+        GROUP BY season
+        """,
+        params=tuple(history_seasons),
+    )
+    teams_by_season = {int(season): int(teams) for season, teams in rows}
+    return all(teams_by_season.get(season, 0) >= NFL_TEAM_COUNT for season in history_seasons)
+
+
+def _history_is_usable(history_seasons: list[int]) -> bool:
+    return (
+        _has_gsis_history(history_seasons)
+        and not _has_unscoped_team_history(history_seasons)
+        and _history_covers_all_franchises(history_seasons)
     )
 
 
@@ -161,10 +207,15 @@ def prepare_week(
     historical_player_weeks = 0
     history_refreshed = False
     if refresh_history is None and history_seasons:
-        refresh_history = not _has_gsis_history(history_seasons)
+        refresh_history = not _history_is_usable(history_seasons)
     if refresh_history and history_seasons:
         historical_player_weeks = ingest_seasons(history_seasons, through_week=22)
         history_refreshed = True
+    if history_seasons and not _history_is_usable(history_seasons):
+        raise RuntimeError(
+            "Historical player stats are missing team scope or franchise coverage; "
+            "re-ingest prior seasons before generating projections"
+        )
 
     current_player_weeks = ingest_seasons([season], through_week=week, stats_through_week=week - 1)
     roster_players = _count_roster_players(season)

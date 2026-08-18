@@ -1,16 +1,33 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckCircle2, XCircle, MinusCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getPerformance, getOutcomes, getUserBets, getUserStats } from "@/lib/api";
+import {
+  getPerformance,
+  getOutcomes,
+  getProjectionWeeks,
+  getUserBets,
+  getUserStats,
+} from "@/lib/api";
 import { getNbaPerformance, getNbaOutcomes } from "@/lib/nba-api";
-import type { BetOutcome, WeeklyPerformance, UserBet, UserStats } from "@/lib/types";
+import type {
+  AvailableWeek,
+  BetOutcome,
+  WeeklyPerformance,
+  UserBet,
+  UserStats,
+} from "@/lib/types";
 import type { NbaBetOutcome, NbaDailyPerformance } from "@/lib/nba-types";
+import { ValueCard } from "@/components/value-card";
+import { WatchedPicksTable } from "@/components/watched-picks";
+import { filterForWeek, latestWatchedWeek, useWatchlist } from "@/lib/slate-watchlist";
 
 type Sport = "nfl" | "nba";
+type BetsTab = "card" | "watching" | "my-slip" | "history";
 type ResultFilter = "all" | "WIN" | "LOSS" | "PUSH";
 
 const SPORT_TABS: { value: Sport; label: string }[] = [
@@ -76,10 +93,10 @@ function ResultIcon({ result }: { result: string | null }) {
 
 function TierBadge({ tier }: { tier: string }) {
   const tierMap: Record<string, string> = {
-    Premium: "bg-emerald-500/10 text-emerald-400",
-    Strong: "bg-blue-500/10 text-blue-400",
-    Marginal: "bg-amber-500/10 text-amber-400",
-    Pass: "bg-slate-700/50 text-slate-500",
+    Premium: "bg-primary/10 text-primary",
+    Strong: "bg-slate-700/40 text-slate-200",
+    Marginal: "bg-[#8a9a7b]/10 text-[#a9bb98]",
+    Pass: "bg-slate-800/60 text-slate-500",
   };
   return (
     <span className={cn("text-[11px] font-mono px-2 py-0.5 rounded", tierMap[tier] ?? "bg-slate-700/50 text-slate-500")}>
@@ -131,6 +148,68 @@ function LoadingSkeleton() {
       <Card className="bg-[#0d1220] border-slate-800/50">
         <CardContent className="py-12 text-center text-slate-600 text-sm">
           Loading…
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Watching: algorithm picks starred on the Slate (localStorage only) ──────
+
+function WatchingTab() {
+  const { watchlist } = useWatchlist();
+  const [slateWeek, setSlateWeek] = useState<AvailableWeek | null>(null);
+  const [resolved, setResolved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getProjectionWeeks()
+      .then((data) => {
+        if (!cancelled) setSlateWeek(data.available_weeks[0] ?? null);
+      })
+      .catch(() => {
+        // No slate endpoint is not fatal here — fall back to what is stored.
+      })
+      .finally(() => {
+        if (!cancelled) setResolved(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const target = slateWeek ?? latestWatchedWeek(watchlist);
+  const picks = target ? filterForWeek(watchlist, target.season, target.week) : [];
+
+  return (
+    <div className="space-y-4">
+      <Card className="bg-[#0d1220] border-slate-800/50">
+        <CardHeader className="pb-3">
+          <div className="flex items-baseline justify-between gap-3 flex-wrap">
+            <CardTitle className="text-sm font-medium text-slate-400 uppercase tracking-wider">
+              Watching ({picks.length})
+            </CardTitle>
+            {target && (
+              <span className="text-xs text-slate-600 font-[family-name:var(--font-jetbrains)]">
+                Season {target.season} · Week {target.week}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 pt-1">
+            Algorithm picks you are tracking — not placed bets, and not part of your slip
+            or P/L. Change the set on the{" "}
+            <Link href="/" className="text-amber-400/80 hover:text-amber-300 transition-colors">
+              Slate
+            </Link>
+            .
+          </p>
+        </CardHeader>
+        <CardContent>
+          {!resolved ? (
+            <div className="px-6 py-10 text-center text-slate-600 text-sm">Loading…</div>
+          ) : (
+            <WatchedPicksTable picks={picks} />
+          )}
         </CardContent>
       </Card>
     </div>
@@ -221,7 +300,7 @@ function MySlipTab() {
           {pending.length === 0 ? (
             <div className="px-6 py-10 text-center text-slate-600 text-sm">
               No pending bets. Use the{" "}
-              <span className="text-blue-400">+</span> button on value bets to add to your slip.
+              <span className="text-primary">+</span> button on value bets to add to your slip.
             </div>
           ) : (
             <UserBetsTable bets={pending} showResult={false} />
@@ -290,7 +369,7 @@ function UserBetsTable({ bets, showResult }: { bets: UserBet[]; showResult: bool
                 )}
                 <td className="px-4 py-3 font-mono text-xs text-slate-500">{dateStr}</td>
                 <td className="px-4 py-3">
-                  <span className="text-xs font-mono text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded uppercase">
+                  <span className="text-xs font-mono text-slate-300 bg-slate-800 px-2 py-0.5 rounded uppercase">
                     {bet.market}
                   </span>
                 </td>
@@ -438,7 +517,7 @@ function NflHistoryTab() {
                   const [s, w] = e.target.value.split("-").map(Number);
                   setSelectedWeek({ season: s, week: w });
                 }}
-                className="text-xs bg-slate-900 border border-slate-700 text-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+                className="text-xs bg-slate-900 border border-slate-700 text-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-primary"
               >
                 {weeks.map((w) => (
                   <option key={`${w.season}-${w.week}`} value={`${w.season}-${w.week}`}>
@@ -623,7 +702,7 @@ function GradedOutcomesTable({ outcomes }: { outcomes: BetOutcome[] }) {
                 <td className="px-4 py-3"><ResultIcon result={norm} /></td>
                 <td className="px-4 py-3 font-medium text-slate-200">{bet.player_name ?? "—"}</td>
                 <td className="px-4 py-3">
-                  <span className="text-xs font-mono text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded uppercase">
+                  <span className="text-xs font-mono text-slate-300 bg-slate-800 px-2 py-0.5 rounded uppercase">
                     {bet.market}
                   </span>
                 </td>
@@ -707,14 +786,19 @@ function NbaOutcomesTable({ outcomes }: { outcomes: NbaBetOutcome[] }) {
 
 export default function BetsPage() {
   const [sport, setSport] = useState<Sport>("nfl");
+  const [tab, setTab] = useState<BetsTab>("card");
 
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">Bet Tracking</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Manage your slip and review historical outcomes</p>
+          <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">
+            Bets
+          </p>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Published card, your slip, and graded history
+          </p>
         </div>
 
         {/* Sport tabs */}
@@ -725,9 +809,11 @@ export default function BetsPage() {
               onClick={() => setSport(tab.value)}
               className={cn(
                 "px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-150 font-[family-name:var(--font-jetbrains)]",
-                sport === tab.value
-                  ? "bg-blue-500/20 text-blue-300"
-                  : "text-slate-500 hover:text-slate-300"
+                sport !== tab.value
+                  ? "text-slate-500 hover:text-slate-300"
+                  : tab.value === "nba"
+                    ? "bg-blue-500/20 text-blue-300"
+                    : "bg-amber-500/20 text-amber-300"
               )}
             >
               {tab.label}
@@ -736,8 +822,24 @@ export default function BetsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="my-slip" className="space-y-6">
+      <Tabs
+        value={tab}
+        onValueChange={(value) => setTab(value as BetsTab)}
+        className="space-y-6"
+      >
         <TabsList className="bg-slate-900/60 border border-slate-800/50 p-1 h-auto">
+          <TabsTrigger
+            value="card"
+            className="text-xs data-[state=active]:bg-slate-700 data-[state=active]:text-slate-100 text-slate-500 px-4 py-1.5"
+          >
+            Published Card
+          </TabsTrigger>
+          <TabsTrigger
+            value="watching"
+            className="text-xs data-[state=active]:bg-slate-700 data-[state=active]:text-slate-100 text-slate-500 px-4 py-1.5"
+          >
+            Watching
+          </TabsTrigger>
           <TabsTrigger
             value="my-slip"
             className="text-xs data-[state=active]:bg-slate-700 data-[state=active]:text-slate-100 text-slate-500 px-4 py-1.5"
@@ -751,6 +853,22 @@ export default function BetsPage() {
             History
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="card" className="mt-0">
+          {sport === "nfl" ? (
+            <ValueCard />
+          ) : (
+            <Card className="bg-[#0d1220] border-slate-800/50">
+              <CardContent className="py-12 text-center text-slate-600 text-sm">
+                The published card is NFL-only. Switch the sport toggle to NFL to see it.
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="watching" className="mt-0">
+          <WatchingTab />
+        </TabsContent>
 
         <TabsContent value="my-slip" className="mt-0">
           <MySlipTab />

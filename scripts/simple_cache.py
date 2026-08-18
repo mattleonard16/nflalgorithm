@@ -113,7 +113,13 @@ class SimpleCachedClient:
                     return cached_response
 
             # Make actual API request
-            response = self.session.get(url, params=params, timeout=30)
+            response = self.session.get(
+                url,
+                params=params,
+                timeout=30,
+                expire_after=self._get_ttl_for_api(api_type),
+                force_refresh=force_refresh or config.api.force_cache_refresh,
+            )
             response.raise_for_status()
 
             # Log performance
@@ -214,7 +220,7 @@ class SimpleCachedClient:
     def _get_ttl_for_api(self, api_type: str) -> timedelta:
         """Get appropriate TTL based on API type."""
         if api_type == "odds":
-            return timedelta(minutes=config.cache.odds_cache_ttl_season)
+            return timedelta(seconds=config.pipeline.odds_max_age_seconds)
         elif api_type == "weather":
             return timedelta(minutes=config.cache.weather_cache_ttl)
         elif api_type == "player":

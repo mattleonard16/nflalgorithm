@@ -294,7 +294,9 @@ LOG_FORMAT=console  # use json in deployments
 LOG_LEVEL=INFO
 ```
 
-The UI and read-only API can start without `ODDS_API_KEY`, but live-odds NFL runs fail closed. `make doctor-production` also requires deployment-supplied private NFL modules.
+The UI and read-only API can start without `ODDS_API_KEY`, but live-odds NFL runs fail closed.
+`make doctor-production` also requires deployment-supplied private NFL modules and rejects
+`DEMO_MODE=true`.
 
 Before queueing a weekly run, verify that the requested season/week has a complete schedule,
 kickoff timestamps, a roster, and prior history:

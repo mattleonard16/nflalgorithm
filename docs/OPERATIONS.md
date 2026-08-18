@@ -29,26 +29,31 @@ the reason on the job, run, and interrupted stage.
    make migrate
    make doctor
    ```
-2. Update a specific NFL week (idempotent upserts):
+2. Confirm 2024-2025 history is team-scoped before live odds exist:
+   ```bash
+   make ingest-nfl NFL_SEASONS=2024,2025 THROUGH_WEEK=22
+   make doctor-preseason SEASON=2026 WEEK=1
+   ```
+3. Update a specific NFL week (idempotent upserts):
    ```bash
    make week-refresh SEASON=2026 WEEK=1
    make doctor-season SEASON=2026 WEEK=1
    ```
-3. Train or refresh rolling models if needed:
+4. Train or refresh rolling models if needed:
    ```bash
-   python -c "from models.position_specific import train_weekly_models; train_weekly_models([(2023, 10), (2023, 11), (2023, 12)])"
+   make nfl-train
    ```
-4. Queue the durable production run and let the worker execute it:
+5. Queue the durable production run and let the worker execute it:
    ```bash
    make production-run SEASON=2026 WEEK=1
    make pipeline-worker-once
    ```
-5. Verify persisted worker evidence and execute sanity checks:
+6. Verify persisted worker evidence and execute sanity checks:
    ```bash
    make doctor-season SEASON=2026 WEEK=1 SEASON_PHASE=post-run
    make health SEASON=2026 WEEK=1
    ```
-6. Launch dashboard and monitor feeds:
+7. Launch dashboard and monitor feeds:
    ```bash
    make dashboard
    ```

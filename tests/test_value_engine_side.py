@@ -161,3 +161,38 @@ def test_grade_bet_under_pathway_works():
 def test_grade_bet_over_pathway_still_works():
     assert grade_bet(80.0, 70.5, "over") == "win"
     assert grade_bet(60.0, 70.5, "over") == "loss"
+
+
+def test_rank_weekly_value_keeps_pre_kickoff_line_when_later_post_kickoff_exists(temp_db):
+    with sqlite3.connect(temp_db) as conn:
+        conn.execute("DELETE FROM weekly_odds")
+        conn.execute(
+            """
+            INSERT INTO games (game_id, season, week, home_team, away_team, game_date, kickoff_utc)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("evt1", 2024, 1, "MIA", "NE", "2024-09-08", "2024-09-08T17:00:00+00:00"),
+        )
+        conn.execute(
+            """
+            INSERT INTO weekly_odds
+            (event_id, season, week, player_id, market, sportsbook, line, price, as_of)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("evt1", 2024, 1, "p1", "rushing_yards", "BookA", 70.5, -110,
+             "2024-09-08T15:00:00+00:00"),
+        )
+        conn.execute(
+            """
+            INSERT INTO weekly_odds
+            (event_id, season, week, player_id, market, sportsbook, line, price, as_of)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("evt1", 2024, 1, "p1", "rushing_yards", "BookA", 99.5, -105,
+             "2024-09-08T18:00:00+00:00"),
+        )
+        conn.commit()
+
+    df = rank_weekly_value(2024, 1, min_edge=-1.0)
+    assert not df.empty
+    assert set(df["line"].unique()) == {70.5}

@@ -20,6 +20,7 @@ from models.position_specific.weekly import (
     _eligible_role_mask,
     _engineer_rolling_features,
     _iter_chronological_week_folds,
+    _prefer_richer_role_estimate,
     _load_player_history_for_rolling,
     _load_training_data,
     get_nfl_feature_cols,
@@ -280,6 +281,72 @@ class TestCausalTrainingWindows:
 
         assert _eligible_role_mask(df, "receiving_yards").tolist() == [False, True]
 
+    def test_role_eligibility_requires_rotation_level_volume(self):
+        df = pd.DataFrame(
+            {
+                "expected_targets": [0.4, 2.0, 6.0],
+                "expected_rushing_attempts": [0.2, 3.0, 12.0],
+                "expected_passing_attempts": [4.0, 12.0, 30.0],
+            }
+        )
+
+        assert _eligible_role_mask(df, "receiving_yards").tolist() == [False, True, True]
+        assert _eligible_role_mask(df, "rushing_yards").tolist() == [False, True, True]
+        assert _eligible_role_mask(df, "passing_yards").tolist() == [False, True, True]
+
+    def test_snapshot_depth_penalty_does_not_hide_wr2_history(self):
+        explicit = pd.Series([1.5, np.nan])
+        fallback = pd.Series([6.0, 4.0])
+        blended = _prefer_richer_role_estimate(explicit, fallback)
+        assert blended.tolist() == [6.0, 4.0]
+
+        df = pd.DataFrame(
+            {
+                "player_id": ["KC_xavier_worthy", "KC_xavier_worthy"],
+                "season": [2025, 2026],
+                "week": [18, 1],
+                "targets": [8.0, 0.0],
+                "receptions": [5.0, 0.0],
+                "receiving_yards": [70.0, 0.0],
+                "expected_targets": [1.5, 1.5],
+            }
+        )
+        engineered = _engineer_rolling_features(df, "receiving_yards")
+        week_one = engineered[(engineered["season"] == 2026) & (engineered["week"] == 1)]
+        assert float(week_one["expected_targets"].iloc[0]) >= 2.0
+        assert _eligible_role_mask(week_one, "receiving_yards").tolist() == [True]
+
+    def test_week1_role_uses_seventy_thirty_season_prior(self):
+        rows = []
+        for season, targets in ((2024, 8.0), (2025, 6.0)):
+            for week in range(1, 11):
+                rows.append(
+                    {
+                        "player_id": "KC_xavier_worthy",
+                        "season": season,
+                        "week": week,
+                        "targets": targets,
+                        "receptions": 4.0,
+                        "receiving_yards": 50.0,
+                        "expected_targets": 1.5,
+                    }
+                )
+        rows.append(
+            {
+                "player_id": "KC_xavier_worthy",
+                "season": 2026,
+                "week": 1,
+                "targets": 0.0,
+                "receptions": 0.0,
+                "receiving_yards": 0.0,
+                "expected_targets": 1.5,
+            }
+        )
+        week_one = _engineer_rolling_features(pd.DataFrame(rows), "receiving_yards")
+        week_one = week_one[(week_one["season"] == 2026) & (week_one["week"] == 1)]
+        assert float(week_one["expected_targets"].iloc[0]) == 0.70 * 6.0 + 0.30 * 8.0
+        assert "last_season_targets_pg" in get_nfl_feature_cols("receiving_yards")
+
     def test_chronological_folds_keep_future_weeks_out_of_training(self):
         rows = []
         for week in range(1, 7):
@@ -403,6 +470,11 @@ class TestTrainAndPredict:
         history["position"] = "WR"
         history["season"] = 2025
         history["week"] = [17, 18]
+        history.loc[history["week"] == 17, ["targets", "receptions", "receiving_yards"]] = [
+            8.0,
+            5.0,
+            70.0,
+        ]
         history.loc[history["week"] == 18, ["targets", "receptions", "receiving_yards"]] = 0
         reserve_history = history.copy()
         reserve_history["player_id"] = "LV_reserve_player"
@@ -454,7 +526,7 @@ class TestTrainAndPredict:
             }
         ]
         assert frame.iloc[0]["targets"] == 0
-        assert frame.iloc[0]["expected_targets"] > 0
+        assert frame.iloc[0]["expected_targets"] >= MARKET_CONFIGS["receiving_yards"]["min_value"]
         with sqlite3.connect(tmp_db) as conn:
             target_rows = conn.execute(
                 "SELECT COUNT(*) FROM player_stats_enhanced WHERE season = 2026 AND week = 1"

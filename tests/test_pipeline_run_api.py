@@ -1,14 +1,37 @@
 """Tests for the pipeline run API endpoints (Feature 1)."""
 
+import re
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
+from pipelines.nfl_contract import NFL_STAGE_NAMES
 from schema_migrations import MigrationManager
 from utils.db import execute
+
+_ARCHITECTURE_COMPONENT = (
+    Path(__file__).resolve().parents[1] / "frontend/src/components/pipeline-architecture.tsx"
+)
+
+
+def _ts_record_keys(source: str, name: str) -> set[str]:
+    """Extract the keys of a top-level `const <name>: Record<...> = { ... }` literal."""
+    start = source.index(f"const {name}")
+    body = source[start : source.index("\n};", start)]
+    return {
+        quoted or bare
+        for quoted, bare in re.findall(r'^\s*(?:"([^"]+)"|([A-Za-z0-9_]+))\s*:', body, re.MULTILINE)
+    }
+
+
+def _ts_record_values(source: str, name: str) -> set[str]:
+    start = source.index(f"const {name}")
+    body = source[start : source.index("\n};", start)]
+    return set(re.findall(r':\s*"([^"]+)"\s*,', body))
 
 
 @pytest.fixture()
@@ -113,6 +136,55 @@ class TestPipelineRunAPI:
         app.dependency_overrides.clear()
         response = TestClient(app).get("/api/system/architecture")
         assert response.status_code == 401
+
+    def test_architecture_levels_follow_documented_topology(self, client):
+        levels = client.get("/api/system/architecture").json()["levels"]
+
+        assert [level["id"] for level in levels] == [
+            "entry",
+            "control",
+            "execution",
+            "pipeline",
+            "decision",
+            "persistence",
+        ]
+        assert [level["level"] for level in levels] == [1, 2, 3, 4, 5, 6]
+        assert all(level["nodes"] for level in levels)
+
+
+class TestArchitectureControlRoomContract:
+    """The topology payload and the control room's node maps must not drift apart.
+
+    A node the dashboard has no icon for renders with a generic fallback, and a
+    stage name that no longer exists leaves that pipeline step permanently idle —
+    both look like a healthy-but-stalled pipeline rather than a bug.
+    """
+
+    def test_every_topology_node_has_a_dashboard_icon(self, client):
+        source = _ARCHITECTURE_COMPONENT.read_text()
+        icons = _ts_record_keys(source, "nodeIcons")
+
+        payload = client.get("/api/system/architecture").json()
+        nodes = {node for level in payload["levels"] for node in level["nodes"]}
+
+        assert icons, "failed to parse nodeIcons; the guard would pass vacuously"
+        assert nodes <= icons, f"topology nodes without an icon: {sorted(nodes - icons)}"
+
+    def test_stage_map_targets_real_pipeline_stages(self, client):
+        source = _ARCHITECTURE_COMPONENT.read_text()
+        mapped_nodes = _ts_record_keys(source, "stageByNode")
+        mapped_stages = _ts_record_values(source, "stageByNode")
+
+        payload = client.get("/api/system/architecture").json()
+        nodes = {node for level in payload["levels"] for node in level["nodes"]}
+
+        assert mapped_nodes and mapped_stages, "failed to parse stageByNode"
+        assert mapped_stages <= set(NFL_STAGE_NAMES), (
+            f"stage map references unknown stages: {sorted(mapped_stages - set(NFL_STAGE_NAMES))}"
+        )
+        assert mapped_nodes <= nodes, (
+            f"stage map references nodes the API no longer emits: {sorted(mapped_nodes - nodes)}"
+        )
 
 
 def test_free_account_is_not_pipeline_operator(monkeypatch) -> None:

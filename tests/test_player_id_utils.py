@@ -56,6 +56,10 @@ def test_relocated_clubs_still_resolve_from_historical_feeds() -> None:
     assert canonicalize_team("Washington Football Team") == "WAS"
 
 
+def test_nflverse_rams_abbreviation_is_lar() -> None:
+    assert canonicalize_team("LA") == "LAR"
+
+
 def test_unknown_club_returns_empty_rather_than_guessing() -> None:
     assert canonicalize_team("Toronto Argonauts") == ""
 

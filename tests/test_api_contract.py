@@ -21,6 +21,7 @@ def db(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cfg.config.database, "path", db_path)
     monkeypatch.setattr(cfg.config.database, "backend", "sqlite")
+    monkeypatch.setattr(cfg.config.api, "demo_mode", True)
 
     MigrationManager(db_path).run()
     return db_path
@@ -93,6 +94,8 @@ class TestOpenAPIContract:
             "/api/export/bundle",
             "/api/run/{run_id}/review",
             "/api/run/{run_id}/review-status",
+            "/api/projections",
+            "/api/projections/weeks",
         ]
         for path in expected_paths:
             assert path in paths, f"Missing path: {path}"

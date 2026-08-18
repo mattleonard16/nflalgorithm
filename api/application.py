@@ -16,6 +16,7 @@ except ModuleNotFoundError as exc:
 
 from api.diagnostics import router as diagnostics_router
 from api.pipeline_router import router as pipeline_router
+from api.projections_router import router as projections_router
 
 
 def _replace_legacy_routes(app: Any, replacement_router: Any) -> None:
@@ -39,5 +40,6 @@ def _replace_legacy_routes(app: Any, replacement_router: Any) -> None:
 _replace_legacy_routes(app, pipeline_router)
 app.include_router(pipeline_router)
 app.include_router(diagnostics_router)
+app.include_router(projections_router)
 
 __all__ = ["app"]

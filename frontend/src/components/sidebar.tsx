@@ -32,7 +32,7 @@ export interface NavItem {
 }
 
 export const nflNavItems: NavItem[] = [
-  { title: "Dashboard", href: "/", icon: LayoutDashboard },
+  { title: "Slate", href: "/", icon: LayoutDashboard },
   { title: "Performance", href: "/performance", icon: TrendingUp },
   { title: "Analytics", href: "/analytics", icon: BarChart3 },
   { title: "Backtest", href: "/backtest", icon: History },

@@ -44,10 +44,12 @@ if not all(path.is_file() for path in _private_algorithm_files):
 _private_api_server = Path(_project_root) / "api" / "server.py"
 _private_api_tests = [
     "test_api_contract.py",
+    "test_api_visibility.py",
     "test_export_api.py",
     "test_nba_api.py",
     "test_nba_api_contract.py",
     "test_pipeline_run_api.py",
+    "test_readiness.py",
     "test_record_bet_api.py",
     "test_risk_api.py",
 ]

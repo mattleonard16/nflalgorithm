@@ -18,6 +18,7 @@ def db(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cfg.config.database, "path", db_path)
     monkeypatch.setattr(cfg.config.database, "backend", "sqlite")
+    monkeypatch.setattr(cfg.config.api, "demo_mode", True)
 
     MigrationManager(db_path).run()
     return db_path
@@ -27,10 +28,11 @@ def db(tmp_path, monkeypatch):
 def client(db):
     from fastapi.testclient import TestClient
 
-    from api.pipeline_router import require_pipeline_reader
+    from api.pipeline_router import require_pipeline_operator, require_pipeline_reader
     from api.server import app
 
     app.dependency_overrides[require_pipeline_reader] = lambda: "test-reader"
+    app.dependency_overrides[require_pipeline_operator] = lambda: "test-operator"
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
@@ -139,7 +141,9 @@ class TestAgentReview:
         resp = client.post("/api/run/nonexistent/review?season=2025&week=22")
         assert resp.status_code == 404
 
-    def test_review_starts_for_valid_run(self, client, db):
+    def test_review_starts_for_valid_run(self, client, db, monkeypatch):
+        monkeypatch.setattr("api.server._run_agent_review_background", lambda *args: None)
+        _seed_bets(db)
         _seed_pipeline_run(db)
         resp = client.post("/api/run/test-run-001/review?season=2025&week=22")
         assert resp.status_code == 200

@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight doctor doctor-production doctor-season migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade production-run health health-check
+.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade production-run health health-check
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -84,6 +84,7 @@ help:
 	@echo "  make doctor              Validate tools, config, database, migrations, keys, and modules"
 	@echo "  make doctor-production   Require live-odds key and private execution modules"
 	@echo "  make doctor-season SEASON=2026 WEEK=1 [SEASON_PHASE=post-run]"
+	@echo "  make doctor-preseason SEASON=2026 WEEK=1"
 	@echo ""
 	@echo "Local applications:"
 	@echo "  make fullstack           Supervise worker, API (:8000), and frontend (:3000)"
@@ -242,16 +243,23 @@ migrate: api-preflight
 runtime-preflight:
 	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema
 
+runtime-production-preflight:
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-demo-mode-off
+
 # Validate a migrated local environment. Warnings identify optional live/private features.
 doctor:
 	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --check-frontend
 
 doctor-production:
-	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --check-frontend --require-live-odds --require-private-modules
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --check-frontend --require-live-odds --require-private-modules --require-demo-mode-off
 
 doctor-season:
 	$(call require_season_week)
-	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-live-odds --require-private-modules --season $(SEASON) --week $(WEEK) --season-phase $(SEASON_PHASE)
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-live-odds --require-private-modules --require-demo-mode-off --season $(SEASON) --week $(WEEK) --season-phase $(SEASON_PHASE)
+
+doctor-preseason:
+	$(call require_season_week)
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-private-modules --season $(SEASON) --week $(WEEK) --season-phase pre-run
 
 # Launch FastAPI backend after callers complete any required preflight.
 api-serve:
@@ -267,7 +275,7 @@ api-prod-serve:
 	$(DB_ENV) $(PYTHON) -m uvicorn api.application:app --host $(API_HOST) --port $(API_PORT)
 
 api-prod: api-preflight
-	@$(MAKE) runtime-preflight
+	@$(MAKE) runtime-production-preflight
 	@$(MAKE) api-prod-serve
 
 # Frontend commands
@@ -500,7 +508,7 @@ nba-full:
 # Train NFL weekly models for all markets (StackingRegressor ensemble)
 nfl-train:
 	@echo "Training NFL weekly models for all markets..."
-	$(DB_ENV) $(PYTHON) -c "from models.position_specific.weekly import train_weekly_models; from utils.db import read_dataframe; df = read_dataframe('SELECT DISTINCT season, week FROM player_stats_enhanced ORDER BY season DESC, week DESC LIMIT 20'); train_weekly_models(list(df.itertuples(index=False, name=None)))"
+	$(DB_ENV) $(PYTHON) -c "from models.position_specific.weekly import train_weekly_models; from utils.db import read_dataframe; from utils.season_priors import regular_season_training_weeks; df = read_dataframe('SELECT DISTINCT season, week FROM player_stats_enhanced'); train_weekly_models(regular_season_training_weeks(df))"
 
 # Optuna hyperparameter tuning for NFL stat models (writes best_params_{market}.json)
 nfl-tune:

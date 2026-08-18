@@ -201,6 +201,7 @@ def test_ingest_seasons_filters_week_and_returns_upsert_count(monkeypatch) -> No
 
     monkeypatch.setattr(ingest_real_nfl_data, "transform_to_enhanced_stats", fake_transform)
     monkeypatch.setattr(ingest_real_nfl_data, "upsert_player_stats", lambda df: len(df))
+    monkeypatch.setattr(ingest_real_nfl_data, "purge_unscoped_player_stats", lambda seasons: 0)
 
     count = ingest_real_nfl_data.ingest_seasons([2026], through_week=1)
 
@@ -649,6 +650,10 @@ def test_player_context_snapshot_combines_role_availability_and_priors() -> None
     assert veteran["practice_status"] == "Limited Participation in Practice"
     assert veteran["expected_targets"] > 0
     assert veteran["uncertainty_multiplier"] > 1.0
+    # Depth-2 factor is 0.70. History EWM of 8/10 targets times new-team
+    # 0.85 and questionable 0.75 is ~5.7 without the depth multiplier and
+    # ~4.0 with it. Keep the historical estimate.
+    assert veteran["expected_targets"] >= 5.0
 
 
 def test_player_context_excludes_depth_rows_after_target_week_cutoff() -> None:

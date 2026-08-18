@@ -64,7 +64,7 @@ def main() -> None:
         extra={"event": "startup.migrations"},
     )
     MigrationManager(config.database.path).run()
-    diagnostics = collect_diagnostics(check_schema=True)
+    diagnostics = collect_diagnostics(check_schema=True, require_demo_mode_off=True)
     print_diagnostics(diagnostics)
     if any(item.failed for item in diagnostics):
         logger.error(

@@ -20,7 +20,7 @@ export function PerformanceWidget({ collapsed = false }: PerformanceWidgetProps)
         async function fetchData() {
             try {
                 const data = await getWeeklySummary(4);
-                setWeeks(data.weeks);
+                setWeeks(data.weeks ?? []);
                 setError(null);
             } catch {
                 setError("Failed to load");
@@ -46,7 +46,7 @@ export function PerformanceWidget({ collapsed = false }: PerformanceWidgetProps)
         );
     }
 
-    if (error || weeks.length === 0) {
+    if (error || (weeks?.length ?? 0) === 0) {
         return null;
     }
 

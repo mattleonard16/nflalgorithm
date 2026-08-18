@@ -99,3 +99,23 @@ def test_supervisor_stops_before_children_when_preflight_fails(monkeypatch) -> N
         run_services.main()
 
     assert exc_info.value.code == 2
+
+
+def test_supervisor_requires_demo_mode_to_be_off(monkeypatch) -> None:
+    import scripts.run_services as run_services
+
+    monkeypatch.setattr(run_services, "configure_logging", lambda _service: None)
+    monkeypatch.setattr(run_services.MigrationManager, "run", lambda _self: None)
+    captured = {}
+
+    def collect(**kwargs):
+        captured.update(kwargs)
+        return [Diagnostic("database", "fail", "stop before children")]
+
+    monkeypatch.setattr(run_services, "collect_diagnostics", collect)
+    monkeypatch.setattr(run_services, "print_diagnostics", lambda _items: None)
+
+    with pytest.raises(SystemExit):
+        run_services.main()
+
+    assert captured["require_demo_mode_off"] is True

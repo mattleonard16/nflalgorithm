@@ -24,6 +24,8 @@ import type {
   UserStats,
   RecordBetPayload,
   ArchitectureStatus,
+  ProjectionWeeksResponse,
+  ProjectionsResponse,
 } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -55,6 +57,38 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
  */
 export async function getMeta(): Promise<MetaResponse> {
   return fetchAPI<MetaResponse>("/api/meta");
+}
+
+/**
+ * Get the weeks that have algorithm projections. Independent of the published
+ * betting card: a slate exists before any odds are joined.
+ */
+export async function getProjectionWeeks(): Promise<ProjectionWeeksResponse> {
+  return fetchAPI<ProjectionWeeksResponse>("/api/projections/weeks");
+}
+
+/**
+ * Get the algorithm slate for a week.
+ *
+ * `likely` defaults to true: the Board shows players the depth chart says will
+ * see the field. Pass false for the full projection file.
+ */
+export async function getProjections(
+  season: number,
+  week: number,
+  options?: { market?: string; position?: string; likely?: boolean }
+): Promise<ProjectionsResponse> {
+  const params = new URLSearchParams({
+    season: season.toString(),
+    week: week.toString(),
+  });
+  if (options?.market) params.append("market", options.market);
+  if (options?.position) params.append("position", options.position);
+  params.append("likely", (options?.likely ?? true) ? "true" : "false");
+
+  // Authenticated so signed-in users get mu/sigma; the endpoint itself is
+  // public and simply omits projected values without a valid session.
+  return fetchAPIAuth<ProjectionsResponse>(`/api/projections?${params.toString()}`);
 }
 
 /**
@@ -219,7 +253,8 @@ export async function getAnalyticsByMarket(
  * Get weekly summary for sidebar widget
  */
 export async function getWeeklySummary(weeks: number = 4): Promise<WeeklySummaryResponse> {
-  return fetchAPI<WeeklySummaryResponse>(`/api/weekly-summary?weeks=${weeks}`);
+  const raw = await fetchAPI<WeeklySummaryResponse>(`/api/weekly-summary?weeks=${weeks}`);
+  return { weeks: raw.weeks ?? [] };
 }
 
 // ============================================================================
@@ -339,7 +374,7 @@ export async function requestAgentReview(
   season: number,
   week: number
 ): Promise<{ run_id: string; review_status: string; message: string }> {
-  return fetchAPI(`/api/run/${runId}/review?season=${season}&week=${week}`, {
+  return fetchAPIAuth(`/api/run/${runId}/review?season=${season}&week=${week}`, {
     method: "POST",
   });
 }
@@ -352,7 +387,7 @@ export async function getAgentReviewStatus(
   season: number,
   week: number
 ): Promise<AgentReviewStatus> {
-  return fetchAPI<AgentReviewStatus>(
+  return fetchAPIAuth<AgentReviewStatus>(
     `/api/run/${runId}/review-status?season=${season}&week=${week}`
   );
 }

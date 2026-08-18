@@ -38,6 +38,7 @@ api = SimpleNamespace(
     enable_caching=env_flag("API_ENABLE_CACHING", True),
     cache_offline_mode=env_flag("API_CACHE_OFFLINE_MODE"),
     force_cache_refresh=env_flag("API_FORCE_CACHE_REFRESH"),
+    demo_mode=env_flag("DEMO_MODE"),
 )
 
 cache = SimpleNamespace(
@@ -50,8 +51,6 @@ cache = SimpleNamespace(
     http_cache_expire_after=3600,
     rate_limit_burst_capacity=60,
     rate_limit_tokens_per_minute=60,
-    odds_cache_ttl_season=30,
-    odds_cache_ttl_offseason=300,
     weather_cache_ttl=60,
     weather_cache_ttl_dome=120,
     player_cache_ttl=120,
@@ -96,9 +95,7 @@ pipeline = SimpleNamespace(
     odds_max_age_seconds=env_int("NFL_ODDS_MAX_AGE_SECONDS", 300),
     odds_min_event_coverage=env_float("NFL_ODDS_MIN_EVENT_COVERAGE", 1.0),
     odds_min_market_coverage=env_float("NFL_ODDS_MIN_MARKET_COVERAGE", 1.0),
-    odds_min_sportsbooks_per_event_market=env_int(
-        "NFL_ODDS_MIN_SPORTSBOOKS_PER_EVENT_MARKET", 2
-    ),
+    odds_min_sportsbooks_per_event_market=env_int("NFL_ODDS_MIN_SPORTSBOOKS_PER_EVENT_MARKET", 2),
     odds_required_markets=tuple(
         value.strip()
         for value in os.getenv(

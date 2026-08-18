@@ -80,7 +80,7 @@ def _load_market_data(market: str) -> pd.DataFrame:
     df = _engineer_rolling_features(df, market)
 
     if filter_col in df.columns:
-        df = df[df[filter_col] > config_dict["min_value"]].copy()
+        df = df[df[filter_col] >= config_dict["min_value"]].copy()
 
     feature_cols = get_nfl_feature_cols(market)
     df = df.dropna(subset=feature_cols + [target_col])
