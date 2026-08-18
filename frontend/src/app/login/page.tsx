@@ -33,13 +33,13 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-zinc-950 p-4">
-      <Card className="w-full max-w-md bg-zinc-900 border-zinc-800">
+    <div className="min-h-screen flex items-center justify-center bg-[#0a0e17] p-4">
+      <Card className="w-full max-w-md bg-[#111827] border-slate-800">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold text-zinc-100">
+          <CardTitle className="text-2xl font-bold text-slate-100">
             NFL Algorithm
           </CardTitle>
-          <CardDescription className="text-zinc-400">
+          <CardDescription className="text-slate-400">
             Sign in to your account
           </CardDescription>
         </CardHeader>
@@ -52,7 +52,7 @@ export default function LoginPage() {
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-zinc-400">
+              <Label htmlFor="email" className="text-slate-400">
                 Email
               </Label>
               <Input
@@ -62,12 +62,12 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 required
-                className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                className="bg-[#0d1220] border-slate-700 text-slate-100"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-zinc-400">
+              <Label htmlFor="password" className="text-slate-400">
                 Password
               </Label>
               <Input
@@ -77,21 +77,21 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
-                className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                className="bg-[#0d1220] border-slate-700 text-slate-100"
               />
             </div>
 
             <Button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              className="w-full bg-primary text-primary-foreground hover:bg-amber-300"
             >
               {loading ? "Signing in..." : "Sign In"}
             </Button>
 
-            <p className="text-center text-sm text-zinc-400">
+            <p className="text-center text-sm text-slate-400">
               Don&apos;t have an account?{" "}
-              <Link href="/signup" className="text-blue-400 hover:text-blue-300">
+              <Link href="/signup" className="text-primary hover:text-amber-300">
                 Sign up
               </Link>
             </p>

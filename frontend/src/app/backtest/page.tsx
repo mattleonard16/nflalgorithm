@@ -71,9 +71,20 @@ function StatCard({
   );
 }
 
-function SortIcon({ col, sortKey, sortAsc }: { col: SortKey; sortKey: SortKey; sortAsc: boolean }) {
+function SortIcon({
+  col,
+  sortKey,
+  sortAsc,
+  sport,
+}: {
+  col: SortKey;
+  sortKey: SortKey;
+  sortAsc: boolean;
+  sport: Sport;
+}) {
+  const active = sport === "nba" ? "text-blue-400" : "text-primary";
   return sortKey === col ? (
-    <span className="ml-1 text-blue-400">{sortAsc ? "↑" : "↓"}</span>
+    <span className={`ml-1 ${active}`}>{sortAsc ? "↑" : "↓"}</span>
   ) : (
     <span className="ml-1 text-slate-700">↕</span>
   );
@@ -158,9 +169,11 @@ function BacktestContent() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">Backtest Results</h1>
+          <h1 className="text-4xl font-bold text-slate-100 tracking-tight font-display uppercase">
+            Backtest
+          </h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Historical model vs line accuracy
+            Model MAE against the closing line
           </p>
         </div>
 
@@ -172,9 +185,11 @@ function BacktestContent() {
               onClick={() => setSport(tab.value)}
               className={cn(
                 "px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-150 font-[family-name:var(--font-jetbrains)]",
-                sport === tab.value
-                  ? "bg-blue-500/20 text-blue-300"
-                  : "text-slate-500 hover:text-slate-300"
+                sport !== tab.value
+                  ? "text-slate-500 hover:text-slate-300"
+                  : tab.value === "nba"
+                    ? "bg-blue-500/20 text-blue-300"
+                    : "bg-amber-500/20 text-amber-300"
               )}
             >
               {tab.label}
@@ -278,7 +293,14 @@ function BacktestContent() {
                         onClick={key ? () => handleSort(key) : undefined}
                       >
                         {label}
-                        {key && <SortIcon col={key} sortKey={sortKey} sortAsc={sortAsc} />}
+                        {key && (
+                          <SortIcon
+                            col={key}
+                            sortKey={sortKey}
+                            sortAsc={sortAsc}
+                            sport={sport}
+                          />
+                        )}
                       </th>
                     ))}
                   </tr>
@@ -296,7 +318,14 @@ function BacktestContent() {
                         {pick.player_name ?? "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <span className="text-xs font-mono text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded uppercase">
+                        <span
+                          className={cn(
+                            "text-xs font-mono px-2 py-0.5 rounded uppercase",
+                            sport === "nba"
+                              ? "text-blue-400 bg-blue-500/10"
+                              : "text-slate-300 bg-slate-800"
+                          )}
+                        >
                           {pick.market}
                         </span>
                       </td>
@@ -306,7 +335,12 @@ function BacktestContent() {
                       <td className="px-4 py-3 text-right font-mono font-bold text-slate-100">
                         {pick.actual.toFixed(1)}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-blue-400">
+                      <td
+                        className={cn(
+                          "px-4 py-3 text-right font-mono",
+                          sport === "nba" ? "text-blue-400" : "text-primary"
+                        )}
+                      >
                         {pick.mu != null ? pick.mu.toFixed(1) : "—"}
                       </td>
                       <td className="px-4 py-3 text-right">

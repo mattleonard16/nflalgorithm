@@ -30,8 +30,8 @@ import { useAuth } from "@/lib/auth-context";
 import type { ArchitectureStatus, HealthResponse, PipelineRun } from "@/lib/types";
 
 const statusStyles: Record<string, string> = {
-  queued: "border-amber-400/25 bg-amber-400/10 text-amber-300",
-  running: "border-sky-400/25 bg-sky-400/10 text-sky-300",
+  queued: "border-[#c4b08a]/30 bg-[#c4b08a]/10 text-[#c4b08a]",
+  running: "border-amber-400/35 bg-amber-400/10 text-amber-300",
   cancelling: "border-orange-400/25 bg-orange-400/10 text-orange-300",
   completed: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300",
   failed: "border-red-400/25 bg-red-400/10 text-red-300",
@@ -66,7 +66,7 @@ function Metric({
   icon: React.ComponentType<{ className?: string }>;
   state?: "good" | "warn" | "neutral";
 }) {
-  const accent = state === "good" ? "text-emerald-400" : state === "warn" ? "text-amber-400" : "text-sky-400";
+  const accent = state === "good" ? "text-emerald-400" : state === "warn" ? "text-amber-400" : "text-slate-400";
   return (
     <div className="group border-l border-slate-700/50 px-4 first:border-l-0 first:pl-0">
       <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
@@ -118,7 +118,7 @@ function RunRow({
       <div>
         <p className="text-xs text-slate-300">{run.stages_completed}/{run.stages_requested} stages</p>
         <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-slate-800">
-          <div className="h-full rounded-full bg-sky-400 transition-all duration-500" style={{ width: `${progress}%` }} />
+          <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${progress}%` }} />
         </div>
       </div>
       <div className="min-w-0">
@@ -383,7 +383,7 @@ export default function SystemPage() {
         ) : architecture ? (
           <div className="border-t border-slate-800/60 px-4 py-10 text-center text-sm text-slate-500">
             No durable runs yet. Publish a card with Refresh on{" "}
-            <Link href="/bets" className="text-sky-400 hover:text-sky-300">
+            <Link href="/bets" className="text-primary hover:text-amber-300">
               Bets
             </Link>
             , or queue one from the CLI with{" "}
@@ -391,7 +391,7 @@ export default function SystemPage() {
               make production-run
             </code>{" "}
             — the pipeline worker executes it. Projections alone live on the{" "}
-            <Link href="/" className="text-sky-400 hover:text-sky-300">
+            <Link href="/" className="text-primary hover:text-amber-300">
               Slate
             </Link>
             .

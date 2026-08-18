@@ -18,26 +18,28 @@ import {
   TimerReset,
 } from "lucide-react";
 
+// Tone ids come from the API and must keep their names. Only the CSS behind
+// them changes: a steel/gold/olive/khaki ramp instead of a rainbow.
 const toneClasses = {
   blue: {
-    frame: "border-sky-400/25 bg-sky-400/[0.035]",
-    node: "border-sky-400/45 bg-sky-400/[0.08] text-sky-100",
-    glow: "shadow-[0_0_26px_rgba(56,189,248,0.08)]",
+    frame: "border-[#7a8796]/25 bg-[#7a8796]/[0.05]",
+    node: "border-[#7a8796]/50 bg-[#7a8796]/[0.10] text-slate-200",
+    glow: "shadow-[0_0_26px_rgba(122,135,150,0.12)]",
   },
   amber: {
     frame: "border-amber-400/25 bg-amber-400/[0.035]",
     node: "border-amber-400/45 bg-amber-400/[0.08] text-amber-100",
-    glow: "shadow-[0_0_26px_rgba(251,191,36,0.08)]",
+    glow: "shadow-[0_0_26px_rgba(212,168,75,0.10)]",
   },
   green: {
-    frame: "border-emerald-400/25 bg-emerald-400/[0.035]",
-    node: "border-emerald-400/45 bg-emerald-400/[0.08] text-emerald-100",
-    glow: "shadow-[0_0_26px_rgba(52,211,153,0.08)]",
+    frame: "border-[#8a9a7b]/25 bg-[#8a9a7b]/[0.05]",
+    node: "border-[#8a9a7b]/50 bg-[#8a9a7b]/[0.10] text-[#c9d7ba]",
+    glow: "shadow-[0_0_26px_rgba(138,154,123,0.12)]",
   },
   purple: {
-    frame: "border-violet-400/25 bg-violet-400/[0.035]",
-    node: "border-violet-400/45 bg-violet-400/[0.08] text-violet-100",
-    glow: "shadow-[0_0_26px_rgba(167,139,250,0.08)]",
+    frame: "border-[#c4b08a]/25 bg-[#c4b08a]/[0.05]",
+    node: "border-[#c4b08a]/50 bg-[#c4b08a]/[0.10] text-[#e6dac2]",
+    glow: "shadow-[0_0_26px_rgba(196,176,138,0.12)]",
   },
 };
 
@@ -123,7 +125,7 @@ function ArchitectureNode({ node, level, run }: { node: string; level: Architect
       {state !== "idle" && (
         <span
           className={`absolute right-2 top-2 h-1.5 w-1.5 rounded-full ${
-            state === "failed" ? "bg-red-400" : state === "complete" ? "bg-emerald-400" : "bg-sky-300"
+            state === "failed" ? "bg-[#b85c4a]" : state === "complete" ? "bg-[#8a9a7b]" : "bg-[#d4a84b]"
           }`}
         />
       )}
@@ -136,13 +138,13 @@ export function PipelineArchitecture({ levels, activeRun }: { levels: Architectu
     <section aria-labelledby="architecture-heading" className="overflow-hidden rounded-2xl border border-slate-700/40 bg-[#07111d]/90">
       <div className="flex items-end justify-between gap-4 border-b border-slate-700/40 px-5 py-4">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-sky-400/70">Live topology</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-400/70">Live topology</p>
           <h2 id="architecture-heading" className="font-display text-2xl font-bold uppercase tracking-wide text-slate-100">
             NFL scalable architecture
           </h2>
         </div>
         <div className="hidden items-center gap-2 text-[10px] uppercase tracking-widest text-slate-500 sm:flex">
-          <span className="h-1.5 w-1.5 rounded-full bg-sky-300 pipeline-node-active" />
+          <span className="h-1.5 w-1.5 rounded-full bg-[#d4a84b] pipeline-node-active" />
           Live state
         </div>
       </div>
@@ -178,7 +180,7 @@ export function PipelineArchitecture({ levels, activeRun }: { levels: Architectu
                   </p>
                 )}
                 {level.id === "pipeline" && (
-                  <p className="absolute bottom-3 left-3 right-3 rounded-lg border border-emerald-400/30 bg-emerald-400/[0.05] px-2 py-1.5 text-center text-[9px] font-semibold uppercase tracking-[0.18em] text-emerald-300/80">
+                  <p className="absolute bottom-3 left-3 right-3 rounded-lg border border-[#8a9a7b]/35 bg-[#8a9a7b]/[0.07] px-2 py-1.5 text-center text-[9px] font-semibold uppercase tracking-[0.18em] text-[#a9bb98]">
                     Point-in-time inputs
                   </p>
                 )}

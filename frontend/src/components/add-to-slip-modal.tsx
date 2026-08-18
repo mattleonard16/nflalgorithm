@@ -187,7 +187,7 @@ export function AddToSlipModal({
               size="sm"
               onClick={handleSubmit}
               disabled={submitting || !isValidStake}
-              className="flex-1 bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
+              className="flex-1 bg-primary text-primary-foreground hover:bg-amber-300 disabled:opacity-50"
             >
               {submitting ? "Recording…" : "Add to Slip"}
             </Button>

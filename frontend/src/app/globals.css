@@ -98,10 +98,10 @@
   --input: rgba(148, 163, 184, 0.15);
   --ring: #d4a84b;
   --chart-1: #d4a84b;
-  --chart-2: #22d3ee;
-  --chart-3: #a78bfa;
-  --chart-4: #34d399;
-  --chart-5: #f87171;
+  --chart-2: #c4b08a;
+  --chart-3: #8a9a7b;
+  --chart-4: #7a8796;
+  --chart-5: #b85c4a;
   --sidebar: #0d1220;
   --sidebar-foreground: #e2e8f0;
   --sidebar-primary: #d4a84b;
@@ -164,7 +164,7 @@
 
 /* Pipeline control-room topology */
 .architecture-scroll {
-  scrollbar-color: rgba(56, 189, 248, 0.22) transparent;
+  scrollbar-color: rgba(212, 168, 75, 0.22) transparent;
 }
 
 .architecture-level {
@@ -189,7 +189,7 @@
   right: -14px;
   width: 14px;
   height: 1px;
-  background: rgba(125, 211, 252, 0.35);
+  background: rgba(212, 168, 75, 0.35);
 }
 
 .architecture-flow::after {
@@ -201,7 +201,7 @@
   height: 0;
   border-top: 3.5px solid transparent;
   border-bottom: 3.5px solid transparent;
-  border-left: 5px solid rgba(125, 211, 252, 0.7);
+  border-left: 5px solid rgba(212, 168, 75, 0.7);
 }
 
 .architecture-flow > span {
@@ -211,8 +211,8 @@
   width: 4px;
   height: 4px;
   border-radius: 999px;
-  background: #7dd3fc;
-  box-shadow: 0 0 8px rgba(125, 211, 252, 0.7);
+  background: #d4a84b;
+  box-shadow: 0 0 8px rgba(212, 168, 75, 0.7);
   animation: architectureFlow 1.8s linear infinite;
 }
 

@@ -8,8 +8,8 @@ const MONO = "font-[family-name:var(--font-jetbrains)]";
 
 const MARKET_DOTS: Record<string, string> = {
   Pass: "#d4a84b",
-  Rec: "#5b9fd4",
-  Rush: "#3d9b6e",
+  Rec: "#c4b08a",
+  Rush: "#8a9a7b",
 };
 
 function marketDot(label: string): string {

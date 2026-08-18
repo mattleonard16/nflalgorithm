@@ -21,8 +21,8 @@ import {
 
 const MARKET_DOTS: Record<string, string> = {
   Pass: "#d4a84b",
-  Rec: "#5b9fd4",
-  Rush: "#3d9b6e",
+  Rec: "#c4b08a",
+  Rush: "#8a9a7b",
 };
 
 const MARKET_ORDER = ["Pass", "Rec", "Rush"];

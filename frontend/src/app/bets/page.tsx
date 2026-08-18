@@ -93,10 +93,10 @@ function ResultIcon({ result }: { result: string | null }) {
 
 function TierBadge({ tier }: { tier: string }) {
   const tierMap: Record<string, string> = {
-    Premium: "bg-emerald-500/10 text-emerald-400",
-    Strong: "bg-blue-500/10 text-blue-400",
-    Marginal: "bg-amber-500/10 text-amber-400",
-    Pass: "bg-slate-700/50 text-slate-500",
+    Premium: "bg-primary/10 text-primary",
+    Strong: "bg-slate-700/40 text-slate-200",
+    Marginal: "bg-[#8a9a7b]/10 text-[#a9bb98]",
+    Pass: "bg-slate-800/60 text-slate-500",
   };
   return (
     <span className={cn("text-[11px] font-mono px-2 py-0.5 rounded", tierMap[tier] ?? "bg-slate-700/50 text-slate-500")}>
@@ -300,7 +300,7 @@ function MySlipTab() {
           {pending.length === 0 ? (
             <div className="px-6 py-10 text-center text-slate-600 text-sm">
               No pending bets. Use the{" "}
-              <span className="text-blue-400">+</span> button on value bets to add to your slip.
+              <span className="text-primary">+</span> button on value bets to add to your slip.
             </div>
           ) : (
             <UserBetsTable bets={pending} showResult={false} />
@@ -369,7 +369,7 @@ function UserBetsTable({ bets, showResult }: { bets: UserBet[]; showResult: bool
                 )}
                 <td className="px-4 py-3 font-mono text-xs text-slate-500">{dateStr}</td>
                 <td className="px-4 py-3">
-                  <span className="text-xs font-mono text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded uppercase">
+                  <span className="text-xs font-mono text-slate-300 bg-slate-800 px-2 py-0.5 rounded uppercase">
                     {bet.market}
                   </span>
                 </td>
@@ -517,7 +517,7 @@ function NflHistoryTab() {
                   const [s, w] = e.target.value.split("-").map(Number);
                   setSelectedWeek({ season: s, week: w });
                 }}
-                className="text-xs bg-slate-900 border border-slate-700 text-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+                className="text-xs bg-slate-900 border border-slate-700 text-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-primary"
               >
                 {weeks.map((w) => (
                   <option key={`${w.season}-${w.week}`} value={`${w.season}-${w.week}`}>
@@ -702,7 +702,7 @@ function GradedOutcomesTable({ outcomes }: { outcomes: BetOutcome[] }) {
                 <td className="px-4 py-3"><ResultIcon result={norm} /></td>
                 <td className="px-4 py-3 font-medium text-slate-200">{bet.player_name ?? "—"}</td>
                 <td className="px-4 py-3">
-                  <span className="text-xs font-mono text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded uppercase">
+                  <span className="text-xs font-mono text-slate-300 bg-slate-800 px-2 py-0.5 rounded uppercase">
                     {bet.market}
                   </span>
                 </td>
@@ -793,8 +793,12 @@ export default function BetsPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">Bet Tracking</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Published card, your slip, and graded history</p>
+          <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">
+            Bets
+          </p>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Published card, your slip, and graded history
+          </p>
         </div>
 
         {/* Sport tabs */}
@@ -805,9 +809,11 @@ export default function BetsPage() {
               onClick={() => setSport(tab.value)}
               className={cn(
                 "px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-150 font-[family-name:var(--font-jetbrains)]",
-                sport === tab.value
-                  ? "bg-blue-500/20 text-blue-300"
-                  : "text-slate-500 hover:text-slate-300"
+                sport !== tab.value
+                  ? "text-slate-500 hover:text-slate-300"
+                  : tab.value === "nba"
+                    ? "bg-blue-500/20 text-blue-300"
+                    : "bg-amber-500/20 text-amber-300"
               )}
             >
               {tab.label}

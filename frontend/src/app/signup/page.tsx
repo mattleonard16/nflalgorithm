@@ -46,13 +46,13 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-zinc-950 p-4">
-      <Card className="w-full max-w-md bg-zinc-900 border-zinc-800">
+    <div className="min-h-screen flex items-center justify-center bg-[#0a0e17] p-4">
+      <Card className="w-full max-w-md bg-[#111827] border-slate-800">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold text-zinc-100">
+          <CardTitle className="text-2xl font-bold text-slate-100">
             Create Account
           </CardTitle>
-          <CardDescription className="text-zinc-400">
+          <CardDescription className="text-slate-400">
             Start finding value bets today
           </CardDescription>
         </CardHeader>
@@ -65,7 +65,7 @@ export default function SignupPage() {
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="name" className="text-zinc-400">
+              <Label htmlFor="name" className="text-slate-400">
                 Name (optional)
               </Label>
               <Input
@@ -74,12 +74,12 @@ export default function SignupPage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="John Doe"
-                className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                className="bg-[#0d1220] border-slate-700 text-slate-100"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-zinc-400">
+              <Label htmlFor="email" className="text-slate-400">
                 Email
               </Label>
               <Input
@@ -89,12 +89,12 @@ export default function SignupPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 required
-                className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                className="bg-[#0d1220] border-slate-700 text-slate-100"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-zinc-400">
+              <Label htmlFor="password" className="text-slate-400">
                 Password
               </Label>
               <Input
@@ -105,12 +105,12 @@ export default function SignupPage() {
                 placeholder="••••••••"
                 required
                 minLength={8}
-                className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                className="bg-[#0d1220] border-slate-700 text-slate-100"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="confirmPassword" className="text-zinc-400">
+              <Label htmlFor="confirmPassword" className="text-slate-400">
                 Confirm Password
               </Label>
               <Input
@@ -121,21 +121,21 @@ export default function SignupPage() {
                 placeholder="••••••••"
                 required
                 minLength={8}
-                className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                className="bg-[#0d1220] border-slate-700 text-slate-100"
               />
             </div>
 
             <Button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              className="w-full bg-primary text-primary-foreground hover:bg-amber-300"
             >
               {loading ? "Creating account..." : "Create Account"}
             </Button>
 
-            <p className="text-center text-sm text-zinc-400">
+            <p className="text-center text-sm text-slate-400">
               Already have an account?{" "}
-              <Link href="/login" className="text-blue-400 hover:text-blue-300">
+              <Link href="/login" className="text-primary hover:text-amber-300">
                 Sign in
               </Link>
             </p>
