@@ -49,6 +49,7 @@ _private_api_tests = [
     "test_nba_api.py",
     "test_nba_api_contract.py",
     "test_pipeline_run_api.py",
+    "test_projections_api.py",
     "test_readiness.py",
     "test_record_bet_api.py",
     "test_risk_api.py",
