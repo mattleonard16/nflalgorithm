@@ -124,6 +124,10 @@ def test_mysql_index_refresh_is_idempotent_without_if_not_exists(monkeypatch) ->
         "idx_materialized_value_view_lookup" in statement and "edge_percentage" in statement
         for statement in create_statements
     )
+    assert any(
+        "idx_nfl_context_player" in statement and "captured_at" in statement
+        for statement in create_statements
+    )
 
 
 def test_mysql_stale_narrow_index_is_dropped_before_recreate(monkeypatch) -> None:

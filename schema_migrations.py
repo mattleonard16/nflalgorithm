@@ -293,7 +293,7 @@ class MigrationManager:
                 uncertainty_multiplier REAL NOT NULL DEFAULT 1,
                 prior_source VARCHAR(32) NOT NULL,
                 source_updated_at TEXT,
-                captured_at TEXT NOT NULL,
+                captured_at VARCHAR(64) NOT NULL,
                 PRIMARY KEY (season, week, gsis_id)
             )
             """,
