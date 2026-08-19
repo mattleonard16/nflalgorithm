@@ -579,18 +579,6 @@ clean:
 	rm -rf .pytest_cache/
 	@echo "Clean complete!"
 
-# Clean root clutter files (exports, logs, old DBs)
-clean-root:
-	@echo "Archiving root clutter files..."
-	@mkdir -p archive/exports archive/databases archive/logs_old
-	@if [ -f "export10.csv" ]; then mv export10.csv archive/exports/; echo "Moved export10.csv"; fi
-	@if [ -f "week102.csv" ]; then mv week102.csv archive/exports/; echo "Moved week102.csv"; fi
-	@if [ -f "prop_update.log" ]; then mv prop_update.log archive/logs_old/; echo "Moved prop_update.log"; fi
-	@if [ -f "nfl_data.db" ]; then cp nfl_data.db archive/databases/; echo "Copied nfl_data.db to archive/databases/"; fi
-	@if [ -f "nfl_prop_lines.db" ]; then cp nfl_prop_lines.db archive/databases/; echo "Copied nfl_prop_lines.db to archive/databases/"; fi
-	@if [ -f "optuna.db" ]; then cp optuna.db archive/databases/; echo "Copied optuna.db to archive/databases/"; fi
-	@echo "Root cleanup complete!"
-
 # Research loop (requires dev-browser on :9222)
 research-loop:
 	@echo "Run: npx tsx scripts/research_loop.ts --question '...' --urls 'url1,url2' --output docs/research/slug.md"
@@ -609,12 +597,12 @@ production-check: lint test validate
 	@echo "Production readiness check complete!"
 	@echo "Review validation results before deployment."
 
-# Backup data
+# Backup data. The copy is deliberately not error-suppressed: a backup target
+# that silently copies nothing is worse than one that fails loud.
 backup:
 	@echo "Backing up data..."
 	mkdir -p data/backups/$(shell date +%Y%m%d)
-	cp data/nfl.db data/backups/$(shell date +%Y%m%d)/ 2>/dev/null || true
-	cp logs/*.csv data/backups/$(shell date +%Y%m%d)/ 2>/dev/null || true
+	cp nfl_data.db data/backups/$(shell date +%Y%m%d)/
 	@echo "Backup complete in data/backups/$(shell date +%Y%m%d)/"
 
 # Archive current week's reports
@@ -629,17 +617,10 @@ archive-week:
 		echo "No reports directory found"; \
 	fi
 
-# Archive everything (exports, logs, DBs, reports)
-archive-all: archive-week clean-root
-	@echo "Full archive complete!"
-	@echo "Archived to: archive/exports/, archive/databases/, archive/logs_old/, archive/reports/"
+# Archive current week's reports
+archive-all: archive-week
+	@echo "Full archive complete! Archived to: archive/reports/"
 
-# Database maintenance
-db-maintenance:
-	@echo "Running database maintenance..."
-	# python -c "import sqlite3; conn = sqlite3.connect('data/nfl.db'); conn.execute('VACUUM'); conn.close()"
-	@echo "Database optimization not supported for remote MySQL yet."
- 
 # ============================================================================
 # UV ENHANCED TARGETS - 10-100x faster dependency management
 # ============================================================================
