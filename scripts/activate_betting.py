@@ -29,7 +29,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import config
 from prop_integration import PropIntegration
 from scripts.run_prop_update import refresh_pregame_inputs
-from utils.db import column_exists, execute, executemany, get_connection
+from utils.db import column_exists, execute, executemany, get_backend, get_connection
 from value_betting_engine import ValueBettingEngine
 
 
@@ -315,7 +315,22 @@ def persist_value_bets(df: pd.DataFrame) -> int:
         return len(df)
 
 
+def _require_sqlite_backend() -> None:
+    """Refuse to run against MySQL rather than fail partway through a write.
+
+    This script writes through SQLite-only upsert syntax, so a MySQL run would
+    abort after the pregame refresh had already landed rows.
+    """
+    if get_backend() == "mysql":
+        raise RuntimeError(
+            "activate_betting is sqlite-only: its opportunity writes use SQLite "
+            "upsert syntax that MySQL rejects. Re-run with DB_BACKEND=sqlite, or "
+            "publish through the durable pipeline."
+        )
+
+
 def main() -> int:
+    _require_sqlite_backend()
     parser = argparse.ArgumentParser(description="Activate value betting pipeline")
     parser.add_argument("--season", type=int, required=True, help="NFL season year")
     parser.add_argument("--week", type=int, required=True, help="NFL week (1-22)")

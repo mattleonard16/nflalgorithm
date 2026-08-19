@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
@@ -196,6 +197,45 @@ def check_database(config: Any, *, check_schema: bool) -> list[Diagnostic]:
         else:
             diagnostics.append(_result("migrations", "pass", "Required API tables are present."))
     return diagnostics
+
+
+def check_sqlite_wal(config: Any) -> list[Diagnostic]:
+    """Confirm the SQLite database is in WAL mode.
+
+    Journal mode is persistent, set once by MigrationManager. A database left in
+    the `delete` default serializes readers against the writer, so a dashboard
+    read blocks for the length of a materialization.
+    """
+    backend = str(getattr(config.database, "backend", "")).strip().lower()
+    if backend != "sqlite":
+        return []
+    database_path = Path(str(config.database.path)).expanduser()
+    if not database_path.is_file():
+        return []
+
+    try:
+        with sqlite3.connect(f"file:{database_path}?mode=ro", uri=True) as connection:
+            journal_mode = str(connection.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+    except Exception as exc:
+        return [
+            _result(
+                "sqlite_wal",
+                "fail",
+                f"Could not read journal_mode from {database_path}: {type(exc).__name__}: {exc}",
+                "Verify SQLITE_DB_PATH points at a readable database file.",
+            )
+        ]
+
+    if journal_mode == "wal":
+        return [_result("sqlite_wal", "pass", "SQLite journal_mode is WAL.")]
+    return [
+        _result(
+            "sqlite_wal",
+            "fail",
+            f"SQLite journal_mode is {journal_mode!r}; concurrent reads will block on writes.",
+            "Run `make migrate` to set WAL mode.",
+        )
+    ]
 
 
 def check_odds_key(config: Any, *, required: bool) -> Diagnostic:
@@ -643,6 +683,8 @@ def collect_diagnostics(
     if config is not None and not any(item.failed for item in config_diagnostics):
         database_diagnostics = check_database(config, check_schema=check_schema)
         diagnostics.extend(database_diagnostics)
+        if not any(item.failed for item in database_diagnostics):
+            diagnostics.extend(check_sqlite_wal(config))
         diagnostics.append(check_odds_key(config, required=require_live_odds))
         diagnostics.append(check_demo_mode(config, production=require_demo_mode_off))
         if (

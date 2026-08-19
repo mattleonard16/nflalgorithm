@@ -17,7 +17,7 @@ import pandas as pd
 
 from config import config
 from utils.clv import STATUS_OK, compute_clv, resolve_closing_lines
-from utils.db import execute, executemany, get_connection, read_dataframe
+from utils.db import execute, executemany, get_backend, get_connection, read_dataframe
 from utils.grading import calculate_profit_units, get_confidence_tier, grade_bet
 from utils.live_odds import kickoffs_from_games
 from utils.nfl_markets import MARKET_TO_STAT
@@ -34,8 +34,8 @@ def make_bet_id(
 ) -> str:
     """Derive a stable bet_id from the bet's natural key.
 
-    A random UUID per grading run defeats `INSERT OR REPLACE`, so re-running a
-    week duplicates every row in bet_outcomes. Hashing the natural key makes
+    A random UUID per grading run defeats the upsert, so re-running a week
+    duplicates every row in bet_outcomes. Hashing the natural key makes
     re-grading idempotent and lets clv_weekly.bet_id join back reliably.
     """
     key = f"{season}|{week}|{player_id}|{market}|{sportsbook}|{side}|{float(line):.4f}"
@@ -263,14 +263,31 @@ def compute_and_save_clv(season: int, week: int, outcomes: List[Dict]) -> Option
         print("No bets had enough snapshot depth to compute CLV")
         return None
 
-    executemany(
-        """
-        INSERT OR REPLACE INTO clv_weekly (
-            bet_id, close_line, close_price, clv_bp, closed_at
-        ) VALUES (?, ?, ?, ?, ?)
-        """,
-        records,
-    )
+    # `INSERT OR REPLACE` is SQLite-only syntax. Same upsert semantics on the
+    # same primary key, incompatible spelling.
+    if get_backend() == "mysql":
+        clv_sql = """
+            INSERT INTO clv_weekly (
+                bet_id, close_line, close_price, clv_bp, closed_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                close_line=VALUES(close_line),
+                close_price=VALUES(close_price),
+                clv_bp=VALUES(clv_bp),
+                closed_at=VALUES(closed_at)
+            """
+    else:
+        clv_sql = """
+            INSERT INTO clv_weekly (
+                bet_id, close_line, close_price, clv_bp, closed_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(bet_id) DO UPDATE SET
+                close_line=excluded.close_line,
+                close_price=excluded.close_price,
+                clv_bp=excluded.clv_bp,
+                closed_at=excluded.closed_at
+            """
+    executemany(clv_sql, records)
     print(f"Wrote {len(records)} CLV records to clv_weekly")
 
     if not clv_values:
@@ -292,16 +309,55 @@ def save_outcomes(outcomes: List[Dict]) -> None:
 
     print(f"Saving {len(outcomes)} outcomes to database...")
 
-    # Insert into bet_outcomes
-    insert_sql = """
-        INSERT OR REPLACE INTO bet_outcomes (
-            bet_id, season, week, player_id, player_name, market,
-            sportsbook, side, line, price, actual_result, result,
-            profit_units, confidence_tier, edge_at_placement, recorded_at
-        ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-        )
+    # Insert into bet_outcomes. Re-grading a week must overwrite in place on
+    # both backends; `INSERT OR REPLACE` would fail outright on MySQL.
+    bet_outcomes_columns = """
+        bet_id, season, week, player_id, player_name, market,
+        sportsbook, side, line, price, actual_result, result,
+        profit_units, confidence_tier, edge_at_placement, recorded_at
     """
+    if get_backend() == "mysql":
+        insert_sql = f"""
+            INSERT INTO bet_outcomes ({bet_outcomes_columns})
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                season=VALUES(season),
+                week=VALUES(week),
+                player_id=VALUES(player_id),
+                player_name=VALUES(player_name),
+                market=VALUES(market),
+                sportsbook=VALUES(sportsbook),
+                side=VALUES(side),
+                line=VALUES(line),
+                price=VALUES(price),
+                actual_result=VALUES(actual_result),
+                result=VALUES(result),
+                profit_units=VALUES(profit_units),
+                confidence_tier=VALUES(confidence_tier),
+                edge_at_placement=VALUES(edge_at_placement),
+                recorded_at=VALUES(recorded_at)
+            """
+    else:
+        insert_sql = f"""
+            INSERT INTO bet_outcomes ({bet_outcomes_columns})
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(bet_id) DO UPDATE SET
+                season=excluded.season,
+                week=excluded.week,
+                player_id=excluded.player_id,
+                player_name=excluded.player_name,
+                market=excluded.market,
+                sportsbook=excluded.sportsbook,
+                side=excluded.side,
+                line=excluded.line,
+                price=excluded.price,
+                actual_result=excluded.actual_result,
+                result=excluded.result,
+                profit_units=excluded.profit_units,
+                confidence_tier=excluded.confidence_tier,
+                edge_at_placement=excluded.edge_at_placement,
+                recorded_at=excluded.recorded_at
+            """
 
     outcome_tuples = [
         (
@@ -370,14 +426,38 @@ def save_outcomes(outcomes: List[Dict]) -> None:
     # CLV is unknown and let the column default stand.
     clv_columns = "clv_avg," if clv_avg is not None else ""
     clv_placeholder = "?," if clv_avg is not None else ""
+    # Updated columns exclude the (season, week) PK. clv_avg is only refreshed
+    # when it was computed, so a re-grade that loses CLV keeps the prior value
+    # rather than resetting it to the column default.
+    perf_updates = [
+        "total_bets",
+        "wins",
+        "losses",
+        "pushes",
+        "profit_units",
+        "roi_pct",
+        "avg_edge",
+        "best_bet",
+        "worst_bet",
+        "updated_at",
+    ]
+    if clv_avg is not None:
+        perf_updates.append("clv_avg")
+    if get_backend() == "mysql":
+        perf_assignments = ", ".join(f"{col}=VALUES({col})" for col in perf_updates)
+        conflict_clause = f"ON DUPLICATE KEY UPDATE {perf_assignments}"
+    else:
+        perf_assignments = ", ".join(f"{col}=excluded.{col}" for col in perf_updates)
+        conflict_clause = f"ON CONFLICT(season, week) DO UPDATE SET {perf_assignments}"
     perf_sql = f"""
-        INSERT OR REPLACE INTO weekly_performance (
+        INSERT INTO weekly_performance (
             season, week, total_bets, wins, losses, pushes,
             profit_units, roi_pct, avg_edge, {clv_columns}
             best_bet, worst_bet, updated_at
         ) VALUES (
             ?, ?, ?, ?, ?, ?, ?, ?, ?, {clv_placeholder} ?, ?, ?
         )
+        {conflict_clause}
     """
 
     perf_params: List[object] = [

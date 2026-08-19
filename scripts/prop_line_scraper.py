@@ -21,7 +21,7 @@ from scripts.api_error_handler import api_error_handler
 
 # Import simplified caching system and validation
 from scripts.simple_cache import simple_cached_client
-from utils.db import execute, get_connection, read_dataframe
+from utils.db import execute, get_backend, get_connection, read_dataframe
 from utils.event_keys import UnresolvableEventError, resolve_event_id
 from utils.player_id_utils import canonicalize_team, make_player_id
 from utils.two_sided_odds import pair_two_sided_prices
@@ -1060,8 +1060,24 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _require_sqlite_backend() -> None:
+    """Refuse to run against MySQL rather than fail partway through a write.
+
+    This tool emits SQLite-only DDL (AUTOINCREMENT) and SQLite-only upserts
+    (ON CONFLICT), so a MySQL run would abort mid-scrape after partial writes.
+    """
+    backend = get_backend()
+    if backend == "mysql":
+        raise RuntimeError(
+            "prop_line_scraper is sqlite-only: it emits SQLite AUTOINCREMENT DDL "
+            "and ON CONFLICT upserts that MySQL rejects. Re-run with "
+            "DB_BACKEND=sqlite, or ingest odds through the durable pipeline."
+        )
+
+
 def main():
     """CLI entry point for the prop line scraper."""
+    _require_sqlite_backend()
     args = _parse_args()
     scraper = NFLPropScraper()
 

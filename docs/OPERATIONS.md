@@ -58,6 +58,27 @@ the reason on the job, run, and interrupted stage.
    make dashboard
    ```
 
+## Migrations: re-run forward, no rollback
+
+There is no down-migration. Every migration is idempotent and gated on introspection — it checks
+what the schema currently looks like and applies only what is missing — so the recovery for any
+interrupted or partial migration is to run `make migrate` again, never to roll back.
+
+Table rebuilds that widen a primary key run inside an explicit transaction, so a crash leaves the
+original table intact and the re-run replays cleanly. One case still needs a human: if migration
+aborts with a stranded `_pipeline_stage_runs_old` table, it means a swap died between renaming the
+original and recreating it. Migration then refuses to continue rather than build an empty table
+beside your stage history. Recover with:
+
+```bash
+sqlite3 <db> 'DROP TABLE IF EXISTS pipeline_stage_runs;'
+sqlite3 <db> 'ALTER TABLE _pipeline_stage_runs_old RENAME TO pipeline_stage_runs;'
+make migrate
+```
+
+`make doctor` additionally verifies the SQLite database is in WAL mode; a `sqlite_wal` failure means
+the file never went through `make migrate`.
+
 All commands are idempotent; rerun if data feeds update. For common database, migration, API-key, private-module, CORS, frontend, and port failures, see [Troubleshooting](TROUBLESHOOTING.md).
 
 Do not use `make week-materialize` as a production publication path. Durable runs stage candidate
