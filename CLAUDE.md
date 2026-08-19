@@ -878,19 +878,51 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     red-zone touches (EPA and the rest untapped). Touchdown and reception columns are still
     discarded at `transform_to_enhanced_stats` `final_cols`, so TD props cannot be priced;
     `game_script` remains hardcoded 0.0 on every row.
-13. Kelly cap not applied in ranking path — `materialized_value_view.py:139`.
+13. [RESOLVED] Kelly cap in ranking path — enforced at both levels. Per-bet: gitignored
+    `value_betting_engine.py:273` caps at `config.betting.max_kelly` (0.10) behind
+    `config.features.kelly_cap_enabled` (`NFL_FEATURE_KELLY_CAP`, default ON per
+    `config/runtime.py`). Portfolio: tracked `materialized_value_view.py:140` scales the whole
+    card to the bankroll via `risk_manager.normalize_portfolio_stakes`, so persisted stakes
+    never sum past `config.betting.bankroll` even when per-bet caps individually pass.
 
 ### Tier 2 — MEDIUM (correctness/ops)
-14. EWMA decay 0.65 untuned, uniform across markets.
-15. Defense multiplier double-applied (`weekly.py:693-703`).
+14. [MOSTLY RESOLVED] EWMA decay 0.65: the market-mu EWMA path in
+    `DataPipeline._compute_market_mu` (`data_pipeline.py:74`) is **dead code in production** — it
+    is exercised only by `tests/test_market_mu_wr.py`. Production mu is
+    `model.predict() x defense_mult` (`weekly.py:1003-1015`); that path never touches EWMA at all.
+    The live 0.65 decay is the **sigma** EWMA in `utils/nfl_sigma.py:109`, which is the real tuning
+    surface — untuned and uniform across markets exactly as this item originally said, just in the
+    other file. Tuning it is blocked on item 10 (no walk-forward backtest harness to validate a
+    change against). The unread config knobs (`config.integration.ewma_decay` in both
+    `config/runtime.py` and `config.py` — zero readers, confirmed by grep) have been
+    removed; do not reintroduce a config knob for `_compute_market_mu`'s constant, since nothing
+    in production reads it.
+15. [RESOLVED — claim was stale] Defense multiplier double-apply: mu gets the multiplier exactly
+    once, at `weekly.py:1003-1015`. The QB decomposition's `opp_factor` (`weekly.py:693-703`)
+    writes only metadata columns, never mu — it does not double-apply anything. Do not "fix" this
+    by removing the single legitimate application at 1003-1015.
 16. SQLite/MySQL parity broken (`AUTOINCREMENT`, `ON CONFLICT`).
 17. SQLite no WAL, no pool.
 18. Migration runner no version table, no rollback.
-19. Opening vs closing line never separated.
-20. Tier-3 name-only match no position guard; suffix stripping destructive.
-21. Stale-line filter missing. `utils/matching.filter_stale_snapshots` exists, is tested, and is
-    still **unwired**. It joins on `event_id`, which was the blocker; that join now works for new
-    writes. It filters nothing on the 89 legacy rows, since none carry a joinable key.
+19. [Documented non-blocker] Opening vs closing line: opening is derivable as the first stored
+    snapshot (`MIN(as_of)` per key, `scripts/backfill_line_accuracy.py:load_opening_lines`,
+    consumed by `make backfill-accuracy`), bounded by scrape cadence rather than true market-open.
+    CLV (`utils/clv.py`) intentionally grades entry-vs-close, not open-vs-close — that is by
+    design, not a gap. `backfill_line_accuracy.py` compares `as_of` as SQLite TEXT (lexical, not
+    chronological) — fine for consistently-formatted UTC timestamps but unlike `utils/clv.py` and
+    `utils/matching.py`, which parse with pandas for true chronological ordering. Latent gap, not
+    fixed here.
+20. [RESOLVED] Tier-3 name-only match: position-guarded via `utils/matching.positions_compatible`
+    at both tier-3 paths (`prop_integration.py:276-277`, `:315-316`) and the tier-3b fuzzy path;
+    suffix handling is non-destructive (`utils/matching.py:91-132`, roster-verified tier 2.5 at
+    `prop_integration.py:254-263`). Full truth table in `tests/test_matching.py`; end-to-end
+    wiring covered by `tests/test_prop_integration_matching.py`
+    (`test_join_blocks_cross_position_name_collision`,
+    `test_join_blocks_suffix_conflict_but_matches_dropped_suffix`).
+21. [RESOLVED] Stale-line filter: `filter_stale_snapshots` is wired via `utils/live_odds.select_live_odds`
+    into `rank_weekly_value`; a schedule row with a null kickoff degrades per-key to
+    unjoinable rather than crashing the run (`utils/live_odds.kickoffs_from_games`). It still filters
+    nothing on the 89 legacy pre-existing rows, since none carry a joinable key.
 22. CORS hard-coded localhost; no rate limits; unbounded threads.
 23. No observability — no Sentry/OTel; logger has no basicConfig.
 
