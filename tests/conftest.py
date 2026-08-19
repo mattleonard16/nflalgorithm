@@ -57,6 +57,13 @@ _private_api_tests = [
 if not _private_api_server.is_file():
     collect_ignore.extend(_private_api_tests)
 
+# The suite shares one process and one TestClient address, so the API rate
+# limiter would 429 unrelated tests once the global budget is spent. Disable
+# both tiers here; tests/test_rate_limit.py constructs its middleware with
+# explicit limits and is unaffected.
+os.environ.setdefault("RATE_LIMIT_AUTH_PER_MIN", "0")
+os.environ.setdefault("RATE_LIMIT_GLOBAL_PER_MIN", "0")
+
 # The normal suite is deterministic SQLite. The focused database-integration
 # matrix opts into a real MySQL service with TEST_DB_BACKEND=mysql.
 TEST_DB_BACKEND = os.getenv("TEST_DB_BACKEND", "sqlite").lower()

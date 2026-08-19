@@ -37,3 +37,37 @@ def test_configure_logging_rejects_invalid_level(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="Invalid LOG_LEVEL"):
         configure_logging("test")
+
+
+def test_configure_logging_json_format_end_to_end(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("LOG_FORMAT", "json")
+    monkeypatch.setenv("LOG_LEVEL", "INFO")
+
+    configure_logging("test-service")
+    logger = logging.getLogger("tests.end_to_end")
+    logger.info("job started", extra={"event": "job.started", "run_id": "run-456", "token": "secret"})
+
+    captured = capsys.readouterr()
+    line = captured.err.strip().splitlines()[-1]
+    payload = json.loads(line)
+
+    assert payload["service"] == "test-service"
+    assert payload["message"] == "job started"
+    assert payload["event"] == "job.started"
+    assert payload["run_id"] == "run-456"
+    assert "token" not in payload
+    assert set(payload) <= {
+        "timestamp",
+        "level",
+        "service",
+        "logger",
+        "message",
+        "exception",
+        "event",
+        "run_id",
+        "job_id",
+        "worker_id",
+        "season",
+        "week",
+        "stage",
+    }

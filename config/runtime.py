@@ -111,7 +111,6 @@ integration = SimpleNamespace(
     tier2_confidence=0.90,
     tier3_confidence=0.85,
     wr_team_mismatch_tolerance=True,
-    ewma_decay=0.65,
     role_priors={"alpha": 75, "secondary": 55, "slot": 45, "fringe": 30},
 )
 

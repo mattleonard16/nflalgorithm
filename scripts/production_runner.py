@@ -31,6 +31,8 @@ from config import config
 from pipelines.nfl_contract import NFL_AUTOMATIC_RETRY_SAFE_STAGES
 from pipelines.orchestrator import PipelineStage, run_stages
 from utils.db import fetchone, read_dataframe
+from utils.error_tracking import init_error_tracking
+from utils.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -397,7 +399,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO)
+    configure_logging("production-runner")
+    init_error_tracking("production-runner")
 
     if not args.inline:
         from pipeline_jobs.service import JobService

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from schema_migrations import MigrationManager
 from scripts.preflight import (
+    check_allowed_origins,
     check_database,
     check_demo_mode,
     check_odds_key,
@@ -65,6 +66,35 @@ def test_demo_mode_is_allowed_locally_and_rejected_for_production() -> None:
     assert local.status == "warn"
     assert production.status == "fail"
     assert production.action == "Set DEMO_MODE=false before running production checks."
+
+
+def test_unset_allowed_origins_warns_locally_and_fails_for_production(monkeypatch) -> None:
+    monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+
+    local = check_allowed_origins(production=False)
+    production = check_allowed_origins(production=True)
+
+    assert local.status == "warn"
+    assert production.status == "fail"
+    assert "ALLOWED_ORIGINS" in (production.action or "")
+
+
+def test_localhost_only_allowed_origins_fails_for_production(monkeypatch) -> None:
+    monkeypatch.setenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3001")
+
+    production = check_allowed_origins(production=True)
+
+    assert production.status == "fail"
+    assert "localhost" in production.message
+
+
+def test_real_allowed_origins_passes(monkeypatch) -> None:
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://app.example.com,http://localhost:3000")
+
+    diagnostic = check_allowed_origins(production=True)
+
+    assert diagnostic.status == "pass"
+    assert "2 origin(s)" in diagnostic.message
 
 
 def test_missing_private_api_blocks_startup(tmp_path) -> None:

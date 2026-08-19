@@ -165,8 +165,9 @@ class TestNbaCacheInvalidation:
         nba_cache.invalidate_all()
 
     def test_invalidate_endpoint(self, monkeypatch, tmp_path):
-        """POST /api/nba/cache/invalidate should clear NBA cache."""
+        """POST /api/nba/cache/invalidate should clear NBA cache for an operator."""
         _setup_db(monkeypatch, tmp_path)
+        monkeypatch.setenv("PIPELINE_CONTROL_TOKEN", "test-control-token")
 
         from utils.db import execute
 
@@ -185,10 +186,37 @@ class TestNbaCacheInvalidation:
         assert nba_cache.size() > 0
 
         # Invalidate
-        r = client.post("/api/nba/cache/invalidate")
+        r = client.post(
+            "/api/nba/cache/invalidate",
+            headers={"Authorization": "Bearer test-control-token"},
+        )
         assert r.status_code == 200
         assert r.json()["cleared"] is True
         assert nba_cache.size() == 0
+
+    def test_invalidate_endpoint_requires_auth(self, monkeypatch, tmp_path):
+        """Anonymous cache invalidation must be rejected, cache left intact."""
+        _setup_db(monkeypatch, tmp_path)
+        monkeypatch.delenv("PIPELINE_CONTROL_TOKEN", raising=False)
+
+        from utils.db import execute
+
+        execute(
+            "CREATE TABLE IF NOT EXISTS nba_player_game_logs "
+            "(season INT, game_date TEXT, player_id INT, game_id TEXT)"
+        )
+        execute(
+            "INSERT INTO nba_player_game_logs VALUES (2025, '2026-03-10', 1, 'G1')"
+        )
+
+        client = _make_client()
+
+        client.get("/api/nba/meta")
+        assert nba_cache.size() > 0
+
+        r = client.post("/api/nba/cache/invalidate")
+        assert r.status_code == 401
+        assert nba_cache.size() > 0
 
 
 class TestNbaHealthCacheStats:

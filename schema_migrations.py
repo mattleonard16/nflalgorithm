@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from pipelines.nfl_contract import NFL_STAGE_COUNT
 from utils.db import column_exists, get_backend, get_connection, table_exists
@@ -1201,8 +1202,31 @@ class MigrationManager:
                     "ALTER TABLE nfl_roster_players ADD COLUMN roster_week INTEGER NOT NULL DEFAULT 0"
                 )
 
+    @staticmethod
+    @contextlib.contextmanager
+    def _sqlite_swap_transaction(cursor: Any) -> Iterator[None]:
+        """Wrap a rename-based table swap so SQLite applies it atomically.
+
+        DDL autocommits, so an unwrapped RENAME/CREATE/INSERT/DROP sequence
+        leaves the original table stranded under its `_old` name if the process
+        dies mid-swap. The driver's implicit transaction must be closed first:
+        `BEGIN IMMEDIATE` raises inside an already-open transaction.
+        """
+        connection = cursor.connection
+        if connection.in_transaction:
+            connection.commit()
+        cursor.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except Exception:
+            connection.rollback()
+            raise
+        cursor.execute("COMMIT")
+
     def _migrate_pipeline_stage_attempt_pk(self, cursor: Any) -> None:
         """Preserve stage results for every job attempt instead of overwriting them."""
+        if get_backend() == "sqlite":
+            self._assert_no_stranded_stage_runs(cursor)
         if not table_exists("pipeline_stage_runs", conn=cursor.connection):
             return
         if get_backend() == "mysql":
@@ -1231,31 +1255,60 @@ class MigrationManager:
         ]
         if primary_key == ["run_id", "attempt", "stage_name"]:
             return
-        cursor.execute("ALTER TABLE pipeline_stage_runs RENAME TO _pipeline_stage_runs_old")
-        cursor.execute("""
-            CREATE TABLE pipeline_stage_runs (
-                run_id VARCHAR(36) NOT NULL,
-                stage_name VARCHAR(64) NOT NULL,
-                ordinal INTEGER NOT NULL,
-                status VARCHAR(32) NOT NULL,
-                attempt INTEGER NOT NULL DEFAULT 1,
-                started_at VARCHAR(40),
-                finished_at VARCHAR(40),
-                result_json TEXT,
-                error_message TEXT,
-                PRIMARY KEY (run_id, attempt, stage_name),
-                FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
-            )
-            """)
-        cursor.execute("""
-            INSERT INTO pipeline_stage_runs
-                (run_id, stage_name, ordinal, status, attempt, started_at,
-                 finished_at, result_json, error_message)
-            SELECT run_id, stage_name, ordinal, status, attempt, started_at,
-                   finished_at, result_json, error_message
-            FROM _pipeline_stage_runs_old
-            """)
-        cursor.execute("DROP TABLE _pipeline_stage_runs_old")
+        with self._sqlite_swap_transaction(cursor):
+            cursor.execute("ALTER TABLE pipeline_stage_runs RENAME TO _pipeline_stage_runs_old")
+            cursor.execute("""
+                CREATE TABLE pipeline_stage_runs (
+                    run_id VARCHAR(36) NOT NULL,
+                    stage_name VARCHAR(64) NOT NULL,
+                    ordinal INTEGER NOT NULL,
+                    status VARCHAR(32) NOT NULL,
+                    attempt INTEGER NOT NULL DEFAULT 1,
+                    started_at VARCHAR(40),
+                    finished_at VARCHAR(40),
+                    result_json TEXT,
+                    error_message TEXT,
+                    PRIMARY KEY (run_id, attempt, stage_name),
+                    FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+                )
+                """)
+            cursor.execute("""
+                INSERT INTO pipeline_stage_runs
+                    (run_id, stage_name, ordinal, status, attempt, started_at,
+                     finished_at, result_json, error_message)
+                SELECT run_id, stage_name, ordinal, status, attempt, started_at,
+                       finished_at, result_json, error_message
+                FROM _pipeline_stage_runs_old
+                """)
+            cursor.execute("DROP TABLE _pipeline_stage_runs_old")
+
+    @staticmethod
+    def _assert_no_stranded_stage_runs(cursor: Any) -> None:
+        """Refuse to migrate past a half-finished stage-runs swap.
+
+        A crash between the RENAME and the DROP leaves history in
+        `_pipeline_stage_runs_old`. Recreating an empty `pipeline_stage_runs`
+        over it would look healthy while every prior attempt stayed stranded,
+        so stop and hand the operator the recovery statement instead.
+        """
+        if not table_exists("_pipeline_stage_runs_old", conn=cursor.connection):
+            return
+        if table_exists("pipeline_stage_runs", conn=cursor.connection):
+            cursor.execute("SELECT COUNT(*) FROM pipeline_stage_runs")
+            if int(cursor.fetchone()[0]) > 0:
+                return
+        cursor.execute("SELECT COUNT(*) FROM _pipeline_stage_runs_old")
+        stranded = int(cursor.fetchone()[0])
+        raise RuntimeError(
+            "Interrupted pipeline_stage_runs migration: "
+            f"_pipeline_stage_runs_old holds {stranded} stranded row(s) while "
+            "pipeline_stage_runs is missing or empty. Recover manually before "
+            "re-running migrations:\n"
+            "  1. sqlite3 <db> 'DROP TABLE IF EXISTS pipeline_stage_runs;'\n"
+            "  2. sqlite3 <db> 'ALTER TABLE _pipeline_stage_runs_old "
+            "RENAME TO pipeline_stage_runs;'\n"
+            "  3. Re-run migrations; the PK rebuild will replay cleanly."
+        )
 
     def _migrate_legacy_pipeline_leases(self, cursor: Any) -> None:
         """Fence running pre-token attempts so deployment cannot leave them stuck."""
@@ -1330,43 +1383,44 @@ class MigrationManager:
         # If as_of is already in the PK, nothing to do
         if "as_of)" in create_sql and "sportsbook, as_of)" in create_sql:
             return
-        # Recreate with new PK
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS nba_odds_new (
-                event_id    TEXT NOT NULL,
-                season      INTEGER NOT NULL,
-                game_date   TEXT NOT NULL,
-                player_id   INTEGER,
-                player_name TEXT NOT NULL,
-                team        TEXT,
-                market      TEXT NOT NULL,
-                sportsbook  TEXT NOT NULL,
-                line        REAL NOT NULL,
-                over_price  INTEGER,
-                under_price INTEGER,
-                as_of       TEXT NOT NULL,
-                PRIMARY KEY (event_id, player_name, market, sportsbook, as_of)
-            )
-        """)
-        cursor.execute("""
-            INSERT OR IGNORE INTO nba_odds_new
-            SELECT event_id, season, game_date, player_id, player_name,
-                   team, market, sportsbook, line, over_price, under_price, as_of
-            FROM nba_odds
-        """)
-        cursor.execute("DROP TABLE nba_odds")
-        cursor.execute("ALTER TABLE nba_odds_new RENAME TO nba_odds")
+        # Recreate with new PK. The copy must be fully populated before the
+        # original is dropped, and the whole swap must be one transaction:
+        # dropping first meant a crash mid-swap lost every row.
+        with self._sqlite_swap_transaction(cursor):
+            cursor.execute("DROP TABLE IF EXISTS nba_odds_new")
+            cursor.execute("""
+                CREATE TABLE nba_odds_new (
+                    event_id    TEXT NOT NULL,
+                    season      INTEGER NOT NULL,
+                    game_date   TEXT NOT NULL,
+                    player_id   INTEGER,
+                    player_name TEXT NOT NULL,
+                    team        TEXT,
+                    market      TEXT NOT NULL,
+                    sportsbook  TEXT NOT NULL,
+                    line        REAL NOT NULL,
+                    over_price  INTEGER,
+                    under_price INTEGER,
+                    as_of       TEXT NOT NULL,
+                    PRIMARY KEY (event_id, player_name, market, sportsbook, as_of)
+                )
+            """)
+            cursor.execute("""
+                INSERT OR IGNORE INTO nba_odds_new
+                SELECT event_id, season, game_date, player_id, player_name,
+                       team, market, sportsbook, line, over_price, under_price, as_of
+                FROM nba_odds
+            """)
+            cursor.execute("DROP TABLE nba_odds")
+            cursor.execute("ALTER TABLE nba_odds_new RENAME TO nba_odds")
 
     def _rebuild_mvv_pk_if_needed(self, cursor) -> None:
         """T0 #4: ensure materialized_value_view PK includes `side`.
 
-        SQLite-only ALTER cannot widen a PK, so existing tables that were
-        only column-added need a rebuild. MySQL DDL handles PK changes via
-        ALTER TABLE elsewhere; skip silently when not SQLite.
+        SQLite ALTER cannot widen a PK, so existing tables that were only
+        column-added need a full rebuild; MySQL widens the PK in place.
 
         Hardening (M-series):
-        - Backend-guarded: sqlite_master only exists on SQLite, so skip
-          for any other backend entirely.
         - DROP IF EXISTS _mvv_old before renaming, so a previously-aborted
           rebuild (which left _mvv_old behind) doesn't fail this one.
         - Carry implied_prob / implied_prob_under in the rebuilt schema
@@ -1374,12 +1428,28 @@ class MigrationManager:
         - Split the substring side check against the post-PK clause so a
           stray 'side' literal earlier in the DDL doesn't false-positive.
         """
-        # Only SQLite uses sqlite_master + rebuild. MySQL drives PK changes
-        # through ALTER TABLE elsewhere. Detect via module helper rather
-        # than connection type sniffing.
-        if get_backend() != "sqlite":
-            return
         if not table_exists("materialized_value_view", conn=cursor.connection):
+            return
+        # MySQL can widen a PK in place. Without this branch an under-side row
+        # collides with its over-side twin and silently overwrites it.
+        if get_backend() == "mysql":
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.key_column_usage
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'materialized_value_view'
+                  AND constraint_name = 'PRIMARY'
+                ORDER BY ordinal_position
+                """)
+            primary_key = [str(row[0]).lower() for row in cursor.fetchall()]
+            if "side" not in primary_key:
+                cursor.execute("""
+                    ALTER TABLE materialized_value_view
+                    DROP PRIMARY KEY,
+                    ADD PRIMARY KEY (season, week, player_id, market, sportsbook, event_id, side)
+                    """)
+            return
+        if get_backend() != "sqlite":
             return
         try:
             row = cursor.execute(
@@ -1396,6 +1466,11 @@ class MigrationManager:
         # Match `side` as a quoted column inside the PK column list.
         if "side" in post_pk:
             return
+        with self._sqlite_swap_transaction(cursor):
+            self._rebuild_mvv_pk(cursor)
+
+    @staticmethod
+    def _rebuild_mvv_pk(cursor: Any) -> None:
         cursor.execute("DROP TABLE IF EXISTS _mvv_old")
         cursor.execute("ALTER TABLE materialized_value_view RENAME TO _mvv_old")
         cursor.execute("""
@@ -1512,6 +1587,22 @@ class MigrationManager:
                     "idx_roster_players_player",
                     "season, player_id",
                 ),
+                # NFL hot paths. These existed only on the SQLite branch below,
+                # so the same queries ran unindexed on MySQL.
+                ("weekly_odds", "idx_weekly_odds_lookup", "season, week, player_id, market"),
+                (
+                    "weekly_projections",
+                    "idx_weekly_projections_lookup",
+                    "season, week, player_id, market",
+                ),
+                ("games", "idx_games_lookup", "season, week"),
+                (
+                    "player_stats_enhanced",
+                    "idx_player_stats_enhanced_lookup",
+                    "season, week, player_id",
+                ),
+                ("bet_outcomes", "idx_bet_outcomes_week", "season, week"),
+                ("weekly_performance", "idx_weekly_performance_lookup", "season, week"),
             ):
                 # Existence is keyed on index name, so an index whose column set
                 # was widened later would otherwise keep its stale definition

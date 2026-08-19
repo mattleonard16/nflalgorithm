@@ -15,6 +15,8 @@ from typing import Any
 
 from pipeline_jobs.service import JobService, LeaseLostError, PipelineJob
 from scripts.production_runner import run_production_pipeline
+from utils.error_tracking import init_error_tracking
+from utils.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +295,8 @@ def main() -> None:
     parser.add_argument("--poll-seconds", type=float, default=2.0)
     parser.add_argument("--worker-id")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO)
+    configure_logging("pipeline-worker")
+    init_error_tracking("pipeline-worker")
 
     worker = PipelineWorker(
         worker_id=args.worker_id,

@@ -151,6 +151,16 @@ class TestAgentReview:
         assert data["run_id"] == "test-run-001"
         assert data["review_status"] == "started"
 
+    def test_review_409_when_already_in_flight(self, client, db, monkeypatch):
+        import api.server as server
+
+        _seed_bets(db)
+        _seed_pipeline_run(db)
+        monkeypatch.setattr(server, "_review_runs_in_flight", {"test-run-001"})
+        resp = client.post("/api/run/test-run-001/review?season=2025&week=22")
+        assert resp.status_code == 409
+        assert "already running" in resp.json()["detail"]
+
     def test_review_status_returns_not_reviewed(self, client, db):
         _seed_pipeline_run(db)
         resp = client.get("/api/run/test-run-001/review-status?season=2025&week=22")

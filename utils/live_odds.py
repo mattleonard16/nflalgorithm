@@ -18,6 +18,12 @@ def kickoffs_from_games(games_df: pd.DataFrame | None) -> pd.DataFrame:
 
     Canonical odds keys match ``games.game_id``. Callers that already renamed
     the column to ``event_id`` are accepted as-is.
+
+    A NULL ``kickoff_utc`` means the kickoff is not yet known (schedule rows
+    can exist before kickoff times land), so the row is dropped here and the
+    event's odds degrade to unjoinable in ``filter_stale_snapshots`` — kept
+    and counted, not stale-filtered against a fabricated kickoff. Non-null
+    garbage (e.g. an empty string) still fails loud downstream.
     """
     if games_df is None or games_df.empty:
         return pd.DataFrame(columns=["event_id", "kickoff_utc"])
@@ -30,7 +36,8 @@ def kickoffs_from_games(games_df: pd.DataFrame | None) -> pd.DataFrame:
         raise ValueError("games_df missing required column: game_id or event_id")
     if "kickoff_utc" not in frame.columns:
         raise ValueError("games_df missing required column: kickoff_utc")
-    return frame[["event_id", "kickoff_utc"]].drop_duplicates().reset_index(drop=True)
+    kickoffs = frame[["event_id", "kickoff_utc"]].drop_duplicates()
+    return kickoffs[kickoffs["kickoff_utc"].notna()].reset_index(drop=True)
 
 
 def select_live_odds(

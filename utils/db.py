@@ -34,6 +34,10 @@ warnings.filterwarnings("ignore", message=".*pandas only supports SQLAlchemy con
 DBConnection = Union[sqlite3.Connection, pymysql_connection]
 MIN_MYSQL_VERSION = (8, 0, 0)
 
+# A validated server does not change version mid-process, so the SELECT
+# VERSION() roundtrip is paid once per DSN instead of on every connection.
+_VALIDATED_MYSQL_DSNS: set[str] = set()
+
 
 def validate_mysql_server_version(version: str) -> tuple[int, int, int]:
     """Require Oracle MySQL 8+ for SKIP LOCKED and queue-fencing semantics."""
@@ -124,6 +128,8 @@ def _create_mysql_connection() -> pymysql_connection:
             port=parsed.port or 3306,
             cursorclass=pymysql.cursors.Cursor,
         )
+        if dsn in _VALIDATED_MYSQL_DSNS:
+            return conn
         try:
             with conn.cursor() as cursor:
                 cursor.execute("SELECT VERSION()")
@@ -134,6 +140,7 @@ def _create_mysql_connection() -> pymysql_connection:
         except Exception:
             conn.close()
             raise
+        _VALIDATED_MYSQL_DSNS.add(dsn)
         return conn
     except Exception as e:
         raise RuntimeError(f"Failed to connect to MySQL: {e}")
@@ -148,6 +155,10 @@ def get_connection() -> Iterator[DBConnection]:
         sqlite_path = config.database.path
         conn = sqlite3.connect(sqlite_path, timeout=30.0)
         conn.execute("PRAGMA busy_timeout = 30000")
+        # NORMAL is the WAL-appropriate durability point: a crash cannot corrupt
+        # the database, only lose the last commits. FULL fsyncs every commit.
+        # Journal mode itself is persistent, set once by MigrationManager.
+        conn.execute("PRAGMA synchronous = NORMAL")
         conn.execute("PRAGMA foreign_keys = ON")
         try:
             yield conn

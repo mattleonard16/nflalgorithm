@@ -47,6 +47,29 @@ def test_kickoffs_from_games_empty() -> None:
     assert list(frame.columns) == ["event_id", "kickoff_utc"]
 
 
+def test_kickoffs_from_games_drops_null_kickoffs() -> None:
+    games = pd.DataFrame(
+        {
+            "game_id": [KEY["event_id"], "2026_01_KC_BUF"],
+            "kickoff_utc": [KICKOFF, None],
+        }
+    )
+    frame = kickoffs_from_games(games)
+    assert list(frame["event_id"]) == [KEY["event_id"]]
+
+
+def test_select_live_odds_null_kickoff_keeps_latest() -> None:
+    # A scheduled game whose kickoff is not yet known must not crash the
+    # selection; its odds pass through unjoinable and the latest one wins.
+    odds = _odds(
+        {"line": 70.5, "price": -110, "as_of": "2026-09-13T15:00:00+00:00"},
+        {"line": 99.5, "price": -105, "as_of": "2026-09-13T18:00:00+00:00"},
+    )
+    live = select_live_odds(odds, kickoffs_from_games(_games(kickoff_utc=None)))
+    assert len(live) == 1
+    assert live.iloc[0]["line"] == 99.5
+
+
 def test_kickoffs_from_games_missing_id_fails_loud() -> None:
     with pytest.raises(ValueError, match="game_id or event_id"):
         kickoffs_from_games(pd.DataFrame({"kickoff_utc": [KICKOFF]}))
