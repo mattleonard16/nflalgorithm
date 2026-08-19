@@ -96,12 +96,6 @@ export function isWatched(picks: WatchedPick[], key: WatchlistKeyParts): boolean
   return picks.some((item) => watchlistKey(item) === target);
 }
 
-export function watchlistForWeek(season: number, week: number): WatchedPick[] {
-  return loadWatchlist().filter(
-    (item) => item.season === season && item.week === week
-  );
-}
-
 export function filterForWeek(
   picks: WatchedPick[],
   season: number,

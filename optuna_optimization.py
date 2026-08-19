@@ -114,78 +114,6 @@ class OptunaOptimizer:
             'study_name': study.study_name
         }
     
-    def optimize_lstm(self, X: pd.DataFrame, y: pd.Series, n_trials: int = 50) -> Dict[str, Any]:
-        """Optimize LSTM hyperparameters."""
-        
-        def objective(trial):
-            # LSTM hyperparameters
-            lstm_units = trial.suggest_int('lstm_units', 32, 256)
-            dropout_rate = trial.suggest_float('dropout_rate', 0.1, 0.5)
-            learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
-            batch_size = trial.suggest_categorical('batch_size', [16, 32, 64])
-            
-            # Prepare sequential data (simplified)
-            sequence_length = 8
-            X_seq, y_seq = self._prepare_sequential_data(X, y, sequence_length)
-            
-            if len(X_seq) < 50:  # Need minimum data
-                return float('inf')
-            
-            # Build model
-            # model = tf.keras.Sequential([
-            #     tf.keras.layers.LSTM(lstm_units, dropout=dropout_rate, return_sequences=False),
-            #     tf.keras.layers.Dense(64, activation='relu'),
-            #     tf.keras.layers.Dropout(dropout_rate),
-            #     tf.keras.layers.Dense(1)
-            # ])
-            
-            # model.compile(
-            #     optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
-            #     loss='mean_absolute_error'
-            # )
-            
-            # Train with early stopping
-            # early_stopping = tf.keras.callbacks.EarlyStopping(
-            #     monitor='val_loss', patience=10, restore_best_weights=True
-            # )
-            
-            # Split for validation
-            split_idx = int(0.8 * len(X_seq))
-            X_train, X_val = X_seq[:split_idx], X_seq[split_idx:]
-            y_train, y_val = y_seq[:split_idx], y_seq[split_idx:]
-            
-            # history = model.fit(
-            #     X_train, y_train,
-            #     validation_data=(X_val, y_val),
-            #     epochs=50,
-            #     batch_size=batch_size,
-            #     callbacks=[early_stopping],
-            #     verbose=0
-            # )
-            
-            # Return validation MAE
-            # val_mae = min(history.history['val_loss'])
-            # return val_mae
-            return float('inf') # Commented out TensorFlow LSTM optimization
-        
-        study = optuna.create_study(
-            direction='minimize',
-            storage=self.storage,
-            study_name=f'lstm_optimization_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-        )
-        
-        study.optimize(objective, n_trials=n_trials, timeout=3600)  # 1 hour timeout
-        
-        logger.info(f"Best LSTM MAE: {study.best_value:.3f}")
-        logger.info(f"Best params: {study.best_params}")
-        
-        return {
-            'best_params': study.best_params,
-            'best_mae': study.best_value,
-            'n_trials': len(study.trials),
-            'study_name': study.study_name
-        }
-    
     def optimize_lightgbm(self, X: pd.DataFrame, y: pd.Series, n_trials: int = 300) -> Dict[str, Any]:
         """Optimize LightGBM with monotonic constraints for breakout prediction."""
         def objective(trial):
@@ -272,32 +200,6 @@ class OptunaOptimizer:
         
         return importance
     
-    def _prepare_sequential_data(self, X: pd.DataFrame, y: pd.Series, sequence_length: int):
-        """Prepare sequential data for LSTM."""
-        # Sort by player and time
-        if 'player_id' in X.columns and 'week' in X.columns:
-            combined = pd.concat([X, y], axis=1).sort_values(['player_id', 'week'])
-        else:
-            combined = pd.concat([X, y], axis=1)
-        
-        sequences_X = []
-        sequences_y = []
-        
-        # Create sequences per player
-        if 'player_id' in X.columns:
-            for player_id in combined['player_id'].unique():
-                player_data = combined[combined['player_id'] == player_id]
-                
-                if len(player_data) >= sequence_length + 1:
-                    for i in range(len(player_data) - sequence_length):
-                        seq_X = player_data.iloc[i:i+sequence_length][X.columns].values
-                        seq_y = player_data.iloc[i+sequence_length][y.name]
-                        
-                        sequences_X.append(seq_X)
-                        sequences_y.append(seq_y)
-        
-        return np.array(sequences_X), np.array(sequences_y)
-    
     def optimize_all_models(self, X: pd.DataFrame, y: pd.Series) -> Dict[str, Dict[str, Any]]:
         """Optimize all including LightGBM and ensemble."""
         logger.info("Starting comprehensive hyperparameter optimization...")
@@ -311,11 +213,6 @@ class OptunaOptimizer:
         # Optimize RandomForest with increased trials
         logger.info("Optimizing RandomForest with 300 trials...")
         results['random_forest'] = self.optimize_random_forest(X, y, n_trials=300)
-        
-        # Optimize LSTM (if enough data)
-        if len(X) > 500:
-            logger.info("Optimizing LSTM...")
-            results['lstm'] = self.optimize_lstm(X, y, n_trials=30)
         
         # Optimize LightGBM with increased trials
         logger.info("Optimizing LightGBM with 300 trials...")
@@ -336,10 +233,9 @@ class OptunaOptimizer:
         logger.info(f"Best overall model: {best_model} with MAE: {best_mae:.3f}")
         
         # Generate SHAP for best model
-        if best_model != 'lstm':
-            model = base_models.get(best_model, GradientBoostingRegressor())
-            model.fit(X, y)
-            self.explain_with_shap(model, X)
+        model = base_models.get(best_model, GradientBoostingRegressor())
+        model.fit(X, y)
+        self.explain_with_shap(model, X)
         
         return {
             'results': results,

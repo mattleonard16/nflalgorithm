@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-NFL Player Prop Line Scraper for 2025-2026 Season
-Retrieves current season-long prop lines from multiple sportsbooks
+NFL weekly player prop line scraper.
+Fetches per-week player prop odds from The Odds API and appends timestamped
+two-sided snapshots to `weekly_odds`.
 """
 
 import argparse
@@ -9,7 +10,6 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
@@ -17,11 +17,10 @@ from typing import Any, Dict, List, Optional, cast
 import pandas as pd
 
 from config import config
-from scripts.api_error_handler import api_error_handler
 
 # Import simplified caching system and validation
 from scripts.simple_cache import simple_cached_client
-from utils.db import execute, get_backend, get_connection, read_dataframe
+from utils.db import execute, get_connection, read_dataframe
 from utils.event_keys import UnresolvableEventError, resolve_event_id
 from utils.player_id_utils import canonicalize_team, make_player_id
 from utils.two_sided_odds import pair_two_sided_prices
@@ -29,22 +28,6 @@ from utils.two_sided_odds import pair_two_sided_prices
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class PropLine:
-    """Data class for player prop lines"""
-
-    player: str
-    team: str
-    position: str
-    book: str
-    stat: str
-    line: float
-    over_odds: int
-    under_odds: int
-    last_updated: str
-    season: str = "2025-2026"
 
 
 class NFLPropScraper:
@@ -106,34 +89,6 @@ class NFLPropScraper:
             "QB": "QB",
         }
 
-        # Initialize database
-        self.init_database()
-
-    def init_database(self):
-        """Initialize SQLite database for storing prop lines"""
-        with get_connection() as conn:
-            execute(
-                """
-            CREATE TABLE IF NOT EXISTS prop_lines (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                player TEXT NOT NULL,
-                team TEXT NOT NULL,
-                position TEXT NOT NULL,
-                book TEXT NOT NULL,
-                stat TEXT NOT NULL,
-                line REAL NOT NULL,
-                over_odds INTEGER NOT NULL,
-                under_odds INTEGER NOT NULL,
-                last_updated TEXT NOT NULL,
-                season TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(player, book, stat, season)
-            )
-        """,
-                conn=conn,
-            )
-            # Weekly prop lines (game-level markets)
-
     @staticmethod
     def _save_snapshot(path: Path, snapshot: Dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,125 +146,6 @@ class NFLPropScraper:
                 f"Live odds cover {len(selected)} of {len(schedule)} requested-week games"
             )
         return selected
-
-    def get_odds_api_props(self) -> List[PropLine]:
-        """Retrieve prop lines from The Odds API"""
-        if not self.odds_api_key:
-            logger.warning("No Odds API key provided. Skipping API call.")
-            return []
-
-        prop_lines = []
-
-        # Season-long props markets
-        markets = [
-            "player_pass_yds",
-            "player_rush_yds",
-            "player_rec_yds",
-            "player_pass_tds",
-            "player_rush_tds",
-            "player_rec_tds",
-        ]
-
-        for market in markets:
-            try:
-                url = f"{self.base_url}/sports/americanfootball_nfl/odds"
-                params = {
-                    "apiKey": self.odds_api_key,
-                    "regions": "us",
-                    "markets": market,
-                    "oddsFormat": "american",
-                    "dateFormat": "iso",
-                }
-
-                # Use cached client with odds API type
-                response = self.client.get(url, params=params, api_type="odds")
-                response.raise_for_status()
-
-                data = response.json()
-
-                prop_lines.extend(self._parse_odds_api_response(data, market))
-
-                # Minimal delay between requests
-                time.sleep(0.1)
-
-            except Exception as e:
-                # Handle API failure with circuit breaker
-                error_result = api_error_handler.handle_api_failure("odds", market, e)
-
-                if error_result["circuit_open"]:
-                    logger.error(f"Circuit breaker open for odds API market {market}")
-                    continue
-
-                if error_result["should_retry"] and error_result["wait_time"] > 0:
-                    logger.info(f"Retrying odds API for {market} in {error_result['wait_time']}s")
-                    time.sleep(error_result["wait_time"])
-                    try:
-                        response = self.client.get(url, params=params, api_type="odds")
-                        response.raise_for_status()
-                        data = response.json()
-                        prop_lines.extend(self._parse_odds_api_response(data, market))
-                    except Exception as retry_error:
-                        logger.error(f"Retry failed for {market}: {retry_error}")
-
-                logger.error(f"Error fetching {market} from Odds API: {e}")
-                continue
-
-        return prop_lines
-
-    def _parse_odds_api_response(self, data: Dict, market: str) -> List[PropLine]:
-        """Parse response from Odds API"""
-        prop_lines = []
-
-        # Map market names to our stat categories
-        stat_mapping = {
-            "player_pass_yds": "passing_yards",
-            "player_rush_yds": "rushing_yards",
-            "player_rec_yds": "receiving_yards",
-            "player_pass_tds": "passing_touchdowns",
-            "player_rush_tds": "rushing_touchdowns",
-            "player_rec_tds": "receiving_touchdowns",
-        }
-
-        stat_category = stat_mapping.get(market, market)
-
-        for game in data:
-            for bookmaker in game.get("bookmakers", []):
-                book_name = bookmaker.get("title", "Unknown")
-
-                for market_data in bookmaker.get("markets", []):
-                    if market_data.get("key") != market:
-                        continue
-
-                    for outcome in market_data.get("outcomes", []):
-                        player_name = outcome.get("description", "")
-
-                        # Extract player name and team (format varies by book)
-                        player_info = self._extract_player_info(
-                            player_name, game.get("home_team", ""), game.get("away_team", "")
-                        )
-
-                        if not player_info:
-                            continue
-
-                        # Pair on player *and* line; see the weekly path below.
-                        paired = pair_two_sided_prices(outcome, market_data.get("outcomes", []))
-
-                        if paired is not None:
-                            line, over_odds, under_odds = paired
-                            prop_line = PropLine(
-                                player=player_info["name"],
-                                team=player_info["team"],
-                                position=player_info["position"],
-                                book=book_name,
-                                stat=stat_category,
-                                line=line,
-                                over_odds=over_odds,
-                                under_odds=under_odds,
-                                last_updated=datetime.now().isoformat(),
-                            )
-                            prop_lines.append(prop_line)
-
-        return prop_lines
 
     # ------------------------ Weekly odds (Week N) ------------------------
     @staticmethod
@@ -821,175 +657,6 @@ class NFLPropScraper:
         # This is a placeholder - in practice you'd need a comprehensive player database
         return "UNKNOWN"
 
-    def get_sample_prop_lines(self) -> List[PropLine]:
-        """Generate sample prop lines for testing"""
-        logger.info("Generating sample prop lines for testing...")
-
-        sample_data: List[Dict[str, Any]] = [
-            # Running Backs
-            {
-                "player": "Christian McCaffrey",
-                "team": "SF",
-                "position": "RB",
-                "book": "DraftKings",
-                "stat": "rushing_yards",
-                "line": 1250.5,
-                "over_odds": -115,
-                "under_odds": -105,
-            },
-            {
-                "player": "Derrick Henry",
-                "team": "BAL",
-                "position": "RB",
-                "book": "FanDuel",
-                "stat": "rushing_yards",
-                "line": 1100.5,
-                "over_odds": -110,
-                "under_odds": -110,
-            },
-            {
-                "player": "Josh Jacobs",
-                "team": "GB",
-                "position": "RB",
-                "book": "BetMGM",
-                "stat": "rushing_yards",
-                "line": 950.5,
-                "over_odds": -108,
-                "under_odds": -112,
-            },
-            # Wide Receivers
-            {
-                "player": "Tyreek Hill",
-                "team": "MIA",
-                "position": "WR",
-                "book": "DraftKings",
-                "stat": "receiving_yards",
-                "line": 1350.5,
-                "over_odds": -120,
-                "under_odds": +100,
-            },
-            {
-                "player": "CeeDee Lamb",
-                "team": "DAL",
-                "position": "WR",
-                "book": "FanDuel",
-                "stat": "receiving_yards",
-                "line": 1200.5,
-                "over_odds": -115,
-                "under_odds": -105,
-            },
-            {
-                "player": "Davante Adams",
-                "team": "NYJ",
-                "position": "WR",
-                "book": "Caesars",
-                "stat": "receiving_yards",
-                "line": 1050.5,
-                "over_odds": -110,
-                "under_odds": -110,
-            },
-            # Quarterbacks
-            {
-                "player": "Josh Allen",
-                "team": "BUF",
-                "position": "QB",
-                "book": "DraftKings",
-                "stat": "passing_yards",
-                "line": 4200.5,
-                "over_odds": -110,
-                "under_odds": -110,
-            },
-            {
-                "player": "Lamar Jackson",
-                "team": "BAL",
-                "position": "QB",
-                "book": "FanDuel",
-                "stat": "passing_yards",
-                "line": 3800.5,
-                "over_odds": -115,
-                "under_odds": -105,
-            },
-            # Tight Ends
-            {
-                "player": "Travis Kelce",
-                "team": "KC",
-                "position": "TE",
-                "book": "BetMGM",
-                "stat": "receiving_yards",
-                "line": 950.5,
-                "over_odds": -112,
-                "under_odds": -108,
-            },
-        ]
-
-        prop_lines = []
-        for data in sample_data:
-            prop_line = PropLine(
-                player=data["player"],
-                team=data["team"],
-                position=data["position"],
-                book=data["book"],
-                stat=data["stat"],
-                line=data["line"],
-                over_odds=data["over_odds"],
-                under_odds=data["under_odds"],
-                last_updated=datetime.now().isoformat(),
-            )
-            prop_lines.append(prop_line)
-
-        return prop_lines
-
-    def save_prop_lines(self, prop_lines: List[PropLine]):
-        """Save prop lines to database"""
-        if not prop_lines:
-            logger.warning("No prop lines to save")
-            return
-
-        with get_connection() as conn:
-            for prop_line in prop_lines:
-                try:
-                    execute(
-                        """
-                        INSERT INTO prop_lines 
-                        (player, team, position, book, stat, line, over_odds, under_odds, last_updated, season)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(player, book, stat, season)
-                        DO UPDATE SET
-                            team = excluded.team,
-                            position = excluded.position,
-                            line = excluded.line,
-                            over_odds = excluded.over_odds,
-                            under_odds = excluded.under_odds,
-                            last_updated = excluded.last_updated
-                        """,
-                        (
-                            prop_line.player,
-                            prop_line.team,
-                            prop_line.position,
-                            prop_line.book,
-                            prop_line.stat,
-                            prop_line.line,
-                            prop_line.over_odds,
-                            prop_line.under_odds,
-                            prop_line.last_updated,
-                            prop_line.season,
-                        ),
-                        conn=conn,
-                    )
-                except Exception as e:
-                    logger.error(f"Error saving prop line for {prop_line.player}: {e}")
-                    continue
-
-        logger.info(f"Saved {len(prop_lines)} prop lines to database")
-
-    def get_prop_lines_dataframe(self) -> pd.DataFrame:
-        """Get all prop lines as a DataFrame"""
-        return read_dataframe("""
-            SELECT player, team, position, book, stat, line, over_odds, under_odds, last_updated, season
-            FROM prop_lines
-            ORDER BY player, stat, book
-            """)
-
     def flag_suspicious_lines(self, df: pd.DataFrame) -> pd.DataFrame:
         """Flag players with suspiciously low lines compared to typical values"""
 
@@ -1019,32 +686,10 @@ class NFLPropScraper:
         return df
 
 
-def run_season_update(self):
-    """Legacy season-long update retained for backward compatibility."""
-    logger.info("Starting season-long prop line update...")
-    prop_lines = self.get_odds_api_props()
-    if not prop_lines:
-        logger.info("Using sample prop lines (no API data available)")
-        prop_lines = self.get_sample_prop_lines()
-    self.save_prop_lines(prop_lines)
-    df = self.get_prop_lines_dataframe()
-    df = self.flag_suspicious_lines(df)
-    df.to_csv("current_prop_lines.csv", index=False)
-    logger.info(f"Update complete: {len(prop_lines)} lines retrieved")
-    logger.info(f"Suspicious lines found: {df['suspicious_line'].sum()}")
-    if df["suspicious_line"].sum() > 0:
-        suspicious_lines = df[df["suspicious_line"]]
-        for _, row in suspicious_lines.iterrows():
-            print(
-                f"  {row['player']} - {row['stat']}: {row['line']} ({row.get('suspicious_reason', 'Unknown')})"
-            )
-    return df
-
-
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="NFL weekly prop line scraper")
-    parser.add_argument("--season", type=int, default=2025, help="Season to fetch (default: 2025)")
-    parser.add_argument("--week", type=int, default=10, help="Week to fetch (default: 10)")
+    parser.add_argument("--season", type=int, required=True, help="Season to fetch")
+    parser.add_argument("--week", type=int, required=True, help="Week to fetch")
     parser.add_argument(
         "--save-json",
         type=Path,
@@ -1060,24 +705,8 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _require_sqlite_backend() -> None:
-    """Refuse to run against MySQL rather than fail partway through a write.
-
-    This tool emits SQLite-only DDL (AUTOINCREMENT) and SQLite-only upserts
-    (ON CONFLICT), so a MySQL run would abort mid-scrape after partial writes.
-    """
-    backend = get_backend()
-    if backend == "mysql":
-        raise RuntimeError(
-            "prop_line_scraper is sqlite-only: it emits SQLite AUTOINCREMENT DDL "
-            "and ON CONFLICT upserts that MySQL rejects. Re-run with "
-            "DB_BACKEND=sqlite, or ingest odds through the durable pipeline."
-        )
-
-
 def main():
     """CLI entry point for the prop line scraper."""
-    _require_sqlite_backend()
     args = _parse_args()
     scraper = NFLPropScraper()
 
