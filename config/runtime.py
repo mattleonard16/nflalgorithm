@@ -32,7 +32,6 @@ database = SimpleNamespace(
 
 api = SimpleNamespace(
     odds_api_key=os.getenv("ODDS_API_KEY", ""),
-    weather_api_key=os.getenv("WEATHER_API_KEY", ""),
     host=os.getenv("API_HOST", "0.0.0.0"),
     port=int(os.getenv("API_PORT", "8000")),
     enable_caching=env_flag("API_ENABLE_CACHING", True),
@@ -52,10 +51,8 @@ cache = SimpleNamespace(
     rate_limit_burst_capacity=60,
     rate_limit_tokens_per_minute=60,
     weather_cache_ttl=60,
-    weather_cache_ttl_dome=120,
     player_cache_ttl=120,
     cache_warm_enabled=False,
-    stale_while_revalidate_window=300,
 )
 
 model = SimpleNamespace(

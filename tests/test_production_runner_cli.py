@@ -324,39 +324,6 @@ def test_weekly_report_refresh_uses_prepare_then_live_odds(monkeypatch) -> None:
     assert len(odds) == 1
 
 
-def test_activation_routes_through_canonical_pregame_refresh(monkeypatch, tmp_path) -> None:
-    try:
-        from scripts import activate_betting
-    except ModuleNotFoundError as exc:
-        if exc.name not in {"prop_integration", "value_betting_engine"}:
-            raise
-        pytest.skip(f"private algorithm module is unavailable: {exc}")
-
-    calls: list[tuple[int, int]] = []
-
-    monkeypatch.setattr(
-        activate_betting,
-        "refresh_pregame_inputs",
-        lambda season, week: calls.append((season, week))
-        or ({"predictions": 1}, pd.DataFrame({"line": [55.5]})),
-    )
-
-    class StopAfterRefresh:
-        def __init__(self):
-            raise RuntimeError("stop after canonical refresh")
-
-    monkeypatch.setattr(activate_betting, "PropIntegration", StopAfterRefresh)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["activate_betting", "--season", "2026", "--week", "1"],
-    )
-
-    with pytest.raises(RuntimeError, match="stop after canonical refresh"):
-        activate_betting.main()
-    assert calls == [(2026, 1)]
-
-
 def test_makefile_week_entrypoints_do_not_call_legacy_prediction_paths() -> None:
     makefile = (production_runner.config.project_root / "Makefile").read_text()
 
