@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from pipeline_jobs.service import JobService
+from utils.error_tracking import init_error_tracking
+from utils.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +87,8 @@ def main() -> None:
         return
     if args.synthetic_alert and not args.once:
         parser.error("--synthetic-alert requires --once to prevent repeated test alerts")
-    logging.basicConfig(level=logging.INFO)
+    configure_logging("queue-monitor")
+    init_error_tracking("queue-monitor")
     if args.once:
         payload = emit_once(
             synthetic_alert=args.synthetic_alert,
