@@ -56,6 +56,7 @@ DB_BACKEND ?= sqlite
 SQLITE_DB_PATH ?= nfl_data.db
 API_HOST ?= 0.0.0.0
 API_PORT ?= 8000
+API_WORKERS ?= 2
 DB_ENV := DB_BACKEND=$(DB_BACKEND) SQLITE_DB_PATH=$(SQLITE_DB_PATH)
 
 # Conditional commands based on ENV_TYPE
@@ -271,8 +272,8 @@ api: api-preflight
 	@$(MAKE) api-serve
 
 api-prod-serve:
-	@echo "Starting FastAPI backend (production) on $(API_HOST):$(API_PORT)..."
-	$(DB_ENV) $(PYTHON) -m uvicorn api.application:app --host $(API_HOST) --port $(API_PORT)
+	@echo "Starting FastAPI backend (production) on $(API_HOST):$(API_PORT) with $(API_WORKERS) workers..."
+	$(DB_ENV) $(PYTHON) -m uvicorn api.application:app --host $(API_HOST) --port $(API_PORT) --workers $(API_WORKERS)
 
 api-prod: api-preflight
 	@$(MAKE) runtime-production-preflight

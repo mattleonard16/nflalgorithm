@@ -15,10 +15,11 @@ import time
 from datetime import date, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.cache import nba_cache, make_cache_key
+from api.pipeline_router import require_pipeline_operator
 from api.nba_explainability import build_why_payload, build_why_payloads_batch
 from utils.db import fetchall, fetchone, read_dataframe
 
@@ -858,8 +859,9 @@ def nba_risk_summary(
 
 
 @router.post("/cache/invalidate")
-def nba_cache_invalidate() -> dict:
-    """Clear all NBA endpoint caches."""
+def nba_cache_invalidate(principal: str = Depends(require_pipeline_operator)) -> dict:
+    """Clear all NBA endpoint caches. Operator-gated: repeated invalidation
+    forces full recomputes, so anonymous callers must not reach it."""
     nba_cache.invalidate_all()
     return {"cleared": True, "message": "NBA cache invalidated"}
 

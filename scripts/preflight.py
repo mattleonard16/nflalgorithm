@@ -263,6 +263,40 @@ def check_demo_mode(config: Any, *, production: bool) -> Diagnostic:
     )
 
 
+def check_allowed_origins(*, production: bool) -> Diagnostic:
+    """Confirm CORS is configured for a real frontend origin.
+
+    api/server.py falls back to localhost origins when ALLOWED_ORIGINS is
+    unset, which silently breaks every browser call from the deployed frontend.
+    """
+    raw = os.getenv("ALLOWED_ORIGINS", "")
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    action = (
+        "Set ALLOWED_ORIGINS to a comma-separated list of deployed frontend origins, "
+        'e.g. ALLOWED_ORIGINS="https://app.example.com".'
+    )
+    if not origins:
+        return _result(
+            "allowed_origins",
+            "fail" if production else "warn",
+            "ALLOWED_ORIGINS is unset; CORS will only allow localhost dev origins.",
+            action,
+        )
+    localhost_only = all(
+        "localhost" in origin or "127.0.0.1" in origin for origin in origins
+    )
+    if localhost_only:
+        return _result(
+            "allowed_origins",
+            "fail" if production else "warn",
+            "ALLOWED_ORIGINS contains only localhost origins; deployed browsers will be blocked.",
+            action,
+        )
+    return _result(
+        "allowed_origins", "pass", f"ALLOWED_ORIGINS configures {len(origins)} origin(s)."
+    )
+
+
 def check_private_api(root: Path = PROJECT_ROOT) -> Diagnostic:
     api_file = root / PRIVATE_API_FILE
     if not api_file.is_file():
@@ -687,6 +721,7 @@ def collect_diagnostics(
             diagnostics.extend(check_sqlite_wal(config))
         diagnostics.append(check_odds_key(config, required=require_live_odds))
         diagnostics.append(check_demo_mode(config, production=require_demo_mode_off))
+        diagnostics.append(check_allowed_origins(production=require_demo_mode_off))
         if (
             season is not None
             and week is not None

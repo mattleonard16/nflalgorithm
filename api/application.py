@@ -26,6 +26,7 @@ except ModuleNotFoundError as exc:
 from api.diagnostics import router as diagnostics_router
 from api.pipeline_router import router as pipeline_router
 from api.projections_router import router as projections_router
+from api.rate_limit import RateLimitMiddleware
 from utils.api_exceptions import install_exception_handlers
 
 
@@ -52,5 +53,9 @@ app.include_router(pipeline_router)
 app.include_router(diagnostics_router)
 app.include_router(projections_router)
 install_exception_handlers(app)
+# Applied here, not in the deployment-supplied module, so every deployment gets
+# the limiter regardless of which private api.server it ships. Limits are read
+# from the environment at construction; invalid values fail startup loud.
+app.add_middleware(RateLimitMiddleware)
 
 __all__ = ["app"]
