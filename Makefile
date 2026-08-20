@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade production-run health
+.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto production-run health
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -352,6 +352,37 @@ week-grade:
 	$(call require_season_week)
 	@echo "📊 Grading bets for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.record_outcomes --season $(SEASON) --week $(WEEK)
+
+week-lines:
+	$(call require_season_week)
+	@echo "Publishing internal lines for season $(SEASON), week $(WEEK)..."
+	$(DB_ENV) $(PYTHON) -m scripts.publish_internal_lines --season $(SEASON) --week $(WEEK)
+
+week-research:
+	$(call require_season_week)
+	@echo "Writing weekly research memo for season $(SEASON), week $(WEEK)..."
+	$(DB_ENV) $(PYTHON) -m scripts.weekly_research --season $(SEASON) --week $(WEEK)
+
+# The Wednesday cron entrypoint: resolve the upcoming week from the schedule,
+# refresh data and projections (with context factors on), publish internal
+# lines, then grade the completed week and write its research memo. Grading
+# and research degrade to a warning so a results hiccup never blocks the
+# new week's lines.
+week-auto:
+	@set -e; \
+	SW=$$($(DB_ENV) $(PYTHON) -c 'from utils.current_week import resolve_current_week; s, w = resolve_current_week(); print(s, w)'); \
+	SEASON=$${SW% *}; WEEK=$${SW#* }; \
+	echo "Resolved upcoming week: $$SEASON W$$WEEK"; \
+	$(MAKE) ingest-nfl; \
+	NFL_FEATURE_CONTEXT_FACTORS=1 $(MAKE) week-predict SEASON=$$SEASON WEEK=$$WEEK; \
+	$(MAKE) week-lines SEASON=$$SEASON WEEK=$$WEEK; \
+	if [ "$$WEEK" -gt 1 ]; then \
+		PREV=$$((WEEK - 1)); \
+		$(MAKE) week-grade SEASON=$$SEASON WEEK=$$PREV || echo "WARN: grading $$SEASON W$$PREV failed; lines were still published"; \
+		$(MAKE) week-research SEASON=$$SEASON WEEK=$$PREV || echo "WARN: research memo for $$SEASON W$$PREV failed; lines were still published"; \
+	else \
+		echo "Week 1: no completed week to grade or research yet"; \
+	fi
 
 backfill-accuracy:
 	@echo "Running historical line accuracy backfill..."
