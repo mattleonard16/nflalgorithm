@@ -134,6 +134,24 @@ class MigrationManager:
             )
             """,
             """
+            CREATE TABLE IF NOT EXISTS internal_lines (
+                season INTEGER NOT NULL,
+                week INTEGER NOT NULL,
+                player_id TEXT NOT NULL,
+                market TEXT NOT NULL,
+                name TEXT NOT NULL,
+                team TEXT NOT NULL,
+                position TEXT NOT NULL,
+                line REAL NOT NULL,
+                mu REAL NOT NULL,
+                sigma REAL NOT NULL,
+                universe_rank INTEGER NOT NULL,
+                generated_at TEXT NOT NULL,
+                computed_at TEXT NOT NULL,
+                PRIMARY KEY (season, week, player_id, market)
+            )
+            """,
+            """
             CREATE TABLE IF NOT EXISTS weekly_odds (
                 event_id TEXT NOT NULL,
                 season INTEGER NOT NULL,
@@ -1556,6 +1574,7 @@ class MigrationManager:
                 # NFL hot paths. These existed only on the SQLite branch below,
                 # so the same queries ran unindexed on MySQL.
                 ("weekly_odds", "idx_weekly_odds_lookup", "season, week, player_id, market"),
+                ("internal_lines", "idx_internal_lines_rank", "season, week, universe_rank"),
                 (
                     "weekly_projections",
                     "idx_weekly_projections_lookup",
@@ -1605,6 +1624,9 @@ class MigrationManager:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_weekly_projections_lookup ON weekly_projections(season, week, player_id, market)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_internal_lines_rank ON internal_lines(season, week, universe_rank)"
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_feed_freshness_week ON feed_freshness(season, week)"
