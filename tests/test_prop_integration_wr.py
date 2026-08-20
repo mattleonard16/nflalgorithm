@@ -72,12 +72,6 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             season INTEGER, week INTEGER
         )
     """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS player_mappings (
-            player_id_canonical TEXT, player_id_odds TEXT,
-            player_id_projections TEXT, match_type TEXT, confidence_score REAL
-        )
-    """)
 
 
 def test_wr_exact_player_id_match_tier1(tmp_path: Path) -> None:

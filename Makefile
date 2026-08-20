@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade production-run health health-check
+.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade production-run health
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -624,46 +624,6 @@ archive-all: archive-week
 # ============================================================================
 # UV ENHANCED TARGETS - 10-100x faster dependency management
 # ============================================================================
-
-# Environment information
-env-info:
-	@echo "Environment Information"
-	@echo "========================="
-	@echo "Environment Type: $(ENV_TYPE)"
-	@echo "Python Command: $(PYTHON)"
-	@echo "Python Version: $(shell $(PYTHON) --version 2>/dev/null || echo 'Not available')"
-	@echo "UV Available: $(shell command -v uv >/dev/null 2>&1 && echo 'Yes' || echo 'No')"
-	@echo "UV Version: $(shell uv --version 2>/dev/null || echo 'Not installed')"
-	@echo "VEnv Available: $(shell [ -d 'venv' ] && echo 'Yes' || echo 'No')"
-	@echo "PyProject.toml: $(shell [ -f 'pyproject.toml' ] && echo 'Yes' || echo 'No')"
-	@echo "Project Root: $(shell pwd)"
-
-# Comprehensive health check
-health-check: env-info
-	@echo ""
-	@echo "🔍 Health Check Results:"
-	@if command -v uv >/dev/null 2>&1; then \
-		echo "UV is available"; \
-		uv pip list | head -5 2>/dev/null || echo "   (No packages listed)"; \
-	else \
-		echo "UV not available"; \
-	fi
-	@if [ -d "venv" ]; then \
-		echo "venv is available"; \
-	else \
-		echo "venv not available"; \
-	fi
-
-# Quick environment reset (UV only - seconds instead of minutes)
-quick-reset:
-	@if command -v uv >/dev/null 2>&1; then \
-		echo "Quick environment reset with UV..."; \
-		rm -rf .venv/; \
-		time uv sync --frozen; \
-		echo "Environment reset complete\!"; \
-	else \
-		echo "UV not available for quick reset"; \
-	fi
 
 # Add new dependency (smart detection)
 add-dep:

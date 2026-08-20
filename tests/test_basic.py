@@ -66,11 +66,9 @@ class TestDataPipeline:
 
             expected_tables = {
                 'player_stats_enhanced',
-                'weather_data',
                 'injury_data',
-                'odds_data',
-                'team_context',
-                'clv_tracking'
+                'weekly_odds',
+                'weekly_projections',
             }
 
             missing = expected_tables - tables

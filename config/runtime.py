@@ -50,9 +50,6 @@ cache = SimpleNamespace(
     http_cache_expire_after=3600,
     rate_limit_burst_capacity=60,
     rate_limit_tokens_per_minute=60,
-    weather_cache_ttl=60,
-    player_cache_ttl=120,
-    cache_warm_enabled=False,
 )
 
 model = SimpleNamespace(

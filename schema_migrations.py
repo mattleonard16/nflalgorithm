@@ -148,26 +148,6 @@ class MigrationManager:
             )
             """,
             """
-            CREATE TABLE IF NOT EXISTS bets_weekly (
-                bet_id TEXT PRIMARY KEY,
-                season INTEGER NOT NULL,
-                week INTEGER NOT NULL,
-                event_id TEXT NOT NULL,
-                player_id TEXT NOT NULL,
-                market TEXT NOT NULL,
-                sportsbook TEXT NOT NULL,
-                side TEXT NOT NULL,
-                line REAL NOT NULL,
-                price INTEGER NOT NULL,
-                p_win REAL NOT NULL,
-                kelly_fraction REAL NOT NULL,
-                stake REAL NOT NULL,
-                bankroll_before REAL NOT NULL,
-                placed_at TEXT NOT NULL,
-                model_version TEXT NOT NULL
-            )
-            """,
-            """
             CREATE TABLE IF NOT EXISTS clv_weekly (
                 bet_id TEXT PRIMARY KEY,
                 close_line REAL,
@@ -209,20 +189,6 @@ class MigrationManager:
                 generated_at TEXT NOT NULL,
                 published_run_id VARCHAR(36),
                 PRIMARY KEY (season, week, player_id, market, sportsbook, event_id, side)
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS player_mappings (
-                player_id_canonical TEXT NOT NULL,
-                player_id_odds TEXT NOT NULL,
-                player_id_projections TEXT,
-                player_name TEXT,
-                team_projections TEXT,
-                team_odds TEXT,
-                match_type TEXT,
-                confidence_score REAL,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (player_id_canonical, player_id_odds)
             )
             """,
             """
@@ -1650,12 +1616,6 @@ class MigrationManager:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_materialized_value_view_lookup "
             "ON materialized_value_view(season, week, edge_percentage)"
-        )
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_player_mappings_odds ON player_mappings(player_id_odds)"
-        )
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_player_mappings_canonical ON player_mappings(player_id_canonical)"
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_player_stats_enhanced_lookup ON player_stats_enhanced(season, week, player_id)"

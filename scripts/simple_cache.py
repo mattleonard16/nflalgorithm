@@ -221,29 +221,7 @@ class SimpleCachedClient:
         """Get appropriate TTL based on API type."""
         if api_type == "odds":
             return timedelta(seconds=config.pipeline.odds_max_age_seconds)
-        elif api_type == "weather":
-            return timedelta(minutes=config.cache.weather_cache_ttl)
-        elif api_type == "player":
-            return timedelta(minutes=config.cache.player_cache_ttl)
-        else:
-            return timedelta(seconds=config.cache.http_cache_expire_after)
-
-    def warm_cache(self, endpoints: list = None):
-        """Pre-populate cache with popular endpoints."""
-        if not config.cache.cache_warm_enabled or not endpoints:
-            return
-
-        logger.info(f"Warming cache for {len(endpoints)} endpoints")
-
-        for endpoint in endpoints:
-            try:
-                if not endpoint.startswith("http"):
-                    endpoint = f"https://api.the-odds-api.com/v4/{endpoint}"
-
-                self.get(endpoint, api_type="odds")
-                time.sleep(0.1)  # Avoid overwhelming APIs
-            except Exception as e:
-                logger.warning(f"Cache warm failed for {endpoint}: {e}")
+        return timedelta(seconds=config.cache.http_cache_expire_after)
 
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get basic cache statistics."""
