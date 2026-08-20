@@ -1590,6 +1590,15 @@ class MigrationManager:
                     "idx_player_stats_enhanced_lookup",
                     "season, week, player_id",
                 ),
+                # Covering index for the identity subquery on the value-bets
+                # and by-position endpoints (GROUP BY player_id over name and
+                # position). name/position are TEXT on MySQL, hence the prefix
+                # lengths.
+                (
+                    "player_stats_enhanced",
+                    "idx_player_stats_identity",
+                    "player_id, name(64), position(8)",
+                ),
                 ("bet_outcomes", "idx_bet_outcomes_week", "season, week"),
                 ("weekly_performance", "idx_weekly_performance_lookup", "season, week"),
             ):
@@ -1651,6 +1660,13 @@ class MigrationManager:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_player_stats_latest ON player_stats_enhanced(player_id, season DESC, week DESC)"
+        )
+        # Covering index for the API identity subquery (GROUP BY player_id
+        # over name/position); without it the subquery scans every stats row
+        # with a table lookup per row, and that cost grows each season.
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_player_stats_identity "
+            "ON player_stats_enhanced(player_id, name, position)"
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_roster_players_team ON nfl_roster_players(season, team, position)"
