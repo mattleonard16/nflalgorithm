@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto production-run health
+.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto db-analyze production-run health
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -353,6 +353,13 @@ week-grade:
 	@echo "📊 Grading bets for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.record_outcomes --season $(SEASON) --week $(WEEK)
 
+# SQLite has no automatic statistics; without ANALYZE the query planner
+# guesses and picks measurably worse plans (benchmarked 62ms -> 20ms on the
+# training rolling-history query). MySQL keeps its own stats, so it's a no-op.
+db-analyze:
+	@echo "Refreshing query-planner statistics..."
+	$(DB_ENV) $(PYTHON) -c "from utils.db import execute, get_backend; execute('ANALYZE') if get_backend() == 'sqlite' else print('non-SQLite backend keeps its own statistics; nothing to do')"
+
 week-lines:
 	$(call require_season_week)
 	@echo "Publishing internal lines for season $(SEASON), week $(WEEK)..."
@@ -374,6 +381,7 @@ week-auto:
 	SEASON=$${SW% *}; WEEK=$${SW#* }; \
 	echo "Resolved upcoming week: $$SEASON W$$WEEK"; \
 	$(MAKE) ingest-nfl; \
+	$(MAKE) db-analyze; \
 	NFL_FEATURE_CONTEXT_FACTORS=1 $(MAKE) week-predict SEASON=$$SEASON WEEK=$$WEEK; \
 	$(MAKE) week-lines SEASON=$$SEASON WEEK=$$WEEK; \
 	if [ "$$WEEK" -gt 1 ]; then \
