@@ -1522,7 +1522,11 @@ class MigrationManager:
         if not existing:
             return
 
-        desired = [col.strip().lower() for col in columns.split(",")]
+        # information_schema reports bare column names, so a desired list may
+        # carry MySQL prefix lengths ("name(64)") that must be stripped before
+        # comparing. A change to only a prefix length therefore does not
+        # trigger a rebuild; changing the column set still does.
+        desired = [col.strip().lower().split("(")[0] for col in columns.split(",")]
         if existing != desired:
             cursor.execute(f"DROP INDEX `{index}` ON `{table}`")
 
