@@ -138,6 +138,10 @@ features = SimpleNamespace(
     # uncapped full Kelly oversizes real cards. Set NFL_FEATURE_KELLY_CAP=0
     # to disable.
     kelly_cap_enabled=env_flag("NFL_FEATURE_KELLY_CAP", True),
+    # Weekly context adjustment (game script, matchup history, usage trend)
+    # multiplied into predicted mu. Default OFF until a walk-forward backtest
+    # validates it; the cron path opts in explicitly.
+    context_factors_enabled=env_flag("NFL_FEATURE_CONTEXT_FACTORS"),
 )
 
 config = SimpleNamespace(
