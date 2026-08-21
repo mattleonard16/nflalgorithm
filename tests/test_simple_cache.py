@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import io
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
+import pytest
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3 import HTTPResponse as U3HTTPResponse
 
 from scripts.simple_cache import SimpleCachedClient
 
@@ -100,3 +104,82 @@ def test_get_passes_odds_ttl_and_force_refresh_to_requests_cache(monkeypatch) ->
         expire_after=timedelta(seconds=180),
         force_refresh=True,
     )
+
+
+class _CannedAdapter(HTTPAdapter):
+    """Serves one canned JSON body without touching the network."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def send(self, request, **kwargs):  # noqa: ANN001, ANN003
+        self.calls += 1
+        raw = U3HTTPResponse(
+            body=io.BytesIO(b'{"ok": true}'),
+            status=200,
+            headers={"Content-Type": "application/json"},
+            preload_content=False,
+        )
+        raw._request_url = request.url
+        return self.build_response(request, raw)
+
+
+def _offline_capable_client(tmp_path, monkeypatch):
+    """Real client with an isolated cache dir and a canned transport."""
+    monkeypatch.setattr("scripts.simple_cache.config.cache_dir", tmp_path)
+    monkeypatch.setattr("scripts.simple_cache.config.api.cache_offline_mode", False)
+    monkeypatch.setattr("scripts.simple_cache.config.api.force_cache_refresh", False)
+    client = SimpleCachedClient()
+    adapter = _CannedAdapter()
+    client.session.mount("https://cache.test", adapter)
+    return client, adapter
+
+
+def test_get_from_cache_round_trips_a_cached_response(tmp_path, monkeypatch) -> None:
+    client, _ = _offline_capable_client(tmp_path, monkeypatch)
+    first = client.get("https://cache.test/odds", params={"week": 1})
+    assert first.headers["X-Cache"] == "MISS"
+
+    cached = client._get_from_cache("https://cache.test/odds", {"week": 1})
+
+    assert cached is not None, "cache lookup must find the entry the session just stored"
+    assert cached.content == b'{"ok": true}'
+    assert "X-Cache-Created-At" in cached.headers
+
+
+def test_get_from_cache_miss_returns_none_without_error(tmp_path, monkeypatch) -> None:
+    client, _ = _offline_capable_client(tmp_path, monkeypatch)
+
+    assert client._get_from_cache("https://cache.test/never-fetched") is None
+
+
+def test_fresh_cache_hit_short_circuits_network(tmp_path, monkeypatch) -> None:
+    client, adapter = _offline_capable_client(tmp_path, monkeypatch)
+    client.get("https://cache.test/odds", params={"week": 1})
+
+    second = client.get("https://cache.test/odds", params={"week": 1})
+
+    assert adapter.calls == 1
+    assert second.headers["X-Cache"] == "HIT"
+
+
+def test_offline_mode_serves_cache_and_fails_closed_when_empty(tmp_path, monkeypatch) -> None:
+    client, _ = _offline_capable_client(tmp_path, monkeypatch)
+    client.get("https://cache.test/odds", params={"week": 1})
+    monkeypatch.setattr("scripts.simple_cache.config.api.cache_offline_mode", True)
+
+    offline = client.get("https://cache.test/odds", params={"week": 1})
+    assert offline.headers["X-Cache"] == "HIT-OFFLINE"
+
+    with pytest.raises(requests.ConnectionError):
+        client.get("https://cache.test/never-fetched")
+
+
+def test_get_cache_stats_counts_entries(tmp_path, monkeypatch) -> None:
+    client, _ = _offline_capable_client(tmp_path, monkeypatch)
+    assert client.get_cache_stats()["cached_urls"] == 0
+
+    client.get("https://cache.test/odds", params={"week": 1})
+
+    assert client.get_cache_stats()["cached_urls"] == 1
