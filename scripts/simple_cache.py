@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 
 import requests
 import requests_cache
+from requests.structures import CaseInsensitiveDict
 
 from config import config
 
@@ -79,7 +80,7 @@ class SimpleCachedClient:
     def get(
         self,
         url: str,
-        params: Dict[str, Any] = None,
+        params: Optional[Dict[str, Any]] = None,
         force_refresh: bool = False,
         api_type: str = "generic",
     ) -> requests.Response:
@@ -144,24 +145,27 @@ class SimpleCachedClient:
             raise
 
     def _get_from_cache(
-        self, url: str, params: Dict[str, Any] = None
+        self, url: str, params: Optional[Dict[str, Any]] = None
     ) -> Optional[requests.Response]:
         """Get response from cache if available."""
         try:
-            cache_key = requests_cache.utils.create_url(url, params)
+            prepared = requests.Request("GET", url, params=params).prepare()
+            cache_key = self.session.cache.create_key(prepared)
             cached_response = self.session.cache.responses.get(cache_key)
             if cached_response:
                 response = requests.Response()
                 response._content = cached_response.content
                 response.status_code = cached_response.status_code
-                response.headers = dict(cached_response.headers)
+                response.headers = CaseInsensitiveDict(cached_response.headers)
                 response.url = cached_response.url
                 created_at = getattr(cached_response, "created_at", None)
                 if created_at:
                     response.headers["X-Cache-Created-At"] = self._as_utc(created_at).isoformat()
                 return response
         except Exception:
-            pass
+            # A lookup failure must degrade to a miss, but never silently:
+            # this except once hid a lookup that failed on every call.
+            logger.warning("Cache lookup failed for %s; treating as miss", url, exc_info=True)
         return None
 
     @staticmethod
@@ -214,7 +218,8 @@ class SimpleCachedClient:
             age = datetime.now(timezone.utc) - created_time
             ttl = self._get_ttl_for_api(api_type=api_type)
             return age.total_seconds() < 0 or age > ttl
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Treating cache entry as expired; bad provenance header (%s)", exc)
             return True
 
     def _get_ttl_for_api(self, api_type: str) -> timedelta:
@@ -225,9 +230,12 @@ class SimpleCachedClient:
 
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get basic cache statistics."""
-        cache_info = getattr(self.session.cache.responses, "keys", [])
+        try:
+            cached_urls = len(self.session.cache.responses)
+        except (TypeError, AttributeError):
+            cached_urls = 0
         return {
-            "cached_urls": len(cache_info),
+            "cached_urls": cached_urls,
             "cache_backend": config.cache.http_cache_backend,
             "rate_limiter_tokens": self.rate_limiter.tokens,
             "cache_dir": str(config.cache_dir / config.cache.http_cache_dir),
