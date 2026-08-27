@@ -54,6 +54,17 @@ def test_missing_index_is_left_for_create_path() -> None:
     assert _drop_statements(cursor) == []
 
 
+def test_backtick_quoted_columns_do_not_trigger_rebuild() -> None:
+    # Quoting is required in the CREATE statement (bare position(8) parses as
+    # the POSITION() function); the comparator must see through it.
+    cursor = _FakeCursor(["player_id", "name", "position"])
+    MigrationManager._drop_mysql_index_if_columns_differ(
+        cursor, "player_stats_enhanced", "idx_player_stats_identity",
+        "player_id, `name`(64), `position`(8)",
+    )
+    assert _drop_statements(cursor) == []
+
+
 def test_case_and_whitespace_are_normalized() -> None:
     cursor = _FakeCursor(["player_id", "name", "position"])
     MigrationManager._drop_mysql_index_if_columns_differ(
