@@ -1523,10 +1523,12 @@ class MigrationManager:
             return
 
         # information_schema reports bare column names, so a desired list may
-        # carry MySQL prefix lengths ("name(64)") that must be stripped before
-        # comparing. A change to only a prefix length therefore does not
-        # trigger a rebuild; changing the column set still does.
-        desired = [col.strip().lower().split("(")[0] for col in columns.split(",")]
+        # carry MySQL prefix lengths ("name(64)") and backtick quoting that
+        # must be stripped before comparing. A change to only a prefix length
+        # therefore does not trigger a rebuild; changing the column set does.
+        desired = [
+            col.strip().lower().split("(")[0].strip("` ") for col in columns.split(",")
+        ]
         if existing != desired:
             cursor.execute(f"DROP INDEX `{index}` ON `{table}`")
 
@@ -1593,11 +1595,12 @@ class MigrationManager:
                 # Covering index for the identity subquery on the value-bets
                 # and by-position endpoints (GROUP BY player_id over name and
                 # position). name/position are TEXT on MySQL, hence the prefix
-                # lengths.
+                # lengths. The backticks are load-bearing: bare position(8) is
+                # parsed as the POSITION() function and fails the migration.
                 (
                     "player_stats_enhanced",
                     "idx_player_stats_identity",
-                    "player_id, name(64), position(8)",
+                    "player_id, `name`(64), `position`(8)",
                 ),
                 ("bet_outcomes", "idx_bet_outcomes_week", "season, week"),
                 ("weekly_performance", "idx_weekly_performance_lookup", "season, week"),
