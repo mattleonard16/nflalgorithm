@@ -186,6 +186,40 @@ def test_position_grouping_attaches_from_actuals() -> None:
     assert result.report["by_position"]["WR"]["count"] == 1
 
 
+def test_market_position_cross_grouping() -> None:
+    # Sigma calibration is bucketed by (market, position); the report must
+    # split the cross, not just each axis alone.
+    actuals = pd.DataFrame(
+        [
+            {"season": SEASON, "week": 1, "player_id": "wr_a", "position": "WR",
+             "receiving_yards": 50.0, "rushing_yards": 5.0},
+            {"season": SEASON, "week": 1, "player_id": "rb_a", "position": "RB",
+             "receiving_yards": 20.0, "rushing_yards": 80.0},
+        ]
+    )
+
+    def predict_fn(season: int, week: int) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {"player_id": "wr_a", "market": "receiving_yards", "mu": 60.0, "sigma": 10.0},
+                {"player_id": "rb_a", "market": "receiving_yards", "mu": 25.0, "sigma": 10.0},
+                {"player_id": "rb_a", "market": "rushing_yards", "mu": 70.0, "sigma": 10.0},
+            ]
+        )
+
+    result = run_walk_forward(predict_fn, actuals, _config((1,)))
+
+    cross = result.report["by_market_position"]
+    assert set(cross) == {
+        "receiving_yards|WR",
+        "receiving_yards|RB",
+        "rushing_yards|RB",
+    }
+    assert cross["receiving_yards|WR"]["mae"] == pytest.approx(10.0)
+    assert cross["receiving_yards|RB"]["mae"] == pytest.approx(5.0)
+    assert cross["rushing_yards|RB"]["mean_bias"] == pytest.approx(-10.0)
+
+
 def _report_for_compare(mae: float, coverage: float, weeks: list[int]) -> dict:
     group = {"mae": mae, "coverage_1sigma": coverage}
     return {

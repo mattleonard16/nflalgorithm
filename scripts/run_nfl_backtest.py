@@ -150,6 +150,10 @@ def _run(args: argparse.Namespace) -> dict:
                 min_week_rows=args.min_week_rows,
             ),
         )
+    if args.rows_output is not None:
+        args.rows_output.parent.mkdir(parents=True, exist_ok=True)
+        result.evaluated.to_csv(args.rows_output, index=False)
+        print(f"scored rows written to {args.rows_output}")
     report = dict(result.report)
     report["generated_at"] = datetime.now(timezone.utc).isoformat()
     report["history_seasons"] = args.history_seasons
@@ -178,6 +182,12 @@ def main() -> None:
     )
     run.add_argument("--min-week-rows", type=int, default=20)
     run.add_argument("--output", type=Path, default=None)
+    run.add_argument(
+        "--rows-output",
+        type=Path,
+        default=None,
+        help="also write the per-row scored frame as CSV (for calibration analysis)",
+    )
 
     compare = subparsers.add_parser("compare", help="compare two backtest reports")
     compare.add_argument("baseline", type=Path)
