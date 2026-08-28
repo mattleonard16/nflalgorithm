@@ -867,7 +867,18 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
    `describe_excluded` reports `{total: 89, unjoinable: 89, synthetic: 72, gradeable: 0}`. Week 10
    rows are the `alpha_receiver` test fixture; week 22 has zero scheduled games. `clv_weekly` is
    empty, so nothing was ever computed from them. Screened, not deleted.
-10. No NFL walk-forward backtest — NBA has `utils/nba_backtest.py`.
+10. [RESOLVED] NFL walk-forward backtest — `utils/nfl_backtest.py` (tracked, CI-tested with a stub
+    model in `tests/test_nfl_backtest.py`) plus runner `scripts/run_nfl_backtest.py` and
+    `make nfl-backtest SEASON=2025`. Retrains the production weekly model per week on history
+    strictly before that week; model artifacts go to a temp dir and `_write_predictions` is
+    no-oped, so production bundles and stored pregame evidence are untouched. The report includes
+    `by_market_position` (the granularity `utils/nfl_sigma.py` buckets use) and `--rows-output`
+    dumps the per-row scored frame for calibration analysis. A `compare` subcommand refuses to
+    compare runs with mismatched scope. 2025 full-season baseline (5,117 predictions, 18/18 weeks,
+    zero problems): overall MAE 26.88, bias +2.81. Note: every position's walk-forward MAE is far
+    above the item-25 mae-gate ceilings (QB 50.8 vs 18, WR 24.2 vs 12, RB 20.4 vs 12, TE 19.1
+    vs 9) — partly slate breadth (this frame scores every player with a stat line), but the
+    ceilings predate any real measurement and need recalibration.
 11. [RESOLVED — by deletion] Universal model, no position split. Decision: the orphaned `RBModel` subclass was deleted rather than revived; `models/position_specific/weekly.py` is the single production model path. `BasePositionModel` is retained as the shared base. Revisit per-position splits as new work against weekly.py, not the old subclass.
 12. [MOSTLY RESOLVED] nflreadpy sources unused — rosters, weekly rosters, schedules, depth charts,
     injuries, and pbp red-zone touches are all ingested by `scripts/ingest_real_nfl_data.py` and
@@ -886,15 +897,18 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     never sum past `config.betting.bankroll` even when per-bet caps individually pass.
 
 ### Tier 2 — MEDIUM (correctness/ops)
-14. [MOSTLY RESOLVED] EWMA decay 0.65: the market-mu EWMA path in
+14. [RESOLVED] EWMA decay 0.65 / sigma calibration: the market-mu EWMA path in
     `DataPipeline._compute_market_mu` (`data_pipeline.py:74`) is **dead code in production** — it
     is exercised only by `tests/test_market_mu_wr.py`. Production mu is
     `model.predict() x defense_mult` (`weekly.py:1003-1015`); that path never touches EWMA at all.
-    The live 0.65 decay is the **sigma** EWMA in `utils/nfl_sigma.py:109`, which is the real tuning
-    surface — untuned and uniform across markets exactly as this item originally said, just in the
-    other file. Tuning it is blocked on item 10 (no walk-forward backtest harness to validate a
-    change against). The unread config knobs (`config.integration.ewma_decay` in both
-    `config/runtime.py` and `config.py` — zero readers, confirmed by grep) have been
+    The live tuning surface was the **sigma** tables in `utils/nfl_sigma.py`, now recalibrated
+    per (market, position) bucket from the 2025 walk-forward backtest (item 10's harness): each
+    bucket deviating >= 2 SE from nominal 68.3% coverage got the 68.27th percentile of |z| as its
+    EWMA multiplier, floors/defaults scaled by the same factor. Result: overall 1-sigma coverage
+    66.3% -> 68.2%; QB passing (previously unvalidated, 58.2%) landed at 68.5%. Factors are
+    in-sample for 2025 — validate against 2026 walk-forward before re-tuning, via
+    `make nfl-backtest` + `compare`. The unread config knobs (`config.integration.ewma_decay` in
+    both `config/runtime.py` and `config.py` — zero readers, confirmed by grep) have been
     removed; do not reintroduce a config knob for `_compute_market_mu`'s constant, since nothing
     in production reads it.
 15. [RESOLVED — claim was stale] Defense multiplier double-apply: mu gets the multiplier exactly
