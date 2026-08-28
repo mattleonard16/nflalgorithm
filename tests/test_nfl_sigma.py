@@ -7,7 +7,7 @@ Covers:
 - Legacy per-market floors via position=None (rushing=15, receiving=12, passing=30)
 - Position-bucketed floors/defaults keyed by (market, position)
 - position=None reproduces legacy behavior exactly (backward compatibility)
-- WR receiving fat-tail multiplier (1.20 on the EWMA estimate)
+- Per-bucket EWMA multipliers (e.g. WR receiving 1.13, QB passing 1.29)
 - Fallback defaults for <6 games
 - Edge cases: empty list, single game, all same values
 - Decay parameter affects output correctly
@@ -40,28 +40,28 @@ SIGMA_DEFAULTS = {
 }
 MIN_GAMES = 6
 
-# Position-bucketed recalibration (2025 held-out coverage study).
+# Position-bucketed recalibration (2025 full-season walk-forward backtest).
 POSITION_SIGMA_FLOORS = {
     ("rushing_yards", "RB"): 15.0,
-    ("rushing_yards", "QB"): 12.0,
+    ("rushing_yards", "QB"): 13.5,
     ("rushing_yards", "WR"): 5.0,
     ("rushing_yards", "TE"): 5.0,
-    ("receiving_yards", "WR"): 13.0,
-    ("receiving_yards", "RB"): 10.0,
-    ("receiving_yards", "TE"): 12.0,
-    ("passing_yards", "QB"): 30.0,  # unvalidated — legacy value
+    ("receiving_yards", "WR"): 12.0,
+    ("receiving_yards", "RB"): 11.0,
+    ("receiving_yards", "TE"): 13.5,
+    ("passing_yards", "QB"): 39.0,
 }
 POSITION_SIGMA_DEFAULTS = {
     ("rushing_yards", "RB"): 25.0,
-    ("rushing_yards", "QB"): 20.0,
+    ("rushing_yards", "QB"): 22.5,
     ("rushing_yards", "WR"): 10.0,
     ("rushing_yards", "TE"): 10.0,
-    ("receiving_yards", "WR"): 24.0,
-    ("receiving_yards", "RB"): 16.0,
-    ("receiving_yards", "TE"): 20.0,
-    ("passing_yards", "QB"): 50.0,  # unvalidated — legacy value
+    ("receiving_yards", "WR"): 22.5,
+    ("receiving_yards", "RB"): 17.5,
+    ("receiving_yards", "TE"): 23.0,
+    ("passing_yards", "QB"): 64.5,
 }
-WR_RECEIVING_MULTIPLIER = 1.20
+WR_RECEIVING_MULTIPLIER = 1.13
 
 
 # ---------------------------------------------------------------------------

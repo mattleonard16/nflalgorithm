@@ -145,6 +145,23 @@ def _grouped_metrics(rows: pd.DataFrame, column: str) -> dict[str, Any]:
     return grouped
 
 
+def _market_position_metrics(rows: pd.DataFrame) -> dict[str, Any]:
+    """Cross of market x position, keyed "market|position".
+
+    Sigma calibration lives in (market, position) buckets
+    (utils/nfl_sigma.py), so per-market or per-position views alone
+    cannot say which bucket is miscalibrated.
+    """
+    if "market" not in rows.columns or "position" not in rows.columns:
+        return {}
+    keys = (
+        rows["market"].fillna("UNKNOWN").astype(str)
+        + "|"
+        + rows["position"].fillna("UNKNOWN").astype(str)
+    )
+    return {str(key): _metric_group(group) for key, group in rows.groupby(keys)}
+
+
 def run_walk_forward(
     predict_fn: PredictFn,
     actuals: pd.DataFrame,
@@ -203,6 +220,7 @@ def run_walk_forward(
         "overall": _metric_group(evaluated),
         "by_market": _grouped_metrics(evaluated, "market"),
         "by_position": _grouped_metrics(evaluated, "position"),
+        "by_market_position": _market_position_metrics(evaluated),
         "by_week": {
             str(week): _metric_group(group) for week, group in evaluated.groupby("week")
         },

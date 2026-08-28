@@ -8,18 +8,28 @@ Floors and fallback defaults are keyed by (market, position_bucket).
 The ``None`` bucket carries the legacy per-market values, so callers that do
 not pass a position get exactly the pre-recalibration behavior.
 
-Position-specific values derive from a held-out 2025 coverage study
-(1,933 predictions; target mu +/- 1 sigma coverage 68.3%):
+Position-specific values derive from the full-season 2025 walk-forward
+backtest (5,117 predictions, retrain-per-week; see
+``reports/nfl_backtest_2025_baseline.json`` ``by_market_position`` and
+``make nfl-backtest``). Per bucket, the applied scale factor is the 68.27th
+percentile of |z| — the multiplier that puts mu +/- 1 sigma coverage exactly
+at nominal. Only buckets whose measured coverage deviated from 68.3% by at
+least two standard errors were changed; floor and default scale by the same
+factor as the EWMA multiplier so all three paths widen together.
 
-- rushing_yards:  RB 71.5% (near nominal, keep floor), QB 80.5% (~1.3x wide),
-  WR 95.6% / TE 95.1% (>=2x wide; these players' rushing values cluster
-  0-5 yards, so the legacy 15.0 floor dominated and was far too large).
-- receiving_yards: TE 68.3% (nominal), RB 79.4% (~1.27x wide),
-  WR 66.6% but z-score std 1.25-1.30 (tails fatter than Gaussian, sigma
-  modestly too small) -> floor raised slightly and a 1.20 multiplier is
-  applied to the EWMA estimate.
-- passing_yards: no coverage measurements exist; values are UNVALIDATED
-  copies of the legacy per-market numbers.
+- passing_yards QB: 58.2% coverage (5 SE below nominal) -> 1.29x. This
+  bucket was previously an unvalidated copy of the legacy numbers; it is
+  now measured.
+- receiving_yards: TE 63.0% -> 1.14x; RB 63.6% -> 1.08x; WR 71.7%
+  (slightly over-wide) -> 0.94x, taking the former 1.20 fat-tail
+  multiplier to 1.13.
+- rushing_yards: QB 63.1% -> 1.13x; RB 67.0% is within noise of nominal
+  (kept); WR/TE rushing kept (TE has 11 samples, WR none with sigma).
+
+Caveat: these factors are fit on the same 2025 season the backtest scores,
+so they are in-sample for 2025. They are one-dimensional scale constants
+per bucket (low overfit risk), but 2026 walk-forward results are the real
+validation. Re-run ``make nfl-backtest`` before re-tuning.
 """
 
 from __future__ import annotations
@@ -39,17 +49,17 @@ SIGMA_FLOORS: dict[_Bucket, float] = {
     ("rushing_yards", None): 15.0,
     ("receiving_yards", None): 12.0,
     ("passing_yards", None): 30.0,
-    # rushing_yards (2025 coverage: RB 71.5%, QB 80.5%, WR 95.6%, TE 95.1%)
-    ("rushing_yards", "RB"): 15.0,  # near nominal — keep legacy floor
-    ("rushing_yards", "QB"): 12.0,  # ~1.3x too wide -> 15.0 / 1.3
-    ("rushing_yards", "WR"): 5.0,   # floor-dominated, >=2x too wide; values cluster 0-5
-    ("rushing_yards", "TE"): 5.0,   # same regime as WR rushing
-    # receiving_yards (2025 coverage: WR 66.6% z-std 1.25-1.30, RB 79.4%, TE 68.3%)
-    ("receiving_yards", "WR"): 13.0,  # slight raise for fat tails (see multiplier)
-    ("receiving_yards", "RB"): 10.0,  # ~1.27x too wide -> 12.0 / 1.27
-    ("receiving_yards", "TE"): 12.0,  # nominal — keep legacy floor
-    # passing_yards: UNVALIDATED — no coverage measurements; legacy value kept.
-    ("passing_yards", "QB"): 30.0,
+    # rushing_yards (2025 walk-forward coverage: RB 67.0%, QB 63.1%)
+    ("rushing_yards", "RB"): 15.0,   # within noise of nominal — kept
+    ("rushing_yards", "QB"): 13.5,   # 12.0 * 1.13
+    ("rushing_yards", "WR"): 5.0,    # kept — no sigma'd samples in the backtest
+    ("rushing_yards", "TE"): 5.0,    # kept — 11 samples, too few to move
+    # receiving_yards (2025 walk-forward: WR 71.7%, RB 63.6%, TE 63.0%)
+    ("receiving_yards", "WR"): 12.0,  # 13.0 * 0.94
+    ("receiving_yards", "RB"): 11.0,  # 10.0 * 1.08
+    ("receiving_yards", "TE"): 13.5,  # 12.0 * 1.14
+    # passing_yards (2025 walk-forward: QB 58.2% — first measured calibration)
+    ("passing_yards", "QB"): 39.0,   # 30.0 * 1.29
 }
 
 # Fallback defaults when player has fewer than MIN_GAMES_FOR_SIGMA games,
@@ -61,22 +71,27 @@ SIGMA_DEFAULTS: dict[_Bucket, float] = {
     ("passing_yards", None): 50.0,
     # rushing_yards
     ("rushing_yards", "RB"): 25.0,
-    ("rushing_yards", "QB"): 20.0,  # 25.0 / 1.3
-    ("rushing_yards", "WR"): 10.0,  # scaled ~2.5x down; kept at 2x floor for no-history uncertainty
+    ("rushing_yards", "QB"): 22.5,  # 20.0 * 1.13
+    ("rushing_yards", "WR"): 10.0,  # kept at 2x floor for no-history uncertainty
     ("rushing_yards", "TE"): 10.0,
     # receiving_yards
-    ("receiving_yards", "WR"): 24.0,  # 20.0 * 1.20 fat-tail multiplier
-    ("receiving_yards", "RB"): 16.0,  # 20.0 / 1.27
-    ("receiving_yards", "TE"): 20.0,
-    # passing_yards: UNVALIDATED — no coverage measurements; legacy value kept.
-    ("passing_yards", "QB"): 50.0,
+    ("receiving_yards", "WR"): 22.5,  # 24.0 * 0.94
+    ("receiving_yards", "RB"): 17.5,  # 16.0 * 1.08
+    ("receiving_yards", "TE"): 23.0,  # 20.0 * 1.14
+    # passing_yards
+    ("passing_yards", "QB"): 64.5,   # 50.0 * 1.29
 }
 
-# Multiplier applied to the EWMA estimate (before flooring). WR receiving
-# z-score std of 1.25-1.30 on held-out data means the EWMA sigma is modestly
-# too small in the tails; 1.20 is the midpoint of the measured band.
+# Multiplier applied to the EWMA estimate (before flooring), per bucket the
+# 68.27th percentile of |z| from the 2025 walk-forward backtest — the factor
+# that lands mu +/- 1 sigma coverage on nominal. WR receiving folds the
+# former 1.20 fat-tail multiplier and the measured 0.94 into one number.
 SIGMA_EWMA_MULTIPLIERS: dict[_Bucket, float] = {
-    ("receiving_yards", "WR"): 1.20,
+    ("passing_yards", "QB"): 1.29,
+    ("receiving_yards", "WR"): 1.13,
+    ("receiving_yards", "RB"): 1.08,
+    ("receiving_yards", "TE"): 1.14,
+    ("rushing_yards", "QB"): 1.13,
 }
 
 _GENERIC_FLOOR = 10.0
