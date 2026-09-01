@@ -19,7 +19,7 @@ from typing import Any, Callable, Mapping
 import numpy as np
 import pandas as pd
 
-from utils.nfl_markets import melt_actuals
+from utils.nfl_markets import error_summary, melt_actuals, player_positions
 
 REQUIRED_PREDICTION_COLUMNS = ("player_id", "market", "mu")
 JOIN_KEYS = ["season", "week", "player_id", "market"]
@@ -42,15 +42,6 @@ class WalkForwardConfig:
 class WalkForwardResult:
     report: dict[str, Any]
     evaluated: pd.DataFrame = field(repr=False)
-
-
-def _player_positions(actuals: pd.DataFrame) -> pd.DataFrame:
-    keys = ["season", "week", "player_id"]
-    if actuals.empty or "position" not in actuals.columns:
-        return pd.DataFrame(columns=keys + ["position"])
-    positions = actuals[keys + ["position"]].drop_duplicates(keys, keep="last").copy()
-    positions["position"] = positions["position"].astype("string").str.upper()
-    return positions
 
 
 def _validate_predictions(predictions: pd.DataFrame, season: int, week: int) -> list[str]:
@@ -122,9 +113,7 @@ def evaluate_week(
 def _metric_group(rows: pd.DataFrame) -> dict[str, Any]:
     group: dict[str, Any] = {
         "count": int(len(rows)),
-        "mae": float(rows["abs_error"].mean()),
-        "rmse": float(np.sqrt(np.mean(np.square(rows["signed_error"])))),
-        "mean_bias": float(rows["signed_error"].mean()),
+        **error_summary(rows),
         "small_sample": bool(len(rows) < MIN_GROUP_SAMPLE),
     }
     z = rows["z"].dropna()
@@ -177,7 +166,7 @@ def run_walk_forward(
         raise ValueError("At least one week is required")
 
     melted = melt_actuals(actuals)
-    positions = _player_positions(actuals)
+    positions = player_positions(actuals)
     problems: list[str] = []
     evaluated_frames: list[pd.DataFrame] = []
     weeks_evaluated: list[int] = []

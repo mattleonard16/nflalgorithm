@@ -11,11 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-import numpy as np
 import pandas as pd
 
 from utils.db import read_dataframe
-from utils.nfl_markets import MARKET_TO_STAT, melt_actuals
+from utils.nfl_markets import MARKET_TO_STAT, error_summary, melt_actuals, player_positions
 
 MAX_PROJECTION_AGE = pd.Timedelta(days=7)
 PROJECTION_KEYS = ("season", "week", "player_id", "market")
@@ -87,24 +86,7 @@ def _freshness_failure(row: pd.Series) -> str | None:
 def _metric_group(rows: pd.DataFrame) -> dict[str, Any]:
     if rows.empty:
         return {"projection_count": 0, "mae": None, "rmse": None, "mean_bias": None}
-    return {
-        "projection_count": int(len(rows)),
-        "mae": float(rows["abs_error"].mean()),
-        "rmse": float(np.sqrt(np.mean(np.square(rows["signed_error"])))),
-        "mean_bias": float(rows["signed_error"].mean()),
-    }
-
-
-def _player_positions(actuals: pd.DataFrame) -> pd.DataFrame:
-    """Return one position per player-week, for grouping projection errors."""
-    keys = ["season", "week", "player_id"]
-    if actuals.empty or "position" not in actuals.columns:
-        return pd.DataFrame(columns=keys + ["position"])
-    positions = actuals[keys + ["position"]].drop_duplicates(keys, keep="last").copy()
-    positions["position"] = (
-        positions["position"].astype("string").str.upper().fillna(UNKNOWN_POSITION)
-    )
-    return positions
+    return {"projection_count": int(len(rows)), **error_summary(rows)}
 
 
 def _evaluation_scope(*frames: pd.DataFrame) -> dict[str, Any]:
@@ -210,7 +192,11 @@ def evaluate_projections(
         frame = frame.merge(melt_actuals(actuals), on=list(PROJECTION_KEYS), how="left")
         # weekly_projections carries no position, so attach it from the same
         # actuals rows rather than migrating the projections table.
-        frame = frame.merge(_player_positions(actuals), on=["season", "week", "player_id"], how="left")
+        frame = frame.merge(
+            player_positions(actuals, fill_missing=UNKNOWN_POSITION),
+            on=["season", "week", "player_id"],
+            how="left",
+        )
         frame["freshness_failure"] = frame.apply(_freshness_failure, axis=1)
         failures = Counter(frame["freshness_failure"].dropna().astype(str))
         if failures:
