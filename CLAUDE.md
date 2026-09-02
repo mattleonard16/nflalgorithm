@@ -885,15 +885,29 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     context (`spread_line`, `total_line`, `temp`, `wind`, `roof`, `surface`, `div_game`) is now
     extracted by `utils/game_context.py` and persisted on `games` — but **nothing consumes those
     columns yet**; the model does not read them. Still unused: FTN charting; pbp is only mined for
-    red-zone touches (EPA and the rest untapped). Touchdown and reception columns are still
-    discarded at `transform_to_enhanced_stats` `final_cols`, so TD props cannot be priced;
-    `game_script` remains hardcoded 0.0 on every row.
+    red-zone touches (EPA and the rest untapped). Receptions and targets are stored and registered
+    as markets in `sports/markets.py`; touchdown columns (`passing_tds`, `rushing_tds`,
+    `receiving_tds`) are now persisted on `player_stats_enhanced` too — but no TD market is
+    registered and no model prices them yet, so TD props remain unpriceable until that modeling
+    work happens. `game_script` remains hardcoded 0.0 on every row (see item 31 for why that
+    costs real accuracy).
 13. [RESOLVED] Kelly cap in ranking path — enforced at both levels. Per-bet: gitignored
     `value_betting_engine.py:273` caps at `config.betting.max_kelly` (0.10) behind
     `config.features.kelly_cap_enabled` (`NFL_FEATURE_KELLY_CAP`, default ON per
     `config/runtime.py`). Portfolio: tracked `materialized_value_view.py:140` scales the whole
     card to the bankroll via `risk_manager.normalize_portfolio_stakes`, so persisted stakes
     never sum past `config.betting.bankroll` even when per-bet caps individually pass.
+31. QB passing volume over-projection (diagnosed 2026-09 from the 2025 walk-forward rows CSV).
+    The headline +13.2 passing_yards bias decomposes into two separate problems. (a) Slate
+    breadth: QBs with `pass_attempts_predicted` < 28 carry +18 to +31 bias because the model
+    projects backups/uncertain starters as if they will play — books post no lines on them, so
+    bets never see this; it only pollutes aggregate backtest metrics. (b) The real model error:
+    on the clear-starter slate (att_pred >= 28, n=391) efficiency is calibrated (7.09 predicted
+    y/a vs 7.13 actual) but volume runs hot — 33.2 predicted attempts vs 30.9 actual — worth the
+    entire remaining +8.3-yard bias. Likely cause: `game_script` is hardcoded 0.0 (item 12), so
+    the model cannot learn that leading teams stop throwing, and early exits are unpriced. Fix
+    lives in attempts modeling in gitignored `weekly.py`; +8.3 is ~2 SE, so confirm against the
+    2026 walk-forward before tuning anything on it.
 
 ### Tier 2 — MEDIUM (correctness/ops)
 14. [RESOLVED] EWMA decay 0.65 / sigma calibration: the market-mu EWMA path in
