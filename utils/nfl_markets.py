@@ -44,10 +44,17 @@ def melt_actuals(actuals: pd.DataFrame) -> pd.DataFrame:
     """Reshape player-week actuals to one row per supported prop market."""
     keys = ["season", "week", "player_id"]
     rows: list[pd.DataFrame] = []
+    df_actuals = actuals.copy()
+    if not df_actuals.empty and "anytime_td" not in df_actuals.columns:
+        if "rushing_tds" in df_actuals.columns or "receiving_tds" in df_actuals.columns:
+            rush = pd.to_numeric(df_actuals.get("rushing_tds", 0), errors="coerce").fillna(0.0)
+            rec = pd.to_numeric(df_actuals.get("receiving_tds", 0), errors="coerce").fillna(0.0)
+            df_actuals["anytime_td"] = (rush + rec > 0).astype(int)
+
     for market, stat in MARKET_TO_STAT.items():
-        if stat not in actuals.columns:
+        if stat not in df_actuals.columns:
             continue
-        part = actuals[keys + [stat]].rename(columns={stat: "actual"}).copy()
+        part = df_actuals[keys + [stat]].rename(columns={stat: "actual"}).copy()
         part["market"] = market
         rows.append(part)
     if not rows:

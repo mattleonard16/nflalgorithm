@@ -60,6 +60,17 @@ SIGMA_FLOORS: dict[_Bucket, float] = {
     ("receiving_yards", "TE"): 13.5,  # 12.0 * 1.14
     # passing_yards (2025 walk-forward: QB 58.2% — first measured calibration)
     ("passing_yards", "QB"): 39.0,   # 30.0 * 1.29
+    # receptions
+    ("receptions", None): 1.4,
+    ("receptions", "WR"): 1.4,
+    ("receptions", "TE"): 1.2,
+    ("receptions", "RB"): 1.1,
+    # anytime_touchdown
+    ("anytime_touchdown", None): 0.35,
+    ("anytime_touchdown", "RB"): 0.35,
+    ("anytime_touchdown", "WR"): 0.35,
+    ("anytime_touchdown", "TE"): 0.30,
+    ("anytime_touchdown", "QB"): 0.30,
 }
 
 # Fallback defaults when player has fewer than MIN_GAMES_FOR_SIGMA games,
@@ -80,6 +91,17 @@ SIGMA_DEFAULTS: dict[_Bucket, float] = {
     ("receiving_yards", "TE"): 23.0,  # 20.0 * 1.14
     # passing_yards
     ("passing_yards", "QB"): 64.5,   # 50.0 * 1.29
+    # receptions
+    ("receptions", None): 2.2,
+    ("receptions", "WR"): 2.2,
+    ("receptions", "TE"): 1.8,
+    ("receptions", "RB"): 1.8,
+    # anytime_touchdown
+    ("anytime_touchdown", None): 0.48,
+    ("anytime_touchdown", "RB"): 0.48,
+    ("anytime_touchdown", "WR"): 0.48,
+    ("anytime_touchdown", "TE"): 0.45,
+    ("anytime_touchdown", "QB"): 0.45,
 }
 
 # Multiplier applied to the EWMA estimate (before flooring), per bucket the

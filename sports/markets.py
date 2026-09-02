@@ -74,6 +74,12 @@ NFL = _sport(
         _market("passing_yards", unit="yards", positions=("QB",)),
         _market("receptions", unit="receptions", positions=("WR", "TE", "RB")),
         _market("targets", unit="targets", positions=("WR", "TE", "RB")),
+        _market(
+            "anytime_touchdown",
+            unit="touchdowns",
+            positions=("RB", "WR", "TE", "QB"),
+            stat_column="anytime_td",
+        ),
     ),
 )
 
