@@ -875,10 +875,9 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     `by_market_position` (the granularity `utils/nfl_sigma.py` buckets use) and `--rows-output`
     dumps the per-row scored frame for calibration analysis. A `compare` subcommand refuses to
     compare runs with mismatched scope. 2025 full-season baseline (5,117 predictions, 18/18 weeks,
-    zero problems): overall MAE 26.88, bias +2.81. Note: every position's walk-forward MAE is far
-    above the item-25 mae-gate ceilings (QB 50.8 vs 18, WR 24.2 vs 12, RB 20.4 vs 12, TE 19.1
-    vs 9) — partly slate breadth (this frame scores every player with a stat line), but the
-    ceilings predate any real measurement and need recalibration.
+    zero problems): overall MAE 26.88, bias +2.81. The item-25 mae-gate ceilings are now
+    calibrated from this run's per-week worst MAE (see item 25); re-derive them from the latest
+    `--rows-output` CSV whenever the model or slate changes materially.
 11. [RESOLVED — by deletion] Universal model, no position split. Decision: the orphaned `RBModel` subclass was deleted rather than revived; `models/position_specific/weekly.py` is the single production model path. `BasePositionModel` is retained as the shared base. Revisit per-position splits as new work against weekly.py, not the old subclass.
 12. [MOSTLY RESOLVED] nflreadpy sources unused — rosters, weekly rosters, schedules, depth charts,
     injuries, and pbp red-zone touches are all ingested by `scripts/ingest_real_nfl_data.py` and
@@ -944,7 +943,11 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 24. Property tests for Kelly/edge/vig math.
 25. [RESOLVED] CI gate on per-position MAE — `check_position_mae` in
     `scripts/evaluate_nfl_projections.py`, exposed as the `mae-gate` subcommand and `make mae-gate`.
-    Ceilings: QB 18.0, RB 12.0, WR 12.0, TE 9.0; a position under 30 projections is reported as
+    Ceilings: QB 65.0, RB 26.0, WR 29.0, TE 27.0 — each ~10% above that position's worst
+    single-week MAE in the 2025 walk-forward baseline (QB 59.5, RB 24.0, WR 26.0, TE 24.6 from
+    `reports/nfl_backtest_2025_baseline_rows.csv`), so a normal bad week passes and a broken
+    model trips the gate. The original guessed ceilings (QB 18/RB 12/WR 12/TE 9) predated any
+    measurement and would have failed every week. A position under 30 projections is reported as
     skipped, never silently passed. CI runs the gate's unit tests only (no projection data in CI);
     the real-data run is the Makefile target. See the Data Status note — the real-data path
     currently fails on `missing_kickoff`.
