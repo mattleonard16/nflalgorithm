@@ -342,11 +342,12 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     injuries, and pbp red-zone touches are all ingested by `scripts/ingest_real_nfl_data.py` and
     feed `games`, `nfl_roster_players`, and `nfl_player_context_snapshots`. The schedule's pregame
     context (`spread_line`, `total_line`, `temp`, `wind`, `roof`, `surface`, `div_game`) is now
-    extracted by `utils/game_context.py` and persisted on `games` — but **nothing consumes those
-    columns yet**; the model does not read them. Still unused: FTN charting; pbp is only mined for
-    red-zone touches (EPA and the rest untapped). Touchdown and reception columns are still
-    discarded at `transform_to_enhanced_stats` `final_cols`, so TD props cannot be priced;
-    `game_script` remains hardcoded 0.0 on every row.
+    extracted by `utils/game_context.py` and persisted on `games`. `utils/context_factors.py`
+    consumes `spread_line`/`total_line` (game-script factor) behind `NFL_FEATURE_CONTEXT_FACTORS`
+    — see item 31 for its validation status. Still unused: `temp`, `wind`, `roof`, `surface`,
+    `div_game`; FTN charting; pbp is only mined for red-zone touches (EPA and the rest untapped).
+    Receptions are kept, but touchdown columns are still discarded at `transform_to_enhanced_stats`
+    `final_cols`, so TD props cannot be priced; `game_script` remains hardcoded 0.0 on every row.
 13. [RESOLVED] Kelly cap in ranking path — enforced at both levels. Per-bet: gitignored
     `value_betting_engine.py:273` caps at `config.betting.max_kelly` (0.10) behind
     `config.features.kelly_cap_enabled` (`NFL_FEATURE_KELLY_CAP`, default ON per
@@ -373,9 +374,16 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     once, at `weekly.py:1003-1015`. The QB decomposition's `opp_factor` (`weekly.py:693-703`)
     writes only metadata columns, never mu — it does not double-apply anything. Do not "fix" this
     by removing the single legitimate application at 1003-1015.
-16. SQLite/MySQL parity broken (`AUTOINCREMENT`, `ON CONFLICT`).
-17. SQLite no WAL, no pool.
-18. Migration runner no version table, no rollback.
+16. [RESOLVED] SQLite/MySQL parity — upserts in `schema_migrations.py` and
+    `scripts/record_outcomes.py` carry both dialects; `tests/test_grading_upsert_parity.py` and the
+    CI MySQL matrix (`tests/test_pipeline_database_matrix.py`) hold the line.
+17. [RESOLVED] SQLite WAL — `utils/db.py` sets `journal_mode=WAL` and `synchronous=NORMAL`;
+    `make doctor` fails on a non-WAL database (`tests/test_db_pragmas.py`). No pool by design: the
+    worker is the single writer.
+18. [RESOLVED — by design] Migrations are forward-only and idempotent, gated on introspection
+    rather than a version table; recovery from any partial run is `make migrate` again. Crash
+    safety of the PK-widening rebuilds is covered by `tests/test_migration_crash_recovery.py`. See
+    docs/OPERATIONS.md "Migrations: re-run forward, no rollback".
 19. [Documented non-blocker] Opening vs closing line: opening is derivable as the first stored
     snapshot (`MIN(as_of)` per key, `scripts/backfill_line_accuracy.py:load_opening_lines`,
     consumed by `make backfill-accuracy`), bounded by scrape cadence rather than true market-open.
@@ -395,19 +403,41 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     into `rank_weekly_value`; a schedule row with a null kickoff degrades per-key to
     unjoinable rather than crashing the run (`utils/live_odds.kickoffs_from_games`). It still filters
     nothing on the 89 legacy pre-existing rows, since none carry a joinable key.
-22. CORS hard-coded localhost; no rate limits; unbounded threads.
-23. No observability — no Sentry/OTel; logger has no basicConfig.
+22. [RESOLVED] `ALLOWED_ORIGINS` env drives CORS (preflight warns when unset);
+    `api/rate_limit.py` token-bucket middleware (`RATE_LIMIT_*` in `config/runtime.py`); production
+    worker count is explicit in the Makefile.
+23. [RESOLVED] Structured logging (`LOG_FORMAT=json`), `utils/error_tracking.py`, and safe API
+    error responses (`utils/api_exceptions.py`, `tests/test_api_exception_handler.py`).
 
 ### Tier 3 — LOWER (polish)
 24. Property tests for Kelly/edge/vig math.
 25. [RESOLVED] CI gate on per-position MAE — `check_position_mae` in
     `scripts/evaluate_nfl_projections.py`, exposed as the `mae-gate` subcommand and `make mae-gate`.
-    Ceilings: QB 18.0, RB 12.0, WR 12.0, TE 9.0; a position under 30 projections is reported as
-    skipped, never silently passed. CI runs the gate's unit tests only (no projection data in CI);
-    the real-data run is the Makefile target. See the Data Status note — the real-data path
-    currently fails on `missing_kickoff`.
+    Absolute ceilings: QB 18.0, RB 12.0, WR 12.0, TE 9.0; a position under 30 projections is
+    reported as skipped, never silently passed. **Those absolute ceilings are 2-3x below the 2025
+    walk-forward baseline (item 10), so on real data the gate would block every position.** Use
+    the regression mode instead: `make mae-gate SEASON=2026 WEEK=1 BASELINE=<walk-forward report>
+    [TOLERANCE_PCT=10]` derives each ceiling from the baseline's per-position MAE plus the
+    tolerance (`thresholds_from_backtest`; small-sample positions fall back to the absolute table).
+    CI runs the gate's unit tests only (no projection data in CI); the real-data run is the
+    Makefile target. See the Data Status note — the legacy-2025 path fails on `missing_kickoff`.
 26. Perf regression budgets.
 27. Stacking final estimator Ridge → LightGBM or isotonic calibration.
 28. WR role priors stale.
 29. Cache stale-while-revalidate no in-flight dedup.
 30. [RESOLVED] `materialized_value_view` ranking index — composite `(season, week, edge_percentage)` on `idx_materialized_value_view_lookup`, created on both the SQLite and MySQL branches of `_ensure_indexes`. It supersedes the former `(season, week)` index.
+
+### Season-start checks (added 2026-09-02)
+31. **Context factors are unvalidated but switched on by the cron.** `utils/context_factors.py`
+    (game script, matchup history, usage trend; composite clipped to [0.85, 1.15]) was committed
+    with its flag defaulting OFF "until a walk-forward backtest validates it" — but `make week-auto`
+    sets `NFL_FEATURE_CONTEXT_FACTORS=1` unconditionally. No backtest has measured it. Run, on the
+    machine that has the private model:
+    `make nfl-backtest SEASON=2025 CONTEXT_FACTORS=off OUTPUT=logs/metrics/bt-2025-off.json` and
+    the same with `CONTEXT_FACTORS=on LABEL=ctx OUTPUT=logs/metrics/bt-2025-on.json`, then
+    `uv run python -m scripts.run_nfl_backtest compare logs/metrics/bt-2025-off.json
+    logs/metrics/bt-2025-on.json`. If MAE does not improve, drop the `NFL_FEATURE_CONTEXT_FACTORS=1`
+    from `week-auto`. The `--off` report is also the `BASELINE` for item 25's gate.
+32. **The private wiring for context factors is not in `docs/DEPLOYMENT_MANIFEST.md`'s verified
+    set.** What the tracked code expects of `weekly.py` is recorded there now; verify it on the
+    production checkout before week 1.

@@ -257,6 +257,44 @@ def evaluate_projections(
     }
 
 
+def thresholds_from_backtest(
+    backtest_report: Mapping[str, Any],
+    *,
+    tolerance_pct: float = 10.0,
+) -> dict[str, float]:
+    """Derive per-position ceilings from a walk-forward backtest report.
+
+    The absolute ceilings in POSITION_MAE_THRESHOLDS predate any real
+    measurement; the 2025 walk-forward baseline sits 2-3x above every one of
+    them, so on real data the gate fires on every position and teaches
+    operators to ignore it. This turns the gate into a regression check
+    instead: each position's ceiling is its backtest MAE plus `tolerance_pct`.
+
+    Positions the backtest flagged as `small_sample` are left out — a ceiling
+    derived from noise is noise — so they fall back to the absolute table (or
+    the config default) exactly as an unlisted position would.
+
+    Raises ValueError when the report carries no usable per-position MAE, so
+    an empty or mis-shaped baseline can never quietly become "no ceilings".
+    """
+    if tolerance_pct < 0:
+        raise ValueError("tolerance_pct must be non-negative")
+    by_position = backtest_report.get("by_position")
+    if not isinstance(by_position, Mapping) or not by_position:
+        raise ValueError("backtest report has no by_position metrics")
+
+    ceilings: dict[str, float] = {}
+    for position, group in by_position.items():
+        if not isinstance(group, Mapping) or group.get("mae") is None:
+            continue
+        if group.get("small_sample"):
+            continue
+        ceilings[str(position)] = float(group["mae"]) * (1.0 + tolerance_pct / 100.0)
+    if not ceilings:
+        raise ValueError("backtest report has no position with a usable MAE")
+    return ceilings
+
+
 def check_position_mae(
     report: Mapping[str, Any],
     thresholds: Mapping[str, float] | None = None,
@@ -511,6 +549,22 @@ def main() -> None:
     mae_gate.add_argument("--season", type=int, required=True)
     mae_gate.add_argument("--week", type=int, required=True)
     mae_gate.add_argument("--output", type=Path, default=None)
+    mae_gate.add_argument(
+        "--baseline",
+        type=Path,
+        default=None,
+        help=(
+            "walk-forward backtest report (scripts.run_nfl_backtest run --output); "
+            "per-position ceilings become its MAE plus --tolerance-pct instead of "
+            "the absolute POSITION_MAE_THRESHOLDS table"
+        ),
+    )
+    mae_gate.add_argument(
+        "--tolerance-pct",
+        type=float,
+        default=10.0,
+        help="headroom above the baseline MAE before a position blocks (with --baseline)",
+    )
     args = parser.parse_args()
 
     if args.command == "evaluate":
@@ -523,7 +577,20 @@ def main() -> None:
             *_load_inputs(args.season, [args.week]),
             candidate_sha=_git_sha(),
         )
-        report = check_position_mae(evaluation)
+        thresholds = None
+        threshold_source: dict[str, Any] = {"kind": "absolute"}
+        if args.baseline is not None:
+            baseline_report = json.loads(args.baseline.read_text(encoding="utf-8"))
+            thresholds = thresholds_from_backtest(baseline_report, tolerance_pct=args.tolerance_pct)
+            threshold_source = {
+                "kind": "backtest",
+                "path": str(args.baseline),
+                "label": baseline_report.get("label"),
+                "season": baseline_report.get("season"),
+                "tolerance_pct": args.tolerance_pct,
+            }
+        report = check_position_mae(evaluation, thresholds)
+        report["threshold_source"] = threshold_source
         # The evaluation's own blockers (provenance, freshness, coverage) gate
         # the numbers the MAE check reads, so they must fail the gate too.
         if evaluation["passed"] is not True:

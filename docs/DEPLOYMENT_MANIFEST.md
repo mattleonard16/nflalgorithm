@@ -9,6 +9,7 @@ when the private modules are restored from a backup or another machine, verify e
 re-apply anything missing.
 
 Last verified: 2026-08-16, including live-odds selection, kickoff-aware production CLV, and season priors.
+The context-factors section below was added 2026-09-02 from the tracked side only and is unverified.
 
 ---
 
@@ -128,6 +129,30 @@ the same focused API contract tests listed in the season-readiness plan. Product
 the production doctor commands pass `--require-demo-mode-off` and must fail while fixture visibility
 is enabled. A tracked-only deploy is not complete until the deployment copy of `api/server.py` has
 this wiring.
+
+### Context factors (`NFL_FEATURE_CONTEXT_FACTORS`) — added 2026-09-02, NOT yet verified on a production checkout
+
+Tracked: `utils/context_factors.py`, `config/runtime.py` (`features.context_factors_enabled`, default
+OFF). The Wednesday cron (`make week-auto`) sets `NFL_FEATURE_CONTEXT_FACTORS=1`, so the private
+half must exist for that to do anything:
+
+- `config.py` mirrors the flag:
+  `context_factors_enabled=_flag("NFL_FEATURE_CONTEXT_FACTORS", False)`.
+- `models/position_specific/weekly.py`, at the mu site (the same block that applies the defense
+  multiplier once, ~lines 1003-1015), when `config.features.context_factors_enabled` is true: call
+  `utils.context_factors.context_factor_lookup(season, week, market, players=<the frame being
+  predicted>)` **once per market**, then multiply each row's mu by `lookup.get(player_id, 1.0)`.
+  The 1.0 default is the contract — an unknown player is never a silent zero.
+- It must **not** add its own opponent-strength term; the module deliberately omits defense
+  because mu already carries `get_defense_multiplier` exactly once.
+
+Verify:
+```bash
+command grep -n "context_factor_lookup\|context_factors_enabled" models/position_specific/weekly.py config.py
+```
+Both files must match. If `weekly.py` has no call site, the flag is inert: the cron's projections
+are unadjusted and `make nfl-backtest CONTEXT_FACTORS=on` measures nothing (its report will still
+say `"features": {"context_factors_enabled": true}` — that records the flag, not the wiring).
 
 ### Trained model artifacts
 

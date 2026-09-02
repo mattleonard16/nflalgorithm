@@ -16,7 +16,13 @@ covered by tests/test_nfl_backtest.py with a stub model instead.
 
 Usage:
     uv run python -m scripts.run_nfl_backtest run --season 2025 --weeks 5 6 7
+    uv run python -m scripts.run_nfl_backtest run --season 2025 --context-factors on \
+        --label ctx --output ctx.json
     uv run python -m scripts.run_nfl_backtest compare baseline.json candidate.json
+
+Feature flags the private model reads from ``config.features`` can be pinned
+per run (``--context-factors on|off``); the report records what was in effect
+under ``features`` so two runs can be told apart after the fact.
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ from utils.db import read_dataframe
 from utils.nfl_backtest import (
     WalkForwardConfig,
     compare_walk_forward,
+    feature_overrides,
     run_walk_forward,
 )
 from utils.nfl_markets import MARKET_TO_STAT
@@ -96,8 +103,10 @@ def _make_predict_fn(weekly, history_seasons: int):
         if not tuples:
             print(f"week {week}: no training history before cutoff; skipping")
             return pd.DataFrame()
-        print(f"week {week}: training on {len(tuples)} season-week pairs "
-              f"({tuples[0]} .. {tuples[-1]})")
+        print(
+            f"week {week}: training on {len(tuples)} season-week pairs "
+            f"({tuples[0]} .. {tuples[-1]})"
+        )
         weekly.train_weekly_models(tuples)
         return weekly.predict_week(season, week, roster_backed=False)
 
@@ -116,7 +125,9 @@ def _print_summary(report: dict) -> None:
         line += f" cover1s={overall['coverage_1sigma']:.1%} z_std={overall['z_std']:.2f}"
     print(line)
     for market, group in sorted(report["by_market"].items()):
-        line = f"  {market}: n={group['count']} mae={group['mae']:.2f} bias={group['mean_bias']:+.2f}"
+        line = (
+            f"  {market}: n={group['count']} mae={group['mae']:.2f} bias={group['mean_bias']:+.2f}"
+        )
         if "coverage_1sigma" in group:
             line += f" cover1s={group['coverage_1sigma']:.1%}"
         if group["small_sample"]:
@@ -124,6 +135,23 @@ def _print_summary(report: dict) -> None:
         print(line)
     for problem in report["problems"]:
         print(f"  problem: {problem}")
+
+
+# Feature flags a run may pin. Each maps a CLI name to the config.features
+# attribute the private model reads, so "on"/"off" here is exactly what the
+# weekly cron's NFL_FEATURE_* environment would have set.
+FEATURE_FLAGS = {
+    "context_factors": "context_factors_enabled",
+}
+
+
+def _feature_overrides(args: argparse.Namespace) -> dict[str, bool]:
+    overrides: dict[str, bool] = {}
+    for flag, attribute in FEATURE_FLAGS.items():
+        choice = getattr(args, flag, None)
+        if choice in ("on", "off"):
+            overrides[attribute] = choice == "on"
+    return overrides
 
 
 def _run(args: argparse.Namespace) -> dict:
@@ -138,8 +166,13 @@ def _run(args: argparse.Namespace) -> dict:
         )
 
     weekly = _import_weekly_model()
-    with tempfile.TemporaryDirectory(prefix="nfl_backtest_models_") as tmp:
+    overrides = _feature_overrides(args)
+    with (
+        tempfile.TemporaryDirectory(prefix="nfl_backtest_models_") as tmp,
+        feature_overrides(config.features, **overrides) as features,
+    ):
         _patch_for_backtest(weekly, Path(tmp))
+        print(f"features in effect: {features}")
         result = run_walk_forward(
             _make_predict_fn(weekly, args.history_seasons),
             actuals,
@@ -148,6 +181,7 @@ def _run(args: argparse.Namespace) -> dict:
                 weeks=weeks,
                 label=args.label,
                 min_week_rows=args.min_week_rows,
+                features=features,
             ),
         )
     if args.rows_output is not None:
@@ -181,6 +215,16 @@ def main() -> None:
         help="how many seasons before --season may contribute training data",
     )
     run.add_argument("--min-week-rows", type=int, default=20)
+    run.add_argument(
+        "--context-factors",
+        choices=("on", "off", "inherit"),
+        default="inherit",
+        help=(
+            "pin config.features.context_factors_enabled for this run; 'inherit' keeps "
+            "whatever NFL_FEATURE_CONTEXT_FACTORS resolved to (default off). Run once each "
+            "way with the same --season/--weeks, then `compare` the two reports."
+        ),
+    )
     run.add_argument("--output", type=Path, default=None)
     run.add_argument(
         "--rows-output",
