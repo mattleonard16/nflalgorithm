@@ -122,9 +122,6 @@ api/server.py
 .gemini/
 .claude/
 
-# AI-DLC rule details (vendor rules, regeneratable from release zip)
-.aidlc-rule-details/
-aidlc-docs/
 
 # Archive and exports
 archive/
