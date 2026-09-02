@@ -42,26 +42,26 @@ class TestPassAttemptsPredicted:
         result = compute_pass_attempts_predicted(attempts)
         assert result > 30.0, f"EWMA should weight recent 40-attempt game higher, got {result}"
 
-    def test_positive_game_script_increases_volume(self):
+    def test_positive_game_script_decreases_volume(self):
         attempts = pd.Series([35, 34, 33])
         neutral = compute_pass_attempts_predicted(attempts, game_script=0.0)
-        trailing = compute_pass_attempts_predicted(attempts, game_script=1.0)
-        assert trailing > neutral, "Trailing game-script should increase volume"
+        leading = compute_pass_attempts_predicted(attempts, game_script=1.0)
+        assert leading < neutral, "Leading game-script (positive) should decrease volume"
 
-    def test_negative_game_script_decreases_volume(self):
+    def test_negative_game_script_increases_volume(self):
         attempts = pd.Series([35, 34, 33])
         neutral = compute_pass_attempts_predicted(attempts, game_script=0.0)
-        leading = compute_pass_attempts_predicted(attempts, game_script=-1.0)
-        assert leading < neutral, "Leading game-script should decrease volume"
+        trailing = compute_pass_attempts_predicted(attempts, game_script=-1.0)
+        assert trailing > neutral, "Trailing game-script (negative) should increase volume"
 
     def test_game_script_factor_clamped(self):
         attempts = pd.Series([35])
-        extreme_trailing = compute_pass_attempts_predicted(attempts, game_script=10.0)
+        extreme_trailing = compute_pass_attempts_predicted(attempts, game_script=-10.0)
         # Factor should be clamped to 1.25
         assert extreme_trailing <= 35 * 1.26, "Game-script factor should be clamped at 1.25"
 
     def test_minimum_floor(self):
-        result = compute_pass_attempts_predicted(pd.Series([1, 1, 1]), game_script=-5.0)
+        result = compute_pass_attempts_predicted(pd.Series([1, 1, 1]), game_script=10.0)
         assert result >= 10.0, f"Volume should have floor of 10, got {result}"
 
 
