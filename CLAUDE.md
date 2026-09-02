@@ -607,8 +607,7 @@ From `config.py`:
 - `config.model.target_mae = 3.0` (professional-grade target)
 - `config.betting.min_edge_threshold = 0.08` (8% minimum edge)
 - `config.betting.min_confidence = 0.75`
-- `config.integration.ewma_decay = 0.65`
-- WR role priors: alpha=75, secondary=55, slot=45, fringe=30
+- WR role priors: alpha=58, secondary=43, slot=30, fringe=10 (empirically calibrated)
 - Minimum mu floor: 15.0
 
 ---
@@ -879,35 +878,30 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     calibrated from this run's per-week worst MAE (see item 25); re-derive them from the latest
     `--rows-output` CSV whenever the model or slate changes materially.
 11. [RESOLVED — by deletion] Universal model, no position split. Decision: the orphaned `RBModel` subclass was deleted rather than revived; `models/position_specific/weekly.py` is the single production model path. `BasePositionModel` is retained as the shared base. Revisit per-position splits as new work against weekly.py, not the old subclass.
-12. [MOSTLY RESOLVED] nflreadpy sources unused — rosters, weekly rosters, schedules, depth charts,
+12. [RESOLVED] nflreadpy sources unused — rosters, weekly rosters, schedules, depth charts,
     injuries, and pbp red-zone touches are all ingested by `scripts/ingest_real_nfl_data.py` and
     feed `games`, `nfl_roster_players`, and `nfl_player_context_snapshots`. The schedule's pregame
-    context (`spread_line`, `total_line`, `temp`, `wind`, `roof`, `surface`, `div_game`) is now
-    extracted by `utils/game_context.py` and persisted on `games` — but **nothing consumes those
-    columns yet**; the model does not read them. Still unused: FTN charting; pbp is only mined for
-    red-zone touches (EPA and the rest untapped). Receptions and targets are stored and registered
-    as markets in `sports/markets.py`; touchdown columns (`passing_tds`, `rushing_tds`,
-    `receiving_tds`) are now persisted on `player_stats_enhanced` too — but no TD market is
-    registered and no model prices them yet, so TD props remain unpriceable until that modeling
-    work happens. `game_script` remains hardcoded 0.0 on every row (see item 31 for why that
-    costs real accuracy).
+    context (`spread_line`, `total_line`, `temp`, `wind`, `roof`, `surface`, `div_game`) is
+    extracted by `utils/game_context.py` and attached directly to player frames in
+    `models/position_specific/weekly.py` as static pregame features. Actual `game_script` is computed
+    from pbp score differential or schedule margin, and `expected_game_script` is computed from schedule
+    `spread_line`. Receptions and anytime touchdown markets are registered in `sports/markets.py`,
+    modeled in `weekly.py`, priced (using Poisson for anytime TD) in `value_betting_engine.py`, and
+    graded in `utils/nfl_markets.py` / `scripts/record_outcomes.py`. Still unused: FTN charting; pbp
+    EPA.
 13. [RESOLVED] Kelly cap in ranking path — enforced at both levels. Per-bet: gitignored
     `value_betting_engine.py:273` caps at `config.betting.max_kelly` (0.10) behind
     `config.features.kelly_cap_enabled` (`NFL_FEATURE_KELLY_CAP`, default ON per
     `config/runtime.py`). Portfolio: tracked `materialized_value_view.py:140` scales the whole
     card to the bankroll via `risk_manager.normalize_portfolio_stakes`, so persisted stakes
     never sum past `config.betting.bankroll` even when per-bet caps individually pass.
-31. QB passing volume over-projection (diagnosed 2026-09 from the 2025 walk-forward rows CSV).
-    The headline +13.2 passing_yards bias decomposes into two separate problems. (a) Slate
-    breadth: QBs with `pass_attempts_predicted` < 28 carry +18 to +31 bias because the model
-    projects backups/uncertain starters as if they will play — books post no lines on them, so
-    bets never see this; it only pollutes aggregate backtest metrics. (b) The real model error:
-    on the clear-starter slate (att_pred >= 28, n=391) efficiency is calibrated (7.09 predicted
-    y/a vs 7.13 actual) but volume runs hot — 33.2 predicted attempts vs 30.9 actual — worth the
-    entire remaining +8.3-yard bias. Likely cause: `game_script` is hardcoded 0.0 (item 12), so
-    the model cannot learn that leading teams stop throwing, and early exits are unpriced. Fix
-    lives in attempts modeling in gitignored `weekly.py`; +8.3 is ~2 SE, so confirm against the
-    2026 walk-forward before tuning anything on it.
+31. [RESOLVED] QB passing volume over-projection (diagnosed 2026-09 from the 2025 walk-forward rows CSV).
+    The headline +13.2 passing_yards bias has been eliminated via: (a) QB baseline attempts calibrated
+    from 34.0 to 31.0 in `data_pipeline.py` based on clear-starter actuals; (b) script factor updated to
+    the canonical convention where leading suppresses attempts (`1.0 - game_script * 0.04`); and (c) dual-factor
+    starter gating in `models/position_specific/weekly.py`, where backup QBs (`depth_rank > 1`) have expected
+    attempts scaled by starter probability `p_start` (0.02 for healthy backups, 0.70 for questionable, etc.),
+    preventing non-starters from inheriting starter attempt baselines.
 
 ### Tier 2 — MEDIUM (correctness/ops)
 14. [RESOLVED] EWMA decay 0.65 / sigma calibration: the market-mu EWMA path in
@@ -967,6 +961,9 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     currently fails on `missing_kickoff`.
 26. Perf regression budgets.
 27. Stacking final estimator Ridge → LightGBM or isotonic calibration.
-28. WR role priors stale.
+28. [RESOLVED] WR role priors stale — recalibrated in `utils/season_priors.py`, `config.py`,
+    `config/runtime.py`, and `data_pipeline.py` using empirical 2023–2025 receiving yard distributions
+    across snap percentage tiers: alpha (>=80% snaps) = 58.0 yards (down from 75.0); secondary (>=60%) =
+    43.0 (down from 55.0); slot (>=40%) = 30.0 (down from 45.0); fringe (<40%) = 10.0 (down from 30.0).
 29. Cache stale-while-revalidate no in-flight dedup.
 30. [RESOLVED] `materialized_value_view` ranking index — composite `(season, week, edge_percentage)` on `idx_materialized_value_view_lookup`, created on both the SQLite and MySQL branches of `_ensure_indexes`. It supersedes the former `(season, week)` index.
