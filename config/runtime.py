@@ -105,7 +105,7 @@ integration = SimpleNamespace(
     tier2_confidence=0.90,
     tier3_confidence=0.85,
     wr_team_mismatch_tolerance=True,
-    role_priors={"alpha": 75, "secondary": 55, "slot": 45, "fringe": 30},
+    role_priors={"alpha": 58.0, "secondary": 43.0, "slot": 30.0, "fringe": 10.0},
 )
 
 risk = SimpleNamespace(

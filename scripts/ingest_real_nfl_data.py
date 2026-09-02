@@ -121,6 +121,20 @@ ROLE_PRIORS: dict[str, dict[str, float]] = {
 }
 
 
+def assign_wr_role_prior(snap_percentage: float) -> float:
+    """Return empirical receiving yards role prior based on snap percentage."""
+    snap = float(snap_percentage or 0.0)
+    if snap > 1.0:
+        snap = snap / 100.0
+    if snap >= 0.80:
+        return 58.0
+    if snap >= 0.60:
+        return 43.0
+    if snap >= 0.40:
+        return 30.0
+    return 10.0
+
+
 def default_history_seasons(target_season: int) -> list[int]:
     """Return the configured number of immediately preceding NFL seasons."""
     history_depth = max(1, len(config.pipeline.default_seasons))
