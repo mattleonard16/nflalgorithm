@@ -302,6 +302,9 @@ class MigrationManager:
                 receiving_yards REAL NOT NULL DEFAULT 0,
                 receptions REAL NOT NULL DEFAULT 0,
                 targets REAL NOT NULL DEFAULT 0,
+                passing_tds REAL NOT NULL DEFAULT 0,
+                rushing_tds REAL NOT NULL DEFAULT 0,
+                receiving_tds REAL NOT NULL DEFAULT 0,
                 red_zone_touches REAL NOT NULL DEFAULT 0,
                 target_share REAL NOT NULL DEFAULT 0,
                 air_yards REAL NOT NULL DEFAULT 0,
@@ -1175,6 +1178,12 @@ class MigrationManager:
                 cursor.execute(
                     "ALTER TABLE player_stats_enhanced ADD COLUMN passing_attempts REAL NOT NULL DEFAULT 0"
                 )
+            # Touchdown columns (T1 #12) — prerequisite for TD-prop pricing.
+            for td_column in ("passing_tds", "rushing_tds", "receiving_tds"):
+                if not column_exists("player_stats_enhanced", td_column, conn=cursor.connection):
+                    cursor.execute(
+                        f"ALTER TABLE player_stats_enhanced ADD COLUMN {td_column} REAL NOT NULL DEFAULT 0"
+                    )
 
         if table_exists("player_dim", conn=cursor.connection):
             if not column_exists("player_dim", "gsis_id", conn=cursor.connection):
