@@ -226,6 +226,10 @@ export interface BetOutcome {
   player_name: string | null;
   market: string;
   line: number;
+  side?: string | null;
+  sportsbook?: string | null;
+  price?: number | null;
+  edge_at_placement?: number | null;
   actual_result: number | null;
   result: string | null;
   profit_units: number | null;
