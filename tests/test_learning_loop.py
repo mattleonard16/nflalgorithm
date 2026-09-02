@@ -302,7 +302,14 @@ class TestGenerateLearningReport:
 
 class TestMarketToStat:
     def test_all_expected_markets(self):
-        expected = {"rushing_yards", "receiving_yards", "passing_yards", "receptions", "targets"}
+        expected = {
+            "rushing_yards",
+            "receiving_yards",
+            "passing_yards",
+            "receptions",
+            "targets",
+            "anytime_touchdown",
+        }
         assert set(MARKET_TO_STAT.keys()) == expected
 
     def test_values_match_db_columns(self):
