@@ -269,6 +269,20 @@ class TestGetNflFeatureCols:
         for market in MARKET_CONFIGS:
             assert outcome_context.isdisjoint(get_nfl_feature_cols(market))
 
+    def test_game_context_cols_present_in_all_markets(self):
+        expected_context = {
+            "spread_margin",
+            "implied_team_total",
+            "game_total",
+            "wind_speed",
+            "temperature",
+            "is_indoor",
+            "div_game",
+        }
+        for market in MARKET_CONFIGS:
+            cols = set(get_nfl_feature_cols(market))
+            assert expected_context.issubset(cols)
+
 
 class TestCausalTrainingWindows:
     def test_role_eligibility_uses_expected_not_realized_activity(self):
