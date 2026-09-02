@@ -33,7 +33,7 @@ from utils.db import (
     is_sqlite_connection,
     read_dataframe,
 )
-from utils.game_context import CONTEXT_COLUMNS, extract_game_context
+from utils.game_context import CONTEXT_COLUMNS, extract_game_context, home_favored_by
 from utils.player_id_utils import canonicalize_team, make_player_id
 
 logging.basicConfig(
@@ -535,6 +535,85 @@ def _merge_red_zone_from_pbp(df: pd.DataFrame, pbp_rz: pd.DataFrame) -> pd.DataF
     return merged.drop(columns=drop_cols)
 
 
+def _compute_actual_game_script(
+    df: pd.DataFrame,
+    schedule: Optional[pd.DataFrame] = None,
+    pbp: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Compute and assign empirical game_script to player stats.
+
+    Follows the canonical NFL analytics convention:
+    game_script = average score differential across the contest
+    (positive = leading, negative = trailing).
+    """
+    df = df.copy()
+    if df.empty:
+        df["game_script"] = 0.0
+        return df
+
+    script_map: dict[tuple[int, int, str], float] = {}
+
+    # 1. Try play-by-play average score differential if provided
+    if pbp is not None and not pbp.empty and {"season", "week", "posteam", "score_differential"}.issubset(pbp.columns):
+        clean_pbp = pbp.dropna(subset=["season", "week", "posteam", "score_differential"]).copy()
+        clean_pbp["_team"] = clean_pbp["posteam"].apply(canonicalize_team)
+        clean_pbp["_season"] = pd.to_numeric(clean_pbp["season"], errors="coerce").fillna(0).astype(int)
+        clean_pbp["_week"] = pd.to_numeric(clean_pbp["week"], errors="coerce").fillna(0).astype(int)
+        clean_pbp["_diff"] = pd.to_numeric(clean_pbp["score_differential"], errors="coerce")
+        means = clean_pbp.groupby(["_season", "_week", "_team"])["_diff"].mean()
+        for (s, w, t), val in means.items():
+            if pd.notna(val):
+                script_map[(s, w, t)] = float(val)
+
+    # 2. Fall back to schedule final scores: (home_score - away_score) / 2.0
+    if schedule is not None and not schedule.empty:
+        required_cols = {"season", "week", "home_team", "away_team", "home_score", "away_score"}
+        if required_cols.issubset(schedule.columns):
+            for row in schedule.itertuples(index=False):
+                row_dict = row._asdict() if hasattr(row, "_asdict") else dict(zip(schedule.columns, row))
+                s = row_dict.get("season")
+                w = row_dict.get("week")
+                home = row_dict.get("home_team")
+                away = row_dict.get("away_team")
+                h_score = row_dict.get("home_score")
+                a_score = row_dict.get("away_score")
+
+                if s is None or w is None or not home or not away:
+                    continue
+                if pd.isna(h_score) or pd.isna(a_score):
+                    continue
+
+                try:
+                    s_int = int(s)
+                    w_int = int(w)
+                    h_val = float(h_score)
+                    a_val = float(a_score)
+                except (TypeError, ValueError):
+                    continue
+
+                h_team = canonicalize_team(str(home))
+                a_team = canonicalize_team(str(away))
+
+                home_key = (s_int, w_int, h_team)
+                if home_key not in script_map:
+                    script_map[home_key] = float((h_val - a_val) / 2.0)
+
+                away_key = (s_int, w_int, a_team)
+                if away_key not in script_map:
+                    script_map[away_key] = float((a_val - h_val) / 2.0)
+
+    if "team" in df.columns and "season" in df.columns and "week" in df.columns:
+        s_series = pd.to_numeric(df["season"], errors="coerce").fillna(0).astype(int)
+        w_series = pd.to_numeric(df["week"], errors="coerce").fillna(0).astype(int)
+        t_series = df["team"].apply(canonicalize_team)
+        keys = list(zip(s_series, w_series, t_series))
+        df["game_script"] = [script_map.get(k, 0.0) for k in keys]
+    else:
+        df["game_script"] = 0.0
+
+    return df
+
+
 def transform_to_enhanced_stats(
     weekly: pd.DataFrame,
     snaps: pd.DataFrame,
@@ -622,7 +701,7 @@ def transform_to_enhanced_stats(
     # _merge_red_zone_from_pbp overrides it with the real count.
     df["red_zone_touches"] = (df["rushing_attempts"] * 0.15 + df["receptions"] * 0.1).round(2)
     df = _merge_red_zone_from_pbp(df, pbp_rz if pbp_rz is not None else pd.DataFrame())
-    df["game_script"] = 0.0
+    df = _compute_actual_game_script(df, schedule=schedule, pbp=pbp_rz)
     df["usage_delta"] = 0.02
     df["age_curve"] = 1.0
     df["oc_change"] = 0
@@ -1137,6 +1216,7 @@ def build_player_context_snapshots(
     target_week: int,
     target_cutoffs: Optional[dict[int, str]] = None,
     captured_at: Optional[str] = None,
+    schedule: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Build causal roster-role and availability snapshots for one week."""
     if rosters is None or rosters.empty:
@@ -1215,6 +1295,26 @@ def build_player_context_snapshots(
         }
 
     captured = captured_at or datetime.now(timezone.utc).isoformat()
+    expected_script_by_team: dict[tuple[int, str], float] = {}
+    if schedule is not None and not schedule.empty:
+        sched_cols = {"season", "home_team", "away_team", "spread_line"}
+        if sched_cols.issubset(schedule.columns):
+            for s_row in schedule.itertuples(index=False):
+                s_dict = s_row._asdict() if hasattr(s_row, "_asdict") else dict(zip(schedule.columns, s_row))
+                s_season = s_dict.get("season")
+                s_home = s_dict.get("home_team")
+                s_away = s_dict.get("away_team")
+                s_spread = home_favored_by(s_dict.get("spread_line"))
+                if s_season is not None and s_home and s_away and s_spread is not None:
+                    try:
+                        season_int = int(s_season)
+                        h_can = canonicalize_team(str(s_home))
+                        a_can = canonicalize_team(str(s_away))
+                        expected_script_by_team[(season_int, h_can)] = float(s_spread / 2.0)
+                        expected_script_by_team[(season_int, a_can)] = float(-s_spread / 2.0)
+                    except (TypeError, ValueError):
+                        continue
+
     status_col = "status" if "status" in base.columns else "roster_status"
     records: list[dict[str, Any]] = []
     for _, roster_row in base.iterrows():
@@ -1314,7 +1414,7 @@ def build_player_context_snapshots(
                 "expected_air_yards": expected("air_yards"),
                 "expected_yac_yards": expected("yac_yards"),
                 "expected_red_zone_touches": expected("red_zone_touches"),
-                "expected_game_script": 0.0,
+                "expected_game_script": expected_script_by_team.get((season, team), 0.0),
                 "is_rookie": is_rookie,
                 "is_new_team": is_new_team,
                 "uncertainty_multiplier": max(1.0, uncertainty),
@@ -1385,17 +1485,21 @@ def refresh_player_context_snapshots(
         """)
     games = read_dataframe(
         """
-        SELECT season, kickoff_utc
+        SELECT season, home_team, away_team, spread_line, kickoff_utc
         FROM games
-        WHERE week = ? AND kickoff_utc IS NOT NULL
+        WHERE week = ?
         """,
         params=(through_week,),
     )
     target_cutoffs: dict[int, str] = {}
     if not games.empty:
-        games["kickoff_utc"] = pd.to_datetime(games["kickoff_utc"], errors="coerce", utc=True)
-        earliest = games.dropna(subset=["kickoff_utc"]).groupby("season")["kickoff_utc"].min()
-        target_cutoffs = {int(season): cutoff.isoformat() for season, cutoff in earliest.items()}
+        games_with_kickoff = games.dropna(subset=["kickoff_utc"]).copy()
+        if not games_with_kickoff.empty:
+            games_with_kickoff["kickoff_utc"] = pd.to_datetime(
+                games_with_kickoff["kickoff_utc"], errors="coerce", utc=True
+            )
+            earliest = games_with_kickoff.dropna(subset=["kickoff_utc"]).groupby("season")["kickoff_utc"].min()
+            target_cutoffs = {int(season): cutoff.isoformat() for season, cutoff in earliest.items()}
     captured_at = datetime.now(timezone.utc).isoformat()
     snapshots = build_player_context_snapshots(
         rosters,
@@ -1405,6 +1509,7 @@ def refresh_player_context_snapshots(
         target_week=through_week,
         target_cutoffs=target_cutoffs,
         captured_at=captured_at,
+        schedule=games,
     )
     captured_timestamp = pd.Timestamp(captured_at)
     blocked_seasons = {
@@ -1537,6 +1642,115 @@ def ingest_seasons(
     _refresh_context_and_log(roster_context, depth_charts, injuries, through_week)
     logger.info("=== Ingestion Complete: %s player-weeks ===", count)
     return count
+
+
+def backfill_game_script_and_expected_script(
+    seasons: Optional[List[int]] = None,
+    conn: Optional[Any] = None,
+) -> dict[str, int]:
+    """Backfill game_script in player_stats_enhanced and expected_game_script in snapshots.
+
+    Uses stored games.spread_line for pregame expected script and schedule final
+    scores for historical game_script.
+    """
+    snap_updates: list[tuple[float, int, int, str]] = []
+    stat_updates: list[tuple[float, int, int, str]] = []
+
+    # 1. Backfill expected_game_script in nfl_player_context_snapshots
+    try:
+        games_df = read_dataframe(
+            "SELECT season, week, home_team, away_team, spread_line FROM games WHERE spread_line IS NOT NULL",
+            conn=conn,
+        )
+        if not games_df.empty:
+            spread_map: dict[tuple[int, int, str], float] = {}
+            for row in games_df.itertuples(index=False):
+                s = int(row.season)
+                w = int(row.week)
+                spr = home_favored_by(row.spread_line)
+                if spr is not None:
+                    h = canonicalize_team(str(row.home_team))
+                    a = canonicalize_team(str(row.away_team))
+                    spread_map[(s, w, h)] = float(spr / 2.0)
+                    spread_map[(s, w, a)] = float(-spr / 2.0)
+
+            # Query snapshots and player teams
+            roster_map_df = read_dataframe(
+                "SELECT DISTINCT season, gsis_id, team FROM nfl_roster_players",
+                conn=conn,
+            )
+            roster_team_map = {
+                (int(r.season), str(r.gsis_id)): canonicalize_team(str(r.team))
+                for r in roster_map_df.itertuples(index=False)
+            }
+            snaps = read_dataframe(
+                "SELECT DISTINCT season, week, gsis_id FROM nfl_player_context_snapshots WHERE expected_game_script = 0.0",
+                conn=conn,
+            )
+            for row in snaps.itertuples(index=False):
+                s = int(row.season)
+                w = int(row.week)
+                gid = str(row.gsis_id)
+                team = roster_team_map.get((s, gid))
+                if team and (s, w, team) in spread_map:
+                    script_val = spread_map[(s, w, team)]
+                    if script_val != 0.0:
+                        snap_updates.append((script_val, s, w, gid))
+
+            if snap_updates:
+                executemany(
+                    "UPDATE nfl_player_context_snapshots SET expected_game_script = ? WHERE season = ? AND week = ? AND gsis_id = ?",
+                    snap_updates,
+                    conn=conn,
+                )
+                logger.info("Backfilled %d nfl_player_context_snapshots with expected_game_script", len(snap_updates))
+    except Exception as e:
+        logger.warning("Failed backfilling expected_game_script: %s", e)
+
+    # 2. Backfill game_script in player_stats_enhanced
+    try:
+        if not seasons:
+            season_df = read_dataframe("SELECT DISTINCT season FROM player_stats_enhanced", conn=conn)
+            seasons = [int(s) for s in season_df["season"].tolist()] if not season_df.empty else [2024, 2025]
+
+        sched = fetch_schedules(seasons)
+        if not sched.empty and {"season", "week", "home_team", "away_team", "home_score", "away_score"}.issubset(sched.columns):
+            for row in sched.itertuples(index=False):
+                row_dict = row._asdict() if hasattr(row, "_asdict") else dict(zip(sched.columns, row))
+                s = row_dict.get("season")
+                w = row_dict.get("week")
+                home = row_dict.get("home_team")
+                away = row_dict.get("away_team")
+                h_score = row_dict.get("home_score")
+                a_score = row_dict.get("away_score")
+                if s is None or w is None or not home or not away:
+                    continue
+                if pd.isna(h_score) or pd.isna(a_score):
+                    continue
+                try:
+                    s_int = int(s)
+                    w_int = int(w)
+                    h_val = float(h_score)
+                    a_val = float(a_score)
+                except (TypeError, ValueError):
+                    continue
+
+                h_team = canonicalize_team(str(home))
+                a_team = canonicalize_team(str(away))
+                stat_updates.append((float((h_val - a_val) / 2.0), s_int, w_int, h_team))
+                stat_updates.append((float((a_val - h_val) / 2.0), s_int, w_int, a_team))
+
+            if stat_updates:
+                executemany(
+                    "UPDATE player_stats_enhanced SET game_script = ? WHERE season = ? AND week = ? AND team = ?",
+                    stat_updates,
+                    conn=conn,
+                )
+                logger.info("Backfilled %d team-week rows in player_stats_enhanced with game_script", len(stat_updates))
+    except Exception as e:
+        logger.warning("Failed backfilling game_script: %s", e)
+
+    return {"snapshots_updated": len(snap_updates), "stats_updated": len(stat_updates)}
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
