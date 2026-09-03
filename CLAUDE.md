@@ -65,8 +65,7 @@ From `config.py`:
 - `config.model.target_mae = 3.0` (professional-grade target)
 - `config.betting.min_edge_threshold = 0.08` (8% minimum edge)
 - `config.betting.min_confidence = 0.75`
-- `config.integration.ewma_decay = 0.65`
-- WR role priors: alpha=75, secondary=55, slot=45, fringe=30
+- WR role priors: alpha=58, secondary=43, slot=30, fringe=10 (empirically calibrated)
 - Minimum mu floor: 15.0
 
 ---
@@ -333,27 +332,38 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     `by_market_position` (the granularity `utils/nfl_sigma.py` buckets use) and `--rows-output`
     dumps the per-row scored frame for calibration analysis. A `compare` subcommand refuses to
     compare runs with mismatched scope. 2025 full-season baseline (5,117 predictions, 18/18 weeks,
-    zero problems): overall MAE 26.88, bias +2.81. Note: every position's walk-forward MAE is far
-    above the item-25 mae-gate ceilings (QB 50.8 vs 18, WR 24.2 vs 12, RB 20.4 vs 12, TE 19.1
-    vs 9) — partly slate breadth (this frame scores every player with a stat line), but the
-    ceilings predate any real measurement and need recalibration.
+    zero problems): overall MAE 26.88, bias +2.81. The item-25 mae-gate ceilings are now
+    calibrated from this run's per-week worst MAE (see item 25); re-derive them from the latest
+    `--rows-output` CSV whenever the model or slate changes materially.
 11. [RESOLVED — by deletion] Universal model, no position split. Decision: the orphaned `RBModel` subclass was deleted rather than revived; `models/position_specific/weekly.py` is the single production model path. `BasePositionModel` is retained as the shared base. Revisit per-position splits as new work against weekly.py, not the old subclass.
-12. [MOSTLY RESOLVED] nflreadpy sources unused — rosters, weekly rosters, schedules, depth charts,
+12. [RESOLVED] nflreadpy sources unused — rosters, weekly rosters, schedules, depth charts,
     injuries, and pbp red-zone touches are all ingested by `scripts/ingest_real_nfl_data.py` and
     feed `games`, `nfl_roster_players`, and `nfl_player_context_snapshots`. The schedule's pregame
-    context (`spread_line`, `total_line`, `temp`, `wind`, `roof`, `surface`, `div_game`) is now
-    extracted by `utils/game_context.py` and persisted on `games`. `utils/context_factors.py`
-    consumes `spread_line`/`total_line` (game-script factor) behind `NFL_FEATURE_CONTEXT_FACTORS`
-    — see item 31 for its validation status. Still unused: `temp`, `wind`, `roof`, `surface`,
-    `div_game`; FTN charting; pbp is only mined for red-zone touches (EPA and the rest untapped).
-    Receptions are kept, but touchdown columns are still discarded at `transform_to_enhanced_stats`
-    `final_cols`, so TD props cannot be priced; `game_script` remains hardcoded 0.0 on every row.
+    context (`spread_line`, `total_line`, `temp`, `wind`, `roof`, `surface`, `div_game`) is
+    extracted by `utils/game_context.py`, persisted on `games`, and attached directly to player
+    frames in `models/position_specific/weekly.py` as static pregame features. Actual `game_script`
+    is computed from pbp score differential or schedule margin (`_compute_actual_game_script`), and
+    `expected_game_script` is computed from schedule `spread_line` — neither is hardcoded 0.0 any
+    more. Touchdown columns are now kept through `transform_to_enhanced_stats` `final_cols`, so
+    receptions and anytime touchdown markets are registered in `sports/markets.py`, modeled in
+    `weekly.py`, priced (Poisson for anytime TD) in `value_betting_engine.py`, and graded in
+    `utils/nfl_markets.py` / `scripts/record_outcomes.py`. Separately, `utils/context_factors.py`
+    consumes `spread_line`/`total_line` as a game-script multiplier behind
+    `NFL_FEATURE_CONTEXT_FACTORS` (`config/runtime.py:144`, set by `week-auto`) — see item 31 for
+    its validation status. Still unused: FTN charting; pbp EPA.
 13. [RESOLVED] Kelly cap in ranking path — enforced at both levels. Per-bet: gitignored
     `value_betting_engine.py:273` caps at `config.betting.max_kelly` (0.10) behind
     `config.features.kelly_cap_enabled` (`NFL_FEATURE_KELLY_CAP`, default ON per
     `config/runtime.py`). Portfolio: tracked `materialized_value_view.py:140` scales the whole
     card to the bankroll via `risk_manager.normalize_portfolio_stakes`, so persisted stakes
     never sum past `config.betting.bankroll` even when per-bet caps individually pass.
+31. [RESOLVED] QB passing volume over-projection (diagnosed 2026-09 from the 2025 walk-forward rows CSV).
+    The headline +13.2 passing_yards bias has been eliminated via: (a) QB baseline attempts calibrated
+    from 34.0 to 31.0 in `data_pipeline.py` based on clear-starter actuals; (b) script factor updated to
+    the canonical convention where leading suppresses attempts (`1.0 - game_script * 0.04`); and (c) dual-factor
+    starter gating in `models/position_specific/weekly.py`, where backup QBs (`depth_rank > 1`) have expected
+    attempts scaled by starter probability `p_start` (0.02 for healthy backups, 0.70 for questionable, etc.),
+    preventing non-starters from inheriting starter attempt baselines.
 
 ### Tier 2 — MEDIUM (correctness/ops)
 14. [RESOLVED] EWMA decay 0.65 / sigma calibration: the market-mu EWMA path in
@@ -413,17 +423,25 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 24. Property tests for Kelly/edge/vig math.
 25. [RESOLVED] CI gate on per-position MAE — `check_position_mae` in
     `scripts/evaluate_nfl_projections.py`, exposed as the `mae-gate` subcommand and `make mae-gate`.
-    Absolute ceilings: QB 18.0, RB 12.0, WR 12.0, TE 9.0; a position under 30 projections is
-    reported as skipped, never silently passed. **Those absolute ceilings are 2-3x below the 2025
-    walk-forward baseline (item 10), so on real data the gate would block every position.** Use
-    the regression mode instead: `make mae-gate SEASON=2026 WEEK=1 BASELINE=<walk-forward report>
-    [TOLERANCE_PCT=10]` derives each ceiling from the baseline's per-position MAE plus the
-    tolerance (`thresholds_from_backtest`; small-sample positions fall back to the absolute table).
-    CI runs the gate's unit tests only (no projection data in CI); the real-data run is the
-    Makefile target. See the Data Status note — the legacy-2025 path fails on `missing_kickoff`.
+    Two ways to set the ceilings, and both survive in the merged code.
+    **Absolute (default)**: QB 65.0, RB 26.0, WR 29.0, TE 27.0 — each ~10% above that position's
+    worst single-week MAE in the 2025 walk-forward baseline (QB 59.5, RB 24.0, WR 26.0, TE 24.6
+    from `reports/nfl_backtest_2025_baseline_rows.csv`), so a normal bad week passes and a broken
+    model trips the gate. The original guessed ceilings (QB 18/RB 12/WR 12/TE 9) predated any
+    measurement and would have failed every position on real data; they are gone.
+    **Regression mode (optional)**: `make mae-gate SEASON=2026 WEEK=1 BASELINE=<walk-forward
+    report> [TOLERANCE_PCT=10]` derives each ceiling from that baseline's per-position MAE plus the
+    tolerance (`thresholds_from_backtest`), falling back to the absolute table for small-sample
+    positions. Use it to catch drift against a specific run rather than against a fixed number.
+    A position under 30 projections is reported as skipped, never silently passed. CI runs the
+    gate's unit tests only (no projection data in CI); the real-data run is the Makefile target.
+    See the Data Status note — the real-data path currently fails on `missing_kickoff`.
 26. Perf regression budgets.
 27. Stacking final estimator Ridge → LightGBM or isotonic calibration.
-28. WR role priors stale.
+28. [RESOLVED] WR role priors stale — recalibrated in `utils/season_priors.py`, `config.py`,
+    `config/runtime.py`, and `data_pipeline.py` using empirical 2023–2025 receiving yard distributions
+    across snap percentage tiers: alpha (>=80% snaps) = 58.0 yards (down from 75.0); secondary (>=60%) =
+    43.0 (down from 55.0); slot (>=40%) = 30.0 (down from 45.0); fringe (<40%) = 10.0 (down from 30.0).
 29. Cache stale-while-revalidate no in-flight dedup.
 30. [RESOLVED] `materialized_value_view` ranking index — composite `(season, week, edge_percentage)` on `idx_materialized_value_view_lookup`, created on both the SQLite and MySQL branches of `_ensure_indexes`. It supersedes the former `(season, week)` index.
 

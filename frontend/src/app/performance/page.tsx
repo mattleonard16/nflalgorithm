@@ -232,7 +232,7 @@ export default function PerformancePage() {
           </select>
         </CardHeader>
         <CardContent>
-          {outcomes.length === 0 ? (
+          {!Array.isArray(outcomes) || outcomes.length === 0 ? (
             <p className="text-slate-500 text-center py-4">No bet outcomes for this week</p>
           ) : (
             <Table>
@@ -241,7 +241,9 @@ export default function PerformancePage() {
                   <TableHead className="text-slate-400 w-12"></TableHead>
                   <TableHead className="text-slate-400">Player</TableHead>
                   <TableHead className="text-slate-400">Market</TableHead>
+                  <TableHead className="text-slate-400">Book / Odds</TableHead>
                   <TableHead className="text-slate-400 text-right">Line</TableHead>
+                  <TableHead className="text-slate-400 text-right">Model Edge</TableHead>
                   <TableHead className="text-slate-400 text-right">Actual</TableHead>
                   <TableHead className="text-slate-400 text-right">Profit</TableHead>
                 </TableRow>
@@ -258,8 +260,21 @@ export default function PerformancePage() {
                     <TableCell className="text-slate-400">
                       {bet.market.replace("_", " ")}
                     </TableCell>
-                    <TableCell className="text-right text-slate-300">
-                      O {bet.line}
+                    <TableCell className="text-slate-300 text-xs">
+                      {bet.sportsbook ?? "--"}
+                      {bet.price != null && (
+                        <span className="text-slate-500 ml-1">
+                          ({bet.price > 0 ? `+${bet.price}` : bet.price})
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right text-slate-300 font-mono">
+                      {bet.side === "under" ? "U" : "O"} {bet.line}
+                    </TableCell>
+                    <TableCell className="text-right text-amber-400 font-medium font-mono text-xs">
+                      {bet.edge_at_placement != null
+                        ? `+${(bet.edge_at_placement * 100).toFixed(1)}%`
+                        : "-"}
                     </TableCell>
                     <TableCell className="text-right text-slate-100 font-medium">
                       {bet.actual_result?.toFixed(0) ?? "-"}

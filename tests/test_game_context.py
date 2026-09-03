@@ -7,6 +7,9 @@ import pytest
 
 from utils.game_context import (
     CONTEXT_COLUMNS,
+    GAME_CONTEXT_COLUMNS,
+    GAME_CONTEXT_DEFAULTS,
+    attach_game_context_to_player_frame,
     extract_game_context,
     home_favored_by,
     implied_team_totals,
@@ -165,3 +168,133 @@ class TestImpliedTeamTotals:
     def test_missing_either_input_returns_none(self):
         assert implied_team_totals(None, 47.5) is None
         assert implied_team_totals(8.5, None) is None
+
+
+class TestAttachGameContextToPlayerFrame:
+    def test_home_and_away_perspectives(self):
+        games = pd.DataFrame(
+            [
+                {
+                    "game_id": "2025_01_DAL_PHI",
+                    "season": 2025,
+                    "week": 1,
+                    "home_team": "PHI",
+                    "away_team": "DAL",
+                    "spread_line": 6.0,
+                    "total_line": 48.0,
+                    "temp": 72.0,
+                    "wind": 10.0,
+                    "roof": "outdoors",
+                    "div_game": 1,
+                }
+            ]
+        )
+        players = pd.DataFrame(
+            [
+                {"player_id": "P1", "season": 2025, "week": 1, "team": "PHI"},
+                {"player_id": "P2", "season": 2025, "week": 1, "team": "DAL"},
+            ]
+        )
+        result = attach_game_context_to_player_frame(players, games)
+
+        phi = result[result["team"] == "PHI"].iloc[0]
+        dal = result[result["team"] == "DAL"].iloc[0]
+
+        assert phi["spread_margin"] == 6.0
+        assert phi["implied_team_total"] == 27.0
+        assert phi["game_total"] == 48.0
+        assert phi["wind_speed"] == 10.0
+        assert phi["temperature"] == 72.0
+        assert phi["is_indoor"] == 0
+        assert phi["div_game"] == 1
+
+        assert dal["spread_margin"] == -6.0
+        assert dal["implied_team_total"] == 21.0
+        assert dal["game_total"] == 48.0
+        assert dal["wind_speed"] == 10.0
+        assert dal["temperature"] == 72.0
+        assert dal["is_indoor"] == 0
+        assert dal["div_game"] == 1
+
+    def test_indoor_dome_imputes_clean_weather(self):
+        games = pd.DataFrame(
+            [
+                {
+                    "game_id": "2025_01_DET_MIN",
+                    "season": 2025,
+                    "week": 1,
+                    "home_team": "MIN",
+                    "away_team": "DET",
+                    "spread_line": -2.5,
+                    "total_line": 51.0,
+                    "temp": None,
+                    "wind": None,
+                    "roof": "dome",
+                    "div_game": 1,
+                }
+            ]
+        )
+        players = pd.DataFrame(
+            [{"player_id": "P1", "season": 2025, "week": 1, "team": "MIN"}]
+        )
+        result = attach_game_context_to_player_frame(players, games)
+        row = result.iloc[0]
+        assert row["is_indoor"] == 1
+        assert row["wind_speed"] == 0.0
+        assert row["temperature"] == 70.0
+        assert row["spread_margin"] == -2.5
+        assert row["implied_team_total"] == pytest.approx(24.25)
+
+    def test_bye_week_defaults(self):
+        games = pd.DataFrame(
+            [
+                {
+                    "game_id": "2025_05_KC_DEN",
+                    "season": 2025,
+                    "week": 5,
+                    "home_team": "DEN",
+                    "away_team": "KC",
+                    "spread_line": -4.0,
+                    "total_line": 46.0,
+                }
+            ]
+        )
+        players = pd.DataFrame(
+            [{"player_id": "P1", "season": 2025, "week": 5, "team": "MIA"}]  # MIA on bye
+        )
+        result = attach_game_context_to_player_frame(players, games)
+        row = result.iloc[0]
+        assert row["spread_margin"] == GAME_CONTEXT_DEFAULTS["spread_margin"]
+        assert row["implied_team_total"] == GAME_CONTEXT_DEFAULTS["implied_team_total"]
+        assert row["game_total"] == GAME_CONTEXT_DEFAULTS["game_total"]
+        assert row["wind_speed"] == GAME_CONTEXT_DEFAULTS["wind_speed"]
+        assert row["temperature"] == GAME_CONTEXT_DEFAULTS["temperature"]
+        assert row["is_indoor"] == GAME_CONTEXT_DEFAULTS["is_indoor"]
+        assert row["div_game"] == GAME_CONTEXT_DEFAULTS["div_game"]
+
+    def test_corrupt_data_degrades_gracefully(self):
+        games = pd.DataFrame(
+            [
+                {
+                    "game_id": "corrupt",
+                    "season": 2025,
+                    "week": 1,
+                    "home_team": "BUF",
+                    "away_team": "NYJ",
+                    "spread_line": "invalid",
+                    "total_line": "bad",
+                    "temp": "none",
+                    "wind": "nan",
+                    "roof": 12345,
+                }
+            ]
+        )
+        players = pd.DataFrame(
+            [{"player_id": "P1", "season": 2025, "week": 1, "team": "BUF"}]
+        )
+        result = attach_game_context_to_player_frame(players, games)
+        row = result.iloc[0]
+        assert row["spread_margin"] == 0.0
+        assert row["implied_team_total"] == 22.5
+        assert row["game_total"] == 45.0
+

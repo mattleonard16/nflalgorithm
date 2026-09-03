@@ -24,6 +24,7 @@ __all__ = [
     "CRASH_MIN_GAMES",
     "CRASH_PRIOR_WEIGHT",
     "CRASH_VOLUME_RATIO",
+    "DEFAULT_WR_ROLE_PRIORS",
     "EARLY_SEASON_GAME_THRESHOLD",
     "HEALTHY_LAST_WEIGHT",
     "HEALTHY_PRIOR_WEIGHT",
@@ -31,11 +32,72 @@ __all__ = [
     "apply_early_season_role_prior",
     "attach_season_volume_features",
     "blend_per_game_volume",
+    "calibrate_wr_role_priors",
     "is_volume_crash",
     "regular_season_training_weeks",
     "season_feature_cols",
     "season_prior_weights",
 ]
+
+DEFAULT_WR_ROLE_PRIORS: dict[str, float] = {
+    "alpha": 58.0,
+    "secondary": 43.0,
+    "slot": 30.0,
+    "fringe": 10.0,
+}
+
+
+def calibrate_wr_role_priors(history_df: pd.DataFrame | None = None) -> dict[str, float]:
+    """Calibrate empirical WR receiving yards role priors across snap tiers.
+
+    Tiers:
+      - alpha: snap_percentage >= 80% (empirical ~57.6)
+      - secondary: 60% <= snap_percentage < 80% (empirical ~42.8)
+      - slot: 40% <= snap_percentage < 60% (empirical ~30.1)
+      - fringe: snap_percentage < 40% (empirical ~9.8)
+    """
+    if history_df is None:
+        try:
+            from utils.db import read_dataframe
+
+            history_df = read_dataframe(
+                "SELECT position, snap_percentage, receiving_yards, week "
+                "FROM player_stats_enhanced WHERE position = 'WR' AND week <= 18"
+            )
+        except Exception:
+            history_df = pd.DataFrame()
+
+    if history_df is None or history_df.empty or "receiving_yards" not in history_df.columns:
+        return dict(DEFAULT_WR_ROLE_PRIORS)
+
+    df = history_df.copy()
+    if "position" in df.columns:
+        df = df[df["position"].astype(str).str.upper() == "WR"]
+    if df.empty:
+        return dict(DEFAULT_WR_ROLE_PRIORS)
+
+    snaps = pd.to_numeric(df.get("snap_percentage", 0.0), errors="coerce").fillna(0.0)
+    if snaps.max() > 1.0:
+        snaps = snaps / 100.0
+
+    yards = pd.to_numeric(df["receiving_yards"], errors="coerce").fillna(0.0)
+
+    alpha_mask = snaps >= 0.80
+    sec_mask = (snaps >= 0.60) & (snaps < 0.80)
+    slot_mask = (snaps >= 0.40) & (snaps < 0.60)
+    fringe_mask = snaps < 0.40
+
+    result = dict(DEFAULT_WR_ROLE_PRIORS)
+    if alpha_mask.sum() >= 5:
+        result["alpha"] = round(float(yards[alpha_mask].mean()), 1)
+    if sec_mask.sum() >= 5:
+        result["secondary"] = round(float(yards[sec_mask].mean()), 1)
+    if slot_mask.sum() >= 5:
+        result["slot"] = round(float(yards[slot_mask].mean()), 1)
+    if fringe_mask.sum() >= 5:
+        result["fringe"] = round(float(yards[fringe_mask].mean()), 1)
+
+    return result
 
 
 def is_volume_crash(last_games: float, last_volume: float, prior_volume: float) -> bool:

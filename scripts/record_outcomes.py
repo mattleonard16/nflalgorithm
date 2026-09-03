@@ -79,7 +79,7 @@ def grade_bets(season: int, week: int) -> List[Dict]:
         SELECT
             player_id, season, week, name, team, position,
             rushing_yards, receiving_yards, passing_yards,
-            receptions, targets
+            receptions, targets, rushing_tds, receiving_tds
         FROM player_stats_enhanced
         WHERE season = ? AND week = ?
     """
@@ -90,6 +90,10 @@ def grade_bets(season: int, week: int) -> List[Dict]:
         print("All bets will be marked as pushes")
     else:
         print(f"Found actual stats for {len(actuals)} players")
+        if "anytime_td" not in actuals.columns:
+            rush_td = pd.to_numeric(actuals.get("rushing_tds", 0), errors="coerce").fillna(0.0)
+            rec_td = pd.to_numeric(actuals.get("receiving_tds", 0), errors="coerce").fillna(0.0)
+            actuals["anytime_td"] = (rush_td + rec_td > 0).astype(int)
 
     # Grade each bet
     outcomes = []

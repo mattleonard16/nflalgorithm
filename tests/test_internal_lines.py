@@ -188,7 +188,7 @@ def test_non_positive_sigma_fails_loud() -> None:
 
 
 def test_an_unregistered_market_fails_loud() -> None:
-    projections = _projections(("SEA_alpha_receiver", "anytime_touchdown", 0.6, 0.4))
+    projections = _projections(("SEA_alpha_receiver", "field_goals", 0.6, 0.4))
     with pytest.raises(ValueError, match="sports.markets does not define"):
         build_internal_lines(DEFAULT_UNIVERSE, projections)
 

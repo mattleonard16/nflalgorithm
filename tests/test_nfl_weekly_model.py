@@ -95,7 +95,9 @@ def _make_player_stats(n_players: int = 3, n_weeks: int = 10) -> pd.DataFrame:
                     "receiving_yards": max(0, 50 + p * 5 + rng.normal(0, 20)),
                     "receptions": max(0, 5 + rng.normal(0, 2)),
                     "targets": max(0, 7 + rng.normal(0, 2)),
-                    "red_zone_touches": 2,
+                    "red_zone_touches": 3,
+                    "rushing_tds": 1 if position in ["RB", "QB"] and w % 2 == 0 else 0,
+                    "receiving_tds": 1 if position in ["WR", "TE"] and w % 2 == 0 else 0,
                     "target_share": 0.15,
                     "air_yards": 80.0,
                     "yac_yards": 30.0,
@@ -269,6 +271,20 @@ class TestGetNflFeatureCols:
         for market in MARKET_CONFIGS:
             assert outcome_context.isdisjoint(get_nfl_feature_cols(market))
 
+    def test_game_context_cols_present_in_all_markets(self):
+        expected_context = {
+            "spread_margin",
+            "implied_team_total",
+            "game_total",
+            "wind_speed",
+            "temperature",
+            "is_indoor",
+            "div_game",
+        }
+        for market in MARKET_CONFIGS:
+            cols = set(get_nfl_feature_cols(market))
+            assert expected_context.issubset(cols)
+
 
 class TestCausalTrainingWindows:
     def test_role_eligibility_uses_expected_not_realized_activity(self):
@@ -287,12 +303,15 @@ class TestCausalTrainingWindows:
                 "expected_targets": [0.4, 2.0, 6.0],
                 "expected_rushing_attempts": [0.2, 3.0, 12.0],
                 "expected_passing_attempts": [4.0, 12.0, 30.0],
+                "expected_red_zone_touches": [1.0, 2.5, 5.0],
             }
         )
 
         assert _eligible_role_mask(df, "receiving_yards").tolist() == [False, True, True]
         assert _eligible_role_mask(df, "rushing_yards").tolist() == [False, True, True]
         assert _eligible_role_mask(df, "passing_yards").tolist() == [False, True, True]
+        assert _eligible_role_mask(df, "receptions").tolist() == [False, True, True]
+        assert _eligible_role_mask(df, "anytime_touchdown").tolist() == [False, True, True]
 
     def test_snapshot_depth_penalty_does_not_hide_wr2_history(self):
         explicit = pd.Series([1.5, np.nan])
