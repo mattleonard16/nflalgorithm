@@ -270,11 +270,15 @@ def thresholds_from_backtest(
 ) -> dict[str, float]:
     """Derive per-position ceilings from a walk-forward backtest report.
 
-    The absolute ceilings in POSITION_MAE_THRESHOLDS predate any real
-    measurement; the 2025 walk-forward baseline sits 2-3x above every one of
-    them, so on real data the gate fires on every position and teaches
-    operators to ignore it. This turns the gate into a regression check
-    instead: each position's ceiling is its backtest MAE plus `tolerance_pct`.
+    The absolute ceilings in POSITION_MAE_THRESHOLDS are hand-calibrated from
+    one baseline run and go stale as the model or slate changes. This turns
+    the gate into a regression check against a named baseline instead, with
+    the same rule the absolute table was set by: each position's ceiling is
+    its worst single-week MAE in the baseline plus `tolerance_pct`. A ceiling
+    on the season MEAN would fire on every normal bad week (2025: TE's worst
+    week ran 29% above its season MAE). Reports written before
+    `worst_week_mae` existed fall back to the season MAE, so pass a wider
+    tolerance with those.
 
     Positions the backtest flagged as `small_sample` are left out — a ceiling
     derived from noise is noise — so they fall back to the absolute table (or
@@ -295,7 +299,11 @@ def thresholds_from_backtest(
             continue
         if group.get("small_sample"):
             continue
-        ceilings[str(position)] = float(group["mae"]) * (1.0 + tolerance_pct / 100.0)
+        anchor = float(group["mae"])
+        worst_week = group.get("worst_week_mae")
+        if worst_week is not None:
+            anchor = max(anchor, float(worst_week))
+        ceilings[str(position)] = anchor * (1.0 + tolerance_pct / 100.0)
     if not ceilings:
         raise ValueError("backtest report has no position with a usable MAE")
     return ceilings

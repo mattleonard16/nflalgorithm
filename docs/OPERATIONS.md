@@ -70,7 +70,7 @@ needs the private modules and real data.
    context-factors section (added 2026-09-02, unverified) — the cron turns that flag on.
 3. `make ingest-nfl NFL_SEASONS=2024,2025 THROUGH_WEEK=22` then
    `make doctor-preseason SEASON=2026 WEEK=1`.
-4. Validate context factors before the cron uses them (CLAUDE.md item 31):
+4. Validate context factors before the cron uses them (CLAUDE.md item 32):
    ```bash
    make nfl-backtest SEASON=2025 CONTEXT_FACTORS=off OUTPUT=logs/metrics/bt-2025-off.json
    make nfl-backtest SEASON=2025 CONTEXT_FACTORS=on LABEL=ctx OUTPUT=logs/metrics/bt-2025-on.json
@@ -80,9 +80,10 @@ needs the private modules and real data.
 5. `make week-refresh SEASON=2026 WEEK=1` and `make doctor-season SEASON=2026 WEEK=1`.
 6. After week 1 results land, grade with a gate that can actually pass:
    `make week-grade SEASON=2026 WEEK=1` then
-   `make mae-gate SEASON=2026 WEEK=1 BASELINE=logs/metrics/bt-2025-off.json`. The absolute
-   ceilings without `BASELINE` are 2-3x below the measured baseline and will block every
-   position.
+   `make mae-gate SEASON=2026 WEEK=1 BASELINE=logs/metrics/bt-2025-off.json`. Without
+   `BASELINE` the gate uses the absolute ceilings hand-calibrated from the 2025 baseline
+   (CLAUDE.md item 25); `BASELINE` re-derives them from the fresh run's per-position worst
+   week, so the gate tracks the model actually deployed.
 7. `make week-auto` is the Wednesday entrypoint from week 2 on; it grades the previous week and
    writes its research memo, degrading to a warning so a results hiccup never blocks new lines.
 

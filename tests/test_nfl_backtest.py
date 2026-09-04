@@ -325,3 +325,25 @@ def test_feature_overrides_restore_on_error_and_reject_unknown_flags() -> None:
         with feature_overrides(features, no_such_flag=True):
             pass
     assert not hasattr(features, "no_such_flag")
+
+
+def test_position_groups_carry_worst_week_mae_but_weeks_do_not() -> None:
+    """The gate calibrates on a position's worst week, so the report must name it."""
+    actuals = _actuals([("wr_a", 1, 50.0), ("wr_a", 2, 90.0), ("wr_a", 3, 65.0)])
+
+    def predict_fn(season: int, week: int) -> pd.DataFrame:
+        return _predictions([("wr_a", 60.0, 10.0)])
+
+    result = run_walk_forward(predict_fn, actuals, _config((1, 2, 3)))
+
+    wr = result.report["by_position"]["WR"]
+    assert wr["mae"] == pytest.approx(15.0)
+    assert wr["worst_week"] == 2
+    assert wr["worst_week_mae"] == pytest.approx(30.0)
+    assert result.report["overall"]["worst_week"] == 2
+    assert result.report["by_market_position"][f"{MARKET}|WR"]["worst_week_mae"] == pytest.approx(
+        30.0
+    )
+    # A single week's own worst week is itself; reporting it would be noise.
+    assert "worst_week" not in result.report["by_week"]["2"]
+    assert "worst_week_mae" not in result.report["by_week"]["2"]

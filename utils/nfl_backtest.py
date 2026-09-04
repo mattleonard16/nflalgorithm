@@ -114,12 +114,31 @@ def evaluate_week(
     return joined, problems
 
 
-def _metric_group(rows: pd.DataFrame) -> dict[str, Any]:
+def _worst_week(rows: pd.DataFrame) -> dict[str, Any]:
+    """The single evaluated week with the highest MAE inside this group.
+
+    A gate ceiling set from the season MAE alone fires on every normal bad
+    week (2025: TE's worst week ran 29% above its season MAE), so the
+    per-position ceilings are calibrated from the worst week instead; this
+    is what `thresholds_from_backtest` reads.
+    """
+    if "week" not in rows.columns:
+        return {}
+    weekly = rows.groupby("week")["abs_error"].mean().dropna()
+    if weekly.empty:
+        return {}
+    worst = weekly.idxmax()
+    return {"worst_week": int(worst), "worst_week_mae": float(weekly.loc[worst])}
+
+
+def _metric_group(rows: pd.DataFrame, *, with_worst_week: bool = True) -> dict[str, Any]:
     group: dict[str, Any] = {
         "count": int(len(rows)),
         **error_summary(rows),
         "small_sample": bool(len(rows) < MIN_GROUP_SAMPLE),
     }
+    if with_worst_week:
+        group.update(_worst_week(rows))
     z = rows["z"].dropna()
     if not z.empty:
         group["sigma_count"] = int(len(z))
@@ -213,7 +232,10 @@ def run_walk_forward(
         "by_market": _grouped_metrics(evaluated, "market"),
         "by_position": _grouped_metrics(evaluated, "position"),
         "by_market_position": _market_position_metrics(evaluated),
-        "by_week": {str(week): _metric_group(group) for week, group in evaluated.groupby("week")},
+        "by_week": {
+            str(week): _metric_group(group, with_worst_week=False)
+            for week, group in evaluated.groupby("week")
+        },
     }
     return WalkForwardResult(report=report, evaluated=evaluated)
 

@@ -366,3 +366,22 @@ def test_gate_with_backtest_ceilings_blocks_only_real_regressions() -> None:
     assert steady["passed"] is True
     assert slipped["passed"] is False
     assert slipped["blockers"] == ["WR MAE 29.00 exceeds threshold 26.62 over 200 projections"]
+
+
+def test_backtest_thresholds_anchor_on_worst_week_when_reported() -> None:
+    """A season-mean ceiling fires on every normal bad week; the worst week is the anchor."""
+    report = _backtest_report(
+        {
+            "TE": {"mae": 19.1, "worst_week_mae": 24.6, "worst_week": 7, "small_sample": False},
+            "WR": {"mae": 24.2, "worst_week_mae": None, "small_sample": False},
+        }
+    )
+
+    ceilings = thresholds_from_backtest(report, tolerance_pct=10.0)
+
+    assert ceilings == {"TE": pytest.approx(27.06), "WR": pytest.approx(26.62)}
+    # The 2025 TE worst week (24.6) passes its own baseline gate.
+    gate = check_position_mae(
+        _position_report({"TE": {"mae": 24.6, "projection_count": 200}}), ceilings
+    )
+    assert gate["passed"] is True

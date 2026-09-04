@@ -204,8 +204,8 @@ validate:
 
 # Per-position MAE gate. Exits non-zero when a position regresses past its
 # ceiling, so this is safe to chain into a release check. With BASELINE set to
-# a walk-forward report (make nfl-backtest ... --output), ceilings are that
-# run's per-position MAE plus TOLERANCE_PCT instead of the absolute table.
+# a walk-forward report (make nfl-backtest ... OUTPUT=...), ceilings are that
+# run's per-position worst-week MAE plus TOLERANCE_PCT instead of the absolute table.
 # Usage: make mae-gate SEASON=2026 WEEK=1 [BASELINE=logs/metrics/nfl-backtest-2025.json] [TOLERANCE_PCT=10]
 mae-gate:
 	$(call require_season_week)
