@@ -251,7 +251,7 @@ def test_position_gate_passes_when_every_position_is_within_ceiling() -> None:
 def test_position_gate_blocks_position_above_threshold() -> None:
     report = _position_report(
         {
-            "TE": {"mae": 14.25, "projection_count": 70},
+            "TE": {"mae": 30.25, "projection_count": 70},
             "WR": {"mae": 9.5, "projection_count": 120},
         }
     )
@@ -259,7 +259,7 @@ def test_position_gate_blocks_position_above_threshold() -> None:
     gate = check_position_mae(report)
 
     assert gate["passed"] is False
-    assert "TE MAE 14.25 exceeds threshold 9.00 over 70 projections" in gate["blockers"]
+    assert "TE MAE 30.25 exceeds threshold 27.00 over 70 projections" in gate["blockers"]
 
 
 def test_position_gate_skips_thin_samples_without_passing_them() -> None:

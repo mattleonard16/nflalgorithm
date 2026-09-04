@@ -584,6 +584,11 @@ def transform_to_enhanced_stats(
     att_col = "attempts" if "attempts" in df.columns else "passing_attempts"
     df["passing_attempts"] = df[att_col].fillna(0).astype(float) if att_col in df.columns else 0.0
 
+    # Touchdowns (T1 #12) — persisted so TD props can be priced; older fixtures
+    # and pre-TD sources default to 0 like passing_attempts above.
+    for td_col in ("passing_tds", "rushing_tds", "receiving_tds"):
+        df[td_col] = df[td_col].fillna(0).astype(float) if td_col in df.columns else 0.0
+
     # Derived metrics
     df["target_share"] = (
         df["target_share"].fillna(0).astype(float) if "target_share" in df.columns else 0.0
@@ -652,6 +657,9 @@ def transform_to_enhanced_stats(
         "receiving_yards",
         "receptions",
         "targets",
+        "passing_tds",
+        "rushing_tds",
+        "receiving_tds",
         "red_zone_touches",
         "target_share",
         "air_yards",

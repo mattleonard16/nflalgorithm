@@ -125,7 +125,11 @@ export async function getPerformance(season?: number): Promise<PerformanceRespon
  * Get bet outcomes for a specific week
  */
 export async function getOutcomes(season: number, week: number): Promise<BetOutcome[]> {
-  return fetchAPI<BetOutcome[]>(`/api/outcomes?season=${season}&week=${week}`);
+  const data = await fetchAPI<BetOutcome[] | { outcomes?: BetOutcome[]; total?: number }>(
+    `/api/outcomes?season=${season}&week=${week}`
+  );
+  if (Array.isArray(data)) return data;
+  return data?.outcomes ?? [];
 }
 
 /**

@@ -461,8 +461,8 @@ class TestProjectionAccuracy:
 
     def test_computes_per_position_mae_against_the_gate_ceilings(self, tmp_path: Path) -> None:
         conn = _new_db(tmp_path)
-        # WR projected 10 yards high every time; TE projected 20 high, which is
-        # over the TE ceiling of 9.0.
+        # WR projected 10 yards high every time; TE projected 30 high, which is
+        # over the TE ceiling of 27.0.
         for index in range(3):
             _insert(
                 conn,
@@ -513,7 +513,7 @@ class TestProjectionAccuracy:
             player_id="SEA_te0",
             team="SEA",
             market="receiving_yards",
-            mu=50.0,
+            mu=60.0,
             sigma=12.0,
             model_version="v1",
             generated_at="2025-11-12T12:00:00+00:00",
@@ -527,7 +527,7 @@ class TestProjectionAccuracy:
         by_position = {row["position"]: row for row in payload["by_position"]}
         assert by_position["WR"]["mae"] == pytest.approx(10.0)
         assert by_position["WR"]["over_threshold"] is False
-        assert by_position["TE"]["mae"] == pytest.approx(20.0)
+        assert by_position["TE"]["mae"] == pytest.approx(30.0)
         assert by_position["TE"]["over_threshold"] is True
         # Four projections is nowhere near the gate's minimum sample.
         assert all(row["below_min_sample"] for row in payload["by_position"])
