@@ -36,7 +36,7 @@ Excluded from version control. This is the complete set — verify with
 
 | File | Purpose |
 |------|---------|
-| `config.py` | Centralized configuration (database, API, model, betting settings) |
+| `config.py` | Optional local override for configuration. Not required: see the note below. |
 | `data_pipeline.py` | Data ingestion, feature engineering, EWMA market mu computation |
 | `value_betting_engine.py` | Kelly criterion, probability calculations, value ranking |
 | `prop_integration.py` | 3-tier player matching (odds to projections) |
@@ -60,7 +60,11 @@ math stays testable without the private code.
 
 ## Key Configuration Values
 
-From `config.py`:
+A fresh clone reads these from tracked `config/runtime.py`. A gitignored top-level `config.py`
+is an *optional* override: `config/__init__.py` loads it by path when present and its values
+win, with `_fill_missing_settings` filling any gaps from the tracked defaults. So `import config`
+always resolves to the tracked package, never to `config.py` directly, and a public clone runs
+without that file. This is the pattern the other private modules should follow.
 
 - `config.model.target_mae = 3.0` (professional-grade target)
 - `config.betting.min_edge_threshold = 0.08` (8% minimum edge)
