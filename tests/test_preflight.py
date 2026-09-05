@@ -10,7 +10,7 @@ from scripts.preflight import (
     check_database,
     check_demo_mode,
     check_odds_key,
-    check_private_api,
+    check_api_server,
     check_private_modules,
     check_runtime_config,
     collect_nfl_week_counts,
@@ -97,34 +97,26 @@ def test_real_allowed_origins_passes(monkeypatch) -> None:
     assert "2 origin(s)" in diagnostic.message
 
 
-def test_missing_private_api_warns_on_public_clone(tmp_path) -> None:
-    # A fresh public clone never has the gitignored api/server.py. `make doctor`
-    # must not report that as a broken checkout.
-    diagnostic = check_private_api(tmp_path)
-
-    assert diagnostic.status == "warn"
-    assert "api/server.py" in diagnostic.message
-    assert "public clone" in diagnostic.message
-    assert "make api" in (diagnostic.action or "")
-
-
-def test_missing_private_api_blocks_api_startup_when_required(tmp_path) -> None:
-    diagnostic = check_private_api(tmp_path, required=True)
+def test_missing_api_server_reports_a_broken_checkout(tmp_path) -> None:
+    # api/server.py is tracked, so an absent copy is an incomplete checkout,
+    # not a public clone. The action must point at git, not at a deployment.
+    diagnostic = check_api_server(tmp_path)
 
     assert diagnostic.status == "fail"
     assert "api/server.py" in diagnostic.message
-    assert "Install the deployment-supplied copy" in (diagnostic.action or "")
+    assert "git status" in (diagnostic.action or "")
 
 
-def test_stale_private_api_visibility_contract_blocks_startup(tmp_path) -> None:
+def test_stale_api_visibility_contract_blocks_startup(tmp_path) -> None:
     api_dir = tmp_path / "api"
     api_dir.mkdir()
     (api_dir / "server.py").write_text(
         'PUBLIC_VALUE_VISIBILITY_CONTRACT = "legacy"\n', encoding="utf-8"
     )
 
-    # A present-but-stale copy is a real defect even when the file is optional.
-    diagnostic = check_private_api(tmp_path, required=False)
+    # A stale copy is worse than a missing one: it serves legacy unjoinable
+    # and SimBook rows as if they were real.
+    diagnostic = check_api_server(tmp_path)
 
     assert diagnostic.status == "fail"
     assert "current public visibility contract" in diagnostic.message
