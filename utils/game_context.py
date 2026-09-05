@@ -281,7 +281,13 @@ def attach_game_context_to_player_frame(
     context_df = pd.DataFrame(records).drop_duplicates(subset=["season", "week", "team"], keep="last")
 
     if "team" in df.columns and "season" in df.columns and "week" in df.columns:
-        orig_team = df["team"]
+        # The merge joins on the _clean_* helpers (not on "team" itself), so
+        # the player's own "team" column survives untouched and the schedule's
+        # copy lands as "team_context_dup" for disposal below. Do NOT restore
+        # via `df["team"] = <saved series>`: after the merge the frame carries
+        # a fresh RangeIndex, and assigning a series saved under the caller's
+        # original (e.g. non-default) index realigns by label — wiping every
+        # team to NaN and silently breaking the odds join downstream.
         df["_clean_team"] = df["team"].astype(str).str.strip().str.upper()
         df["_clean_season"] = pd.to_numeric(df["season"], errors="coerce").fillna(0).astype(int)
         df["_clean_week"] = pd.to_numeric(df["week"], errors="coerce").fillna(0).astype(int)
@@ -297,7 +303,6 @@ def attach_game_context_to_player_frame(
             how="left",
             suffixes=("", "_context_dup"),
         )
-        df["team"] = orig_team
         df = df.drop(columns=["_clean_team", "_clean_season", "_clean_week"], errors="ignore")
         if "team_context_dup" in df.columns:
             df = df.drop(columns=["team_context_dup"], errors="ignore")

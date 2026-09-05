@@ -272,6 +272,42 @@ class TestAttachGameContextToPlayerFrame:
         assert row["is_indoor"] == GAME_CONTEXT_DEFAULTS["is_indoor"]
         assert row["div_game"] == GAME_CONTEXT_DEFAULTS["div_game"]
 
+    def test_non_default_index_preserves_team_identity(self):
+        # A filtered frame (e.g. market_df.loc[valid_indices]) carries a
+        # non-default index. Restoring "team" from a series saved under that
+        # index after the merge realigns by label and wipes every team to NaN,
+        # silently breaking the odds join downstream.
+        games = pd.DataFrame(
+            [
+                {
+                    "game_id": "2025_01_KC_BUF",
+                    "season": 2025,
+                    "week": 1,
+                    "home_team": "KC",
+                    "away_team": "BUF",
+                    "spread_line": 3.0,
+                    "total_line": 48.0,
+                    "temp": 65.0,
+                    "wind": 5.0,
+                    "roof": "outdoors",
+                    "div_game": 0,
+                }
+            ]
+        )
+        players = pd.DataFrame(
+            [
+                {"player_id": "P1", "season": 2025, "week": 1, "team": "KC"},
+                {"player_id": "P2", "season": 2025, "week": 1, "team": "BUF"},
+            ],
+            index=[10, 20],
+        )
+        result = attach_game_context_to_player_frame(players, games)
+
+        assert result["team"].tolist() == ["KC", "BUF"]
+        assert result["team"].isna().sum() == 0
+        assert result["spread_margin"].tolist() == [3.0, -3.0]
+        assert "team_context_dup" not in result.columns
+
     def test_corrupt_data_degrades_gracefully(self):
         games = pd.DataFrame(
             [
