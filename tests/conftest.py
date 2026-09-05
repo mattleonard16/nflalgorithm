@@ -33,6 +33,7 @@ _private_algorithm_tests = [
     "test_prop_integration_season_week.py",
     "test_prop_integration_wr.py",
     "test_qb_decomposition.py",
+    "test_qb_gating.py",
     "test_synthetic_odds_wr.py",
     "test_value_engine_side.py",
     "test_weekly_pipeline.py",

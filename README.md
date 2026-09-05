@@ -34,9 +34,9 @@ cp .env.example .env
 make install
 make frontend-install
 make migrate
-make doctor
+make doctor             # WARN rows for private_api / private_modules are expected on a public clone
 
-# Launch the supervised React stack (worker + API + frontend)
+# Launch the supervised React stack (worker + API + frontend; needs the private api/server.py)
 make fullstack          # http://localhost:3000
 
 # Optional: ingest real NFL data or launch the legacy dashboard
@@ -385,13 +385,13 @@ make validate SEASON=2025 WEEKS="1 2 3"  # Score persisted pre-kickoff projectio
 
 ## Contributing
 
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'feat: Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first: it explains which
+files are private and never published, what works without them (almost everything), and what
+CI runs on your pull request.
 
-**Standards**: PEP 8 | Type hints | 90%+ coverage | Documented methods
+On a public clone, `make doctor` prints `WARN` for `private_api` and `private_modules`. That is
+expected, not a failure. If you hit a setup problem, open an issue with the "Setup problem"
+template.
 
 ---
 

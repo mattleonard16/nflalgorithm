@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto db-analyze nfl-backtest production-run health
+.PHONY: help list-targets install install-uv install-venv runtime-preflight api-runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto db-analyze nfl-backtest production-run health
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -82,8 +82,8 @@ help:
 	@echo "  make install             Install Python dependencies (UV preferred, venv fallback)"
 	@echo "  make frontend-install    Install locked frontend dependencies"
 	@echo "  make migrate             Back up and migrate the local SQLite database"
-	@echo "  make doctor              Validate tools, config, database, migrations, keys, and modules"
-	@echo "  make doctor-production   Require live-odds key and private execution modules"
+	@echo "  make doctor              Validate tools, config, database, migrations, keys, and modules (private files WARN on a public clone)"
+	@echo "  make doctor-production   Require live-odds key, private execution modules, and api/server.py"
 	@echo "  make doctor-season SEASON=2026 WEEK=1 [SEASON_PHASE=post-run]"
 	@echo "  make doctor-preseason SEASON=2026 WEEK=1"
 	@echo ""
@@ -245,26 +245,33 @@ api-preflight:
 
 migrate: api-preflight
 
+# Shared by the durable pipeline workers, which run the model but never serve
+# HTTP — they must not require api/server.py.
 runtime-preflight:
 	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema
 
-runtime-production-preflight:
-	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-demo-mode-off
+# Adds the api/server.py requirement for targets that actually start the API.
+api-runtime-preflight:
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-private-api
 
-# Validate a migrated local environment. Warnings identify optional live/private features.
+runtime-production-preflight:
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-private-api --require-demo-mode-off
+
+# Validate a migrated local environment. Warnings identify optional live/private features;
+# on a public clone `private_api` and `private_modules` always WARN and that is expected.
 doctor:
 	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --check-frontend
 
 doctor-production:
-	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --check-frontend --require-live-odds --require-private-modules --require-demo-mode-off
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --check-frontend --require-live-odds --require-private-modules --require-private-api --require-demo-mode-off
 
 doctor-season:
 	$(call require_season_week)
-	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-live-odds --require-private-modules --require-demo-mode-off --season $(SEASON) --week $(WEEK) --season-phase $(SEASON_PHASE)
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-live-odds --require-private-modules --require-private-api --require-demo-mode-off --season $(SEASON) --week $(WEEK) --season-phase $(SEASON_PHASE)
 
 doctor-preseason:
 	$(call require_season_week)
-	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-private-modules --season $(SEASON) --week $(WEEK) --season-phase pre-run
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-private-modules --require-private-api --season $(SEASON) --week $(WEEK) --season-phase pre-run
 
 # Launch FastAPI backend after callers complete any required preflight.
 api-serve:
@@ -272,7 +279,7 @@ api-serve:
 	$(DB_ENV) $(PYTHON) -m uvicorn api.application:app --host $(API_HOST) --port $(API_PORT) --reload
 
 api: api-preflight
-	@$(MAKE) runtime-preflight
+	@$(MAKE) api-runtime-preflight
 	@$(MAKE) api-serve
 
 api-prod-serve:

@@ -111,8 +111,12 @@ Verify: `command grep -n "kickoffs_from_games" scripts/record_outcomes.py` retur
 
 ### `api/server.py`
 
-- Declares `PUBLIC_VALUE_VISIBILITY_CONTRACT = "publication-safe-v1"`. Preflight rejects missing
-  or stale deployment copies before services start.
+- Declares `PUBLIC_VALUE_VISIBILITY_CONTRACT = "publication-safe-v1"`. Preflight rejects a stale
+  copy everywhere. A *missing* copy is rejected only where the API is actually served: `make api`
+  and `make api-prod` (via `--require-private-api`), `make fullstack` (via
+  `scripts/run_local_services.py`), and every `doctor-*` target. Plain `make doctor` and the
+  `pipeline-worker` targets only warn — the worker runs the model but serves no HTTP — so a public
+  clone without the file still exits 0.
 - Requires pipeline operator authentication for review requests and authenticated reader access for
   review status.
 

@@ -97,12 +97,23 @@ def test_real_allowed_origins_passes(monkeypatch) -> None:
     assert "2 origin(s)" in diagnostic.message
 
 
-def test_missing_private_api_blocks_startup(tmp_path) -> None:
+def test_missing_private_api_warns_on_public_clone(tmp_path) -> None:
+    # A fresh public clone never has the gitignored api/server.py. `make doctor`
+    # must not report that as a broken checkout.
     diagnostic = check_private_api(tmp_path)
+
+    assert diagnostic.status == "warn"
+    assert "api/server.py" in diagnostic.message
+    assert "public clone" in diagnostic.message
+    assert "make api" in (diagnostic.action or "")
+
+
+def test_missing_private_api_blocks_api_startup_when_required(tmp_path) -> None:
+    diagnostic = check_private_api(tmp_path, required=True)
 
     assert diagnostic.status == "fail"
     assert "api/server.py" in diagnostic.message
-    assert "before starting API services" in (diagnostic.action or "")
+    assert "Install the deployment-supplied copy" in (diagnostic.action or "")
 
 
 def test_stale_private_api_visibility_contract_blocks_startup(tmp_path) -> None:
@@ -112,7 +123,8 @@ def test_stale_private_api_visibility_contract_blocks_startup(tmp_path) -> None:
         'PUBLIC_VALUE_VISIBILITY_CONTRACT = "legacy"\n', encoding="utf-8"
     )
 
-    diagnostic = check_private_api(tmp_path)
+    # A present-but-stale copy is a real defect even when the file is optional.
+    diagnostic = check_private_api(tmp_path, required=False)
 
     assert diagnostic.status == "fail"
     assert "current public visibility contract" in diagnostic.message

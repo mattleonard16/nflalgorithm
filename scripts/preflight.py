@@ -297,14 +297,33 @@ def check_allowed_origins(*, production: bool) -> Diagnostic:
     )
 
 
-def check_private_api(root: Path = PROJECT_ROOT) -> Diagnostic:
+def check_private_api(root: Path = PROJECT_ROOT, *, required: bool = False) -> Diagnostic:
+    """Validate the deployment-supplied API module.
+
+    ``api/server.py`` is gitignored and never ships in the public repository, so a
+    fresh clone always lacks it. That is not a broken checkout: migrations, ingest,
+    tests, backtests, and the frontend build all run without it. Only the API server
+    and the full-stack launcher need it, so those callers pass ``required=True``.
+    A file that is present but declares a stale contract is a real problem either way.
+    """
     api_file = root / PRIVATE_API_FILE
     if not api_file.is_file():
+        if required:
+            return _result(
+                "private_api",
+                "fail",
+                f"Serving the API needs {PRIVATE_API_FILE}, which is not present.",
+                "Install the deployment-supplied copy first. A public clone cannot have this file "
+                "— it is gitignored and never published — so use `make test`, `make migrate`, "
+                "`make ingest-nfl`, or `make nfl-backtest` there instead.",
+            )
         return _result(
             "private_api",
-            "fail",
-            f"Private API module is unavailable: {PRIVATE_API_FILE}",
-            "Install the deployment-supplied API module before starting API services.",
+            "warn",
+            f"Private API module is not present: {PRIVATE_API_FILE} "
+            "(expected on a public clone; it is gitignored and never published).",
+            "Only `make api` and `make fullstack` need it. Everything else works without it. "
+            "Deployments install the deployment-supplied copy before starting API services.",
         )
 
     try:
@@ -706,6 +725,7 @@ def collect_diagnostics(
     check_frontend_dependencies: bool = False,
     require_live_odds: bool = False,
     require_private_modules: bool = False,
+    require_private_api: bool = False,
     require_demo_mode_off: bool = False,
     season: int | None = None,
     week: int | None = None,
@@ -728,7 +748,7 @@ def collect_diagnostics(
             and not any(item.failed for item in database_diagnostics)
         ):
             diagnostics.extend(check_nfl_week_readiness(season, week, phase=season_phase))
-    diagnostics.append(check_private_api())
+    diagnostics.append(check_private_api(required=require_private_api))
     diagnostics.append(check_private_modules(required=require_private_modules))
     if check_frontend_dependencies:
         diagnostics.extend(check_frontend())
@@ -778,6 +798,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Fail if deployment-supplied NFL modules are missing",
     )
     parser.add_argument(
+        "--require-private-api",
+        action="store_true",
+        help="Fail if the deployment-supplied api/server.py is missing (needed to serve the API)",
+    )
+    parser.add_argument(
         "--require-demo-mode-off",
         action="store_true",
         help="Fail if fixture visibility is enabled",
@@ -796,6 +821,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         check_frontend_dependencies=args.check_frontend,
         require_live_odds=args.require_live_odds,
         require_private_modules=args.require_private_modules,
+        require_private_api=args.require_private_api,
         require_demo_mode_off=args.require_demo_mode_off,
         season=args.season,
         week=args.week,

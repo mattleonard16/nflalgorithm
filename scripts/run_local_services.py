@@ -89,7 +89,12 @@ def wait_for_readiness(url: str, timeout_seconds: float = 30.0) -> None:
 
 def main() -> int:
     configure_logging("local-services")
-    diagnostics = collect_diagnostics(check_schema=True, check_frontend_dependencies=True)
+    # This launcher starts uvicorn on api.application, which imports the
+    # gitignored api/server.py. Require it here so a public clone gets the
+    # preflight's explanation instead of an ImportError from inside uvicorn.
+    diagnostics = collect_diagnostics(
+        check_schema=True, check_frontend_dependencies=True, require_private_api=True
+    )
     print_diagnostics(diagnostics)
     if any(item.failed for item in diagnostics):
         logger.error(
