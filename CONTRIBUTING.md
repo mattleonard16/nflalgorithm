@@ -6,19 +6,22 @@ did not work for you, open an issue with the "Setup problem" template. That is a
 
 ## What is public and what is not
 
-Six files are gitignored and never published: `config.py`, `data_pipeline.py`,
-`value_betting_engine.py`, `prop_integration.py`, `models/position_specific/weekly.py`, and
-`api/server.py`. They hold the proprietary model and pricing code.
+Three files are gitignored and never published: `data_pipeline.py`, `value_betting_engine.py`,
+and `models/position_specific/weekly.py`. They hold the model and the pricing logic. A fourth,
+`config.py`, is only an override; tracked defaults live in `config/runtime.py`.
 
-Everything else is public and works on its own:
+Everything else is public, including the API (`api/server.py`) and the player matching
+(`prop_integration.py`). Both were published on 2026-09-05.
 
-- `make install`, `make migrate`, `make doctor`
-- `make test` (tests that import the private files skip automatically, see `tests/conftest.py`)
+Working without the private files:
+
+- `make install`, `make migrate`, `make doctor`, `make test`
+- `make api`, `make fullstack`
 - `make ingest-nfl`, `make nfl-backtest`, `make frontend-build`
 
-Only `make api` and `make fullstack` need the private files. `make doctor` prints `WARN` for
-`private_api` and `private_modules` on a public clone. That is expected and is not a failure.
-See docs/TROUBLESHOOTING.md for the full table.
+`make week-predict` and the other live projection runs need the model, so they will not work on a
+clone. `make doctor` prints `WARN` for `private_modules`. That is expected, not a failure. See
+docs/TROUBLESHOOTING.md for the full table.
 
 Because CI never sees the private files, logic that CI must verify belongs in a tracked module.
 `utils/clv.py` is the pattern: the math lives in a tracked file with tests, and the private

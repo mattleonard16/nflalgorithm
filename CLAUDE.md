@@ -39,13 +39,13 @@ Excluded from version control. This is the complete set — verify with
 | `config.py` | Optional local override for configuration. Not required: see the note below. |
 | `data_pipeline.py` | Data ingestion, feature engineering, EWMA market mu computation |
 | `value_betting_engine.py` | Kelly criterion, probability calculations, value ranking |
-| `prop_integration.py` | 3-tier player matching (odds to projections) |
 | `models/position_specific/weekly.py` | Weekly model training and prediction |
-| `api/server.py` | FastAPI REST API for frontend dashboard |
 
-**Not proprietary, despite previous versions of this file saying otherwise**:
-`materialized_value_view.py` and `scripts/record_outcomes.py` are tracked in git with long commit
-histories. They are not gitignored and never were.
+**Four files that are not on this list, though older versions of it said otherwise.**
+`materialized_value_view.py` and `scripts/record_outcomes.py` are tracked with long commit
+histories and never were gitignored. `api/server.py` and `prop_integration.py` were published on
+2026-09-05: neither held modeling edge, and hiding the API kept 196 tests out of CI. See
+`docs/plans/2026-09-05-003-open-the-public-contribution-boundary-plan.md`.
 
 **Consequence for the gitignored set**: edits to those files live only on the local machine and in
 no commit — a fresh clone gets whatever the deployment supplies. When a change spans a gitignored

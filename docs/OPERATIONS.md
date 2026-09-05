@@ -64,8 +64,8 @@ Run on the production checkout, in this order. Everything before the first arrow
 was rehearsed on a fresh clone on 2026-09-02 (migrate, doctor, frontend build); everything after
 needs the private modules and real data.
 
-1. `make migrate && make doctor` — 47 tables, WAL on, no `[FAIL]` rows. `private_api` and
-   `private_modules` must PASS here, unlike on a tracked-only clone.
+1. `make migrate && make doctor` — 47 tables, WAL on, no `[FAIL]` rows. `private_modules`
+   must PASS here, unlike on a tracked-only clone.
 2. Confirm the private wiring listed in `docs/DEPLOYMENT_MANIFEST.md`, especially the
    context-factors section (added 2026-09-02, unverified) — the cron turns that flag on.
 3. `make ingest-nfl NFL_SEASONS=2024,2025 THROUGH_WEEK=22` then

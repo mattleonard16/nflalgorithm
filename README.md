@@ -34,9 +34,9 @@ cp .env.example .env
 make install
 make frontend-install
 make migrate
-make doctor             # WARN rows for private_api / private_modules are expected on a public clone
+make doctor             # a WARN row for private_modules is expected on a public clone
 
-# Launch the supervised React stack (worker + API + frontend; needs the private api/server.py)
+# Launch the supervised React stack (worker + API + frontend)
 make fullstack          # http://localhost:3000
 
 # Optional: ingest real NFL data or launch the legacy dashboard
@@ -389,7 +389,7 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first: it exp
 files are private and never published, what works without them (almost everything), and what
 CI runs on your pull request.
 
-On a public clone, `make doctor` prints `WARN` for `private_api` and `private_modules`. That is
+On a public clone, `make doctor` prints `WARN` for `private_modules`. That is
 expected, not a failure. If you hit a setup problem, open an issue with the "Setup problem"
 template.
 

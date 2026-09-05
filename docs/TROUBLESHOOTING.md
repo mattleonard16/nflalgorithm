@@ -12,17 +12,27 @@ make doctor-production
 
 ## Public clone vs deployment checkout
 
-Six files are gitignored and never published: `config.py`, `data_pipeline.py`,
-`value_betting_engine.py`, `prop_integration.py`, `models/position_specific/weekly.py`, and
-`api/server.py`. A fresh clone of the public repository does not have them, and `make doctor`
-reports that as `WARN`, not `FAIL`. Nothing is broken.
+Three files are gitignored and never published: `data_pipeline.py`, `value_betting_engine.py`,
+and `models/position_specific/weekly.py`. They hold the model and the pricing logic. A fresh clone
+does not have them, and `make doctor` reports that as `WARN`, not `FAIL`. Nothing is broken.
 
-| Works without the private files | Needs them |
-|---|---|
-| `make install`, `make migrate`, `make doctor` | `make api` (serves `api/server.py`) |
-| `make test` (private-module tests skip automatically via `tests/conftest.py`) | `make fullstack` (starts the API) |
-| `make ingest-nfl`, `make nfl-backtest`, `make frontend-build` | `make doctor-production`, `make doctor-season`, `make doctor-preseason` |
-| every `utils/`, `scripts/`, and `sports/` module | `make week-predict`, `make week-materialize` (model and pricing) |
+A fourth, `config.py`, is only an override. Tracked defaults live in `config/runtime.py`, so a
+clone runs without it.
+
+Works without them:
+
+- `make install`, `make migrate`, `make doctor`, `make test`
+- `make api`, `make fullstack` (the API is tracked; it serves whatever data is already in the database)
+- `make ingest-nfl`, `make nfl-backtest`, `make frontend-build`
+- every `utils/`, `scripts/`, `sports/`, and `api/` module
+
+Needs them:
+
+- `make week-predict`, `make week-materialize`, and any other live projection run
+- `make doctor-production`, `make doctor-season`, `make doctor-preseason`
+
+Tests that import a private module skip themselves. `tests/conftest.py` fences them per module, so
+each one is skipped only when the module it actually needs is absent.
 
 If a `[FAIL]` row names one of those files on a public clone, that is a bug in the repository.
 Please open an issue with the `make doctor` output.
@@ -37,9 +47,8 @@ Please open an issue with the `make doctor` output.
 | `Database connection failed` | Bad credentials, unreachable host, missing database, or unwritable SQLite path | Verify `DB_BACKEND`, `DB_URL`/`SQLITE_DB_PATH`, DNS/firewall, and filesystem permissions |
 | `ODDS_API_KEY is not configured` | Live odds cannot be fetched | Create a key at https://the-odds-api.com/ and set `ODDS_API_KEY` in `.env` or the deployment secret store. NFL player props (`player_pass_yds`, `player_rush_yds`, `player_rec_yds`) need a paid plan that includes player props (currently Business). A free key is enough to prove the credential exists; it will not cover Week 1 props. The live pipeline fails closed without a usable key |
 | `nfl_history_team_scope` or `nfl_history_franchises` fail | Historical stats have empty `team` (legacy `LA` Rams rows) or fewer than 32 clubs | `make ingest-nfl NFL_SEASONS=2024,2025 THROUGH_WEEK=22` then `make doctor-preseason SEASON=2026 WEEK=1`. Do not use `doctor-season` until a live-odds key exists |
-| `[WARN] private_api: Private API module is not present: api/server.py` | Expected on a public clone: `api/server.py` is gitignored and never published | No action for tests, ingest, backtests, or the frontend build. Only `make api` / `make fullstack` need it; deployments install their copy first |
-| `[FAIL] private_api` from `make api`, `make fullstack`, or any `doctor-*` target | Those targets pass `--require-private-api` because they start or validate the API server | On a deployment machine, install `api/server.py`. On a public clone, use the targets in the table above instead |
-| `Deployment-supplied API module does not implement the current public visibility contract` | `api/server.py` is present but its `PUBLIC_VALUE_VISIBILITY_CONTRACT` is stale | Replace it with the current release copy declaring `publication-safe-v1` |
+| `[FAIL] api_server: api/server.py is missing` | The file is tracked, so this means an incomplete checkout, not a public clone | Run `git status` to find the deletion, or re-clone |
+| `api/server.py does not implement the current public visibility contract` | `PUBLIC_VALUE_VISIBILITY_CONTRACT` in that file is stale | Set it to `publication-safe-v1`. A stale value serves legacy unjoinable and `SimBook` rows as if they were real |
 | `[WARN] private_modules: Private NFL execution modules are unavailable` | Expected on a public clone: the model and pricing modules are gitignored | Read-only API/UI, tests, and ingest work without them. Install the private modules before starting production workers |
 | `Node.js ... is too old` | Next.js 16 requires Node 20.9+ | Upgrade Node, then run `make frontend-install` |
 | `Frontend dependencies are not installed` | `frontend/node_modules` is absent | Run `make frontend-install` (`npm ci`) |

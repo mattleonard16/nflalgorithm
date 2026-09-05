@@ -8,24 +8,27 @@ This file records what the tracked code now *expects* the private modules to do.
 when the private modules are restored from a backup or another machine, verify each item below and
 re-apply anything missing.
 
-Last verified: 2026-08-16, including live-odds selection, kickoff-aware production CLV, and season priors.
-The context-factors section below was added 2026-09-02 from the tracked side only and is unverified.
+Last verified: 2026-08-16, including live-odds selection, kickoff-aware production CLV, and season
+priors. The context-factors section below was added 2026-09-02 from the tracked side only and is
+unverified.
+
+`api/server.py` and `prop_integration.py` left this file on 2026-09-05. Both are tracked now, so
+git verifies them and nothing here needs to.
 
 ---
 
 ## Why this matters
 
-Tier A shipped four money-path fixes. Three of them are **split across the git boundary**: the
-tracked half is committed, the wiring that activates it is not. A deploy that takes only the
-committed half gets the new modules sitting inert — no error, no warning, just the old behavior.
+Most fixes below are **split across the git boundary**. The tracked half is committed; the wiring
+that activates it is not. A deploy that takes only the committed half gets the new code sitting
+inert, with no error and no warning, just the old behavior. The last column says what breaks when
+the private half is missing, so start there.
 
 | Fix | Tracked (in git) | Local-only (NOT in git) | Effect if the private half is missing |
 |---|---|---|---|
 | Kelly cap default | `config/runtime.py` default `True` | `config.py:193` `_flag("NFL_FEATURE_KELLY_CAP", True)` | `config.py` wins at runtime. An older copy defaults **False**, so per-bet Kelly capping is **off** and full-Kelly fractions (measured up to 0.743) size the bets. |
 | Portfolio stake cap | `risk_manager.normalize_portfolio_stakes`, called from `materialized_value_view.py:105` | — (fully tracked) | None. This one is safe. |
 | Position-keyed sigma | `utils/nfl_sigma.py` | `weekly.py:977` passes `position=position` | Falls back to the `(market, None)` legacy floors. Dispersion silently reverts to the old miscalibrated values (WR/TE rushing ~2.5x too wide). |
-| Matching guards | `utils/matching.py` | `prop_integration.py:36-42` imports and wiring | Guards never run. Cross-position name collisions (QB/DB Lamar Jackson, WR/LB Justin Jefferson) merge again, and stale odds snapshots fan out into duplicate rows. |
-| Public value-row visibility | `api/value_visibility.py`, `config/runtime.py` | `api/server.py` imports and applies `value_visibility_scope` to public value-data queries | Legacy unpublished, unjoinable, and `SimBook` rows appear in metadata, bets, analytics, risk, exports, and review inputs. |
 | Live-odds stale filter | `utils/live_odds.py` | `value_betting_engine.rank_weekly_value` | Ranking takes SQL `MAX(as_of)` and can price an in-game quote. |
 | Kickoff-aware production CLV | `utils/clv.py`, `utils/live_odds.py` | `scripts/record_outcomes.py` `compute_and_save_clv` | Closing line is `MAX(as_of)`, including post-kickoff scrapes. |
 | Early-season 70/30 role prior | `utils/season_priors.py` | `weekly.py` `_engineer_rolling_features` and `get_nfl_feature_cols` | Week 1 expected_* stays last-6 EWM; last_season_*_pg features are missing so a restored private weekly.py ignores the new helper. |
@@ -71,15 +74,6 @@ print(read_dataframe('SELECT COUNT(*) n, COUNT(volatility_score) scored FROM wee
 `scored` must be non-zero. Measured on the 2026 W1 slate: 784 of 1396 scored, widening multiplier
 spanning 1.0000-1.1500 across 472 distinct values (it was a constant 1.075 on every row before).
 
-### `prop_integration.py`
-- Imports `latest_snapshot_per_key`, `name_variants`, `positions_compatible`, `strip_name_suffix`,
-  `suffix_conflict` from `utils.matching`.
-- Dedups odds via `latest_snapshot_per_key` at load.
-- Sources positions and raw names from `nfl_roster_players` (NOT `player_stats_enhanced`, which is
-  empty pregame and contains no defensive players — the guards are inert if it is used).
-
-Verify: `command grep -n "from utils.matching import" prop_integration.py`
-
 ### `value_betting_engine.py`
 - The per-bet Kelly cap is gated on `config.features.kelly_cap_enabled` (~line 266).
 - Sigma widening calls `apply_volatility_widening(df["sigma"], df.get("volatility_score"))` from
@@ -108,31 +102,6 @@ Verify: `command grep -n "kickoffs_from_games" scripts/record_outcomes.py` retur
 - `compute_player_volatility` deleted (was never wired to anything).
 - The unused `import requests` removed. **If restoring an older copy, the import may return — it is
   harmless, but `tests/test_basic.py` no longer patches it.**
-
-### `api/server.py`
-
-- Declares `PUBLIC_VALUE_VISIBILITY_CONTRACT = "publication-safe-v1"`. Preflight rejects a stale
-  copy everywhere. A *missing* copy is rejected only where the API is actually served: `make api`
-  and `make api-prod` (via `--require-private-api`), `make fullstack` (via
-  `scripts/run_local_services.py`), and every `doctor-*` target. Plain `make doctor` and the
-  `pipeline-worker` targets only warn — the worker runs the model but serves no HTTP — so a public
-  clone without the file still exits 0.
-- Requires pipeline operator authentication for review requests and authenticated reader access for
-  review status.
-
-- Imports `value_visibility_scope` from `api.value_visibility`.
-- Applies that predicate before filtering or aggregation in `/api/meta`, `/api/value-bets`,
-  value-derived analytics, correlation, risk, CSV and bundle exports, and agent-review inputs.
-- Includes `config.api.demo_mode` in the value-bet cache key so demo and production results cannot
-  share an entry.
-- Rejects agent review when the requested run has no reviewable published bets. Demo mode may still
-  review fixture rows explicitly.
-
-Verify with `DEMO_MODE=false`: `uv run pytest tests/test_api_visibility.py -q` must pass. Then run
-the same focused API contract tests listed in the season-readiness plan. Production startup and
-the production doctor commands pass `--require-demo-mode-off` and must fail while fixture visibility
-is enabled. A tracked-only deploy is not complete until the deployment copy of `api/server.py` has
-this wiring.
 
 ### Context factors (`NFL_FEATURE_CONTEXT_FACTORS`) — added 2026-09-02, NOT yet verified on a production checkout
 

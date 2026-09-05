@@ -7,9 +7,10 @@ labels: setup
 
 Thanks for trying the project. Setup problems are almost always ours to fix, so please report them.
 
-**First**: `WARN` rows for `private_api` and `private_modules` in `make doctor` are expected on a
-public clone. Those files are gitignored and never published. Everything except `make api` and
-`make fullstack` works without them. See docs/TROUBLESHOOTING.md.
+**First**: a `WARN` row for `private_modules` in `make doctor` is expected on a
+public clone. The model and pricing modules are gitignored and never published. Everything works
+without them except live projection runs (`make week-predict` and friends). See
+docs/TROUBLESHOOTING.md.
 
 **What I ran**
 

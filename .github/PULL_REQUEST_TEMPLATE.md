@@ -7,7 +7,7 @@
 ## How I checked it
 
 - [ ] `make test` passes locally (private-module tests skip automatically on a public clone; that is fine)
-- [ ] `make doctor` exits 0 (WARN rows for `private_api` / `private_modules` are expected on a public clone)
+- [ ] `make doctor` exits 0 (a WARN row for `private_modules` is expected on a public clone)
 - [ ] New behavior has a test, or I explained below why it does not need one
 
 ## Notes for the reviewer
