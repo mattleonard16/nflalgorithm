@@ -13,6 +13,7 @@ import pytest
 from utils.nfl_backtest import (
     WalkForwardConfig,
     compare_walk_forward,
+    feature_overrides,
     run_walk_forward,
 )
 
@@ -79,9 +80,7 @@ def test_predict_fn_called_once_per_unique_sorted_week() -> None:
 
 
 def test_sigma_coverage_and_z_std_reported() -> None:
-    actuals = _actuals(
-        [("wr_a", 1, 55.0), ("wr_b", 1, 80.0), ("wr_c", 1, 10.0)]
-    )
+    actuals = _actuals([("wr_a", 1, 55.0), ("wr_b", 1, 80.0), ("wr_c", 1, 10.0)])
 
     def predict_fn(season: int, week: int) -> pd.DataFrame:
         # errors: -5 (z=-0.5), 0 (z=0), +30 (z=3) -> coverage 2/3
@@ -191,10 +190,22 @@ def test_market_position_cross_grouping() -> None:
     # split the cross, not just each axis alone.
     actuals = pd.DataFrame(
         [
-            {"season": SEASON, "week": 1, "player_id": "wr_a", "position": "WR",
-             "receiving_yards": 50.0, "rushing_yards": 5.0},
-            {"season": SEASON, "week": 1, "player_id": "rb_a", "position": "RB",
-             "receiving_yards": 20.0, "rushing_yards": 80.0},
+            {
+                "season": SEASON,
+                "week": 1,
+                "player_id": "wr_a",
+                "position": "WR",
+                "receiving_yards": 50.0,
+                "rushing_yards": 5.0,
+            },
+            {
+                "season": SEASON,
+                "week": 1,
+                "player_id": "rb_a",
+                "position": "RB",
+                "receiving_yards": 20.0,
+                "rushing_yards": 80.0,
+            },
         ]
     )
 
@@ -258,3 +269,59 @@ def test_no_weeks_requested_raises() -> None:
 
     with pytest.raises(ValueError, match="At least one week"):
         run_walk_forward(lambda s, w: pd.DataFrame(), actuals, _config(()))
+
+
+def test_report_records_features_in_effect() -> None:
+    actuals = _actuals([("wr_a", 1, 50.0), ("wr_b", 1, 60.0)])
+    predictions = pd.DataFrame(
+        [
+            {"season": SEASON, "week": 1, "player_id": "wr_a", "market": MARKET, "mu": 55.0},
+            {"season": SEASON, "week": 1, "player_id": "wr_b", "market": MARKET, "mu": 58.0},
+        ]
+    )
+    config = WalkForwardConfig(
+        season=SEASON, weeks=(1,), min_week_rows=1, features={"context_factors_enabled": True}
+    )
+
+    result = run_walk_forward(lambda s, w: predictions, actuals, config)
+
+    assert result.report["features"] == {"context_factors_enabled": True}
+
+
+def test_compare_reports_which_features_differed() -> None:
+    baseline = {**_report_for_compare(10.0, 0.60, [1, 2]), "features": {"ctx": False}}
+    candidate = {**_report_for_compare(9.0, 0.68, [1, 2]), "features": {"ctx": True}}
+
+    comparison = compare_walk_forward(baseline, candidate)
+
+    assert comparison["passed"] is True
+    assert comparison["baseline_features"] == {"ctx": False}
+    assert comparison["candidate_features"] == {"ctx": True}
+
+
+def test_feature_overrides_pin_then_restore_flags() -> None:
+    from types import SimpleNamespace
+
+    features = SimpleNamespace(context_factors_enabled=False, kelly_cap_enabled=True, label="x")
+
+    with feature_overrides(features, context_factors_enabled=True) as in_effect:
+        assert features.context_factors_enabled is True
+        assert in_effect == {"context_factors_enabled": True, "kelly_cap_enabled": True}
+
+    assert features.context_factors_enabled is False
+
+
+def test_feature_overrides_restore_on_error_and_reject_unknown_flags() -> None:
+    from types import SimpleNamespace
+
+    features = SimpleNamespace(context_factors_enabled=False)
+
+    with pytest.raises(RuntimeError):
+        with feature_overrides(features, context_factors_enabled=True):
+            raise RuntimeError("model blew up")
+    assert features.context_factors_enabled is False
+
+    with pytest.raises(AttributeError, match="unknown feature flag"):
+        with feature_overrides(features, no_such_flag=True):
+            pass
+    assert not hasattr(features, "no_such_flag")

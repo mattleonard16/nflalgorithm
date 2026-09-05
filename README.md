@@ -34,7 +34,7 @@ cp .env.example .env
 make install
 make frontend-install
 make migrate
-make doctor
+make doctor             # a WARN row for private_modules is expected on a public clone
 
 # Launch the supervised React stack (worker + API + frontend)
 make fullstack          # http://localhost:3000
@@ -383,31 +383,15 @@ make validate SEASON=2025 WEEKS="1 2 3"  # Score persisted pre-kickoff projectio
 
 ---
 
-## AI-DLC Documentation
-
-This repo follows the AI-DLC workflow. Process artifacts live under [`aidlc-docs/`](./aidlc-docs/) and stay in sync with the code.
-
-| Phase | Entry point |
-|---|---|
-| **Inception** | [`aidlc-docs/inception/`](./aidlc-docs/inception/) — reverse engineering, requirements, workflow plan |
-| **Construction** | [`aidlc-docs/construction/build-and-test/build-and-test-summary.md`](./aidlc-docs/construction/build-and-test/build-and-test-summary.md) — Tier 0 build / unit / integration / performance runbooks |
-| **Operations** | [`aidlc-docs/operations/operations-summary.md`](./aidlc-docs/operations/operations-summary.md) — deployment, monitoring, incident response, maintenance, production readiness |
-| **State** | [`aidlc-docs/aidlc-state.md`](./aidlc-docs/aidlc-state.md) — current stage, execution sequence |
-| **Audit log** | [`aidlc-docs/audit.md`](./aidlc-docs/audit.md) — every stage decision with raw user input |
-
-For the 2026-prep punch list (Tier 0 blockers / Tier 1 high-impact / Tier 2 ops hardening / Tier 3 polish) see `CLAUDE.md` and the per-unit summaries under `aidlc-docs/construction/`.
-
----
-
 ## Contributing
 
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'feat: Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first: it explains which
+files are private and never published, what works without them (almost everything), and what
+CI runs on your pull request.
 
-**Standards**: PEP 8 | Type hints | 90%+ coverage | Documented methods
+On a public clone, `make doctor` prints `WARN` for `private_modules`. That is
+expected, not a failure. If you hit a setup problem, open an issue with the "Setup problem"
+template.
 
 ---
 

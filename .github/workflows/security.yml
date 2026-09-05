@@ -1,0 +1,93 @@
+name: Security
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so new advisories against pinned dependencies surface without a PR.
+    - cron: '17 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Known vulnerabilities in pinned Python dependencies. Blocking.
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Audit requirements.txt
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --no-deps --desc off
+
+  # Static analysis of tracked Python for security bugs. Blocking on HIGH
+  # severity only; the medium tier is dominated by B608 (SQL built from
+  # f-strings that are parameterized further down) and B104 (0.0.0.0 bind for
+  # containers), both intentional here.
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Bandit (high severity)
+        run: |
+          pip install bandit
+          bandit -q -r . -x ./tests,./frontend,./node_modules,./.venv -lll
+
+  # Committed secrets and accidentally committed proprietary modules. Blocking.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Private files must not be tracked
+        run: ./scripts/check_private_files_untracked.sh
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Frontend dependency advisories. Report-only until the existing high
+  # advisories in frontend/package-lock.json are resolved; flip
+  # continue-on-error off at that point.
+  npm-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: npm audit (high)
+        working-directory: frontend
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}

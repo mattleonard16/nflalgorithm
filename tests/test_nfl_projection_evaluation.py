@@ -11,6 +11,7 @@ from scripts.evaluate_nfl_projections import (
     check_position_mae,
     compare_reports,
     evaluate_projections,
+    thresholds_from_backtest,
 )
 
 
@@ -99,6 +100,45 @@ def test_evaluation_scores_only_pregame_production_outputs() -> None:
     assert report["metrics"]["mean_bias"] == pytest.approx(-2.5)
     assert report["metrics"]["by_market"]["receiving_yards"]["mae"] == 5.0
     assert report["metrics"]["by_market"]["rushing_yards"]["mae"] == 10.0
+
+
+def test_position_mae_excludes_touchdown_count_errors() -> None:
+    """~0.3-scale TD errors must not deflate the yardage MAE gate."""
+    projections, actuals, games, runs = _inputs(candidate_sha="e" * 40)
+    projections = pd.concat(
+        [
+            projections,
+            pd.DataFrame(
+                [
+                    {
+                        "season": 2025,
+                        "week": 1,
+                        "player_id": "p1",
+                        "team": "BUF",
+                        "market": "anytime_touchdown",
+                        "mu": 0.6,
+                        "model_version": "candidate-v1",
+                        "featureset_hash": "features-v1",
+                        "generated_at": "2025-09-03T12:00:00Z",
+                    }
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+    actuals = actuals.assign(rushing_tds=[1, 0], receiving_tds=[0, 0])
+
+    report = evaluate_projections(projections, actuals, games, runs, candidate_sha="e" * 40)
+
+    assert report["passed"] is True
+    # Yardage errors only: |55-50| and |40-50| averaged by position, with no
+    # position column present both rows land in UNKNOWN.
+    assert report["metrics"]["by_position"]["UNKNOWN"]["mae"] == pytest.approx(7.5)
+    # The TD row is still visible per-market and per-market-position.
+    assert report["metrics"]["by_market"]["anytime_touchdown"]["mae"] == pytest.approx(0.4)
+    assert report["metrics"]["by_market_position"]["anytime_touchdown"]["UNKNOWN"][
+        "mae"
+    ] == pytest.approx(0.4)
 
 
 def test_evaluation_rejects_run_from_another_commit() -> None:
@@ -301,3 +341,67 @@ def test_position_gate_blocks_missing_mae_rather_than_skipping() -> None:
 
     assert gate["passed"] is False
     assert "WR MAE is missing" in gate["blockers"]
+
+
+def _backtest_report(by_position: dict) -> dict:
+    """Minimal report shaped like utils.nfl_backtest.run_walk_forward output."""
+    return {"schema_version": 1, "label": "baseline", "season": 2025, "by_position": by_position}
+
+
+def test_backtest_thresholds_add_tolerance_to_each_position_mae() -> None:
+    report = _backtest_report(
+        {
+            "WR": {"mae": 24.2, "count": 1800, "small_sample": False},
+            "QB": {"mae": 50.8, "count": 500, "small_sample": False},
+        }
+    )
+
+    ceilings = thresholds_from_backtest(report, tolerance_pct=10.0)
+
+    assert ceilings == {"WR": pytest.approx(26.62), "QB": pytest.approx(55.88)}
+
+
+def test_backtest_thresholds_drop_small_sample_positions() -> None:
+    """A ceiling derived from a noisy group falls back to the absolute table."""
+    report = _backtest_report(
+        {
+            "WR": {"mae": 24.2, "count": 1800, "small_sample": False},
+            "FB": {"mae": 3.0, "count": 6, "small_sample": True},
+            "K": {"mae": None, "count": 90, "small_sample": False},
+        }
+    )
+
+    ceilings = thresholds_from_backtest(report, tolerance_pct=0.0)
+
+    assert ceilings == {"WR": pytest.approx(24.2)}
+    gate = check_position_mae(
+        _position_report({"FB": {"mae": 10.0, "projection_count": 40}}), ceilings
+    )
+    assert gate["by_position"]["FB"]["threshold"] == POSITION_MAE_THRESHOLDS.get("FB", 3.0)
+
+
+def test_backtest_thresholds_refuse_empty_or_negative_inputs() -> None:
+    with pytest.raises(ValueError, match="no by_position"):
+        thresholds_from_backtest({"schema_version": 1})
+    with pytest.raises(ValueError, match="usable MAE"):
+        thresholds_from_backtest(_backtest_report({"WR": {"mae": None}}))
+    with pytest.raises(ValueError, match="non-negative"):
+        thresholds_from_backtest(_backtest_report({"WR": {"mae": 1.0}}), tolerance_pct=-1)
+
+
+def test_gate_with_backtest_ceilings_blocks_only_real_regressions() -> None:
+    """The 2025 walk-forward numbers pass their own gate; a 20% slip does not."""
+    ceilings = thresholds_from_backtest(
+        _backtest_report({"WR": {"mae": 24.2, "small_sample": False}}), tolerance_pct=10.0
+    )
+
+    steady = check_position_mae(
+        _position_report({"WR": {"mae": 24.9, "projection_count": 200}}), ceilings
+    )
+    slipped = check_position_mae(
+        _position_report({"WR": {"mae": 29.0, "projection_count": 200}}), ceilings
+    )
+
+    assert steady["passed"] is True
+    assert slipped["passed"] is False
+    assert slipped["blockers"] == ["WR MAE 29.00 exceeds threshold 26.62 over 200 projections"]

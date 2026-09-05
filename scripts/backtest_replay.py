@@ -20,8 +20,8 @@ import pandas as pd
 from config import config
 from utils.db import read_dataframe
 from utils.grading import calculate_profit_units, grade_bet
-from utils.nfl_markets import melt_actuals
-from value_betting_engine import market_implied_probabilities, prob_over
+from utils.nfl_markets import melt_actuals, prob_over
+from value_betting_engine import market_implied_probabilities
 
 MAX_PROJECTION_AGE = pd.Timedelta(days=7)
 MAX_CONTEXT_AGE = pd.Timedelta(days=7)
@@ -209,7 +209,10 @@ def build_replay_dataset(
                 {"side": None, "p_win": np.nan, "edge": np.nan, "recommendation": False}
             )
         p_over = prob_over(
-            float(row["mu"]), max(float(row["sigma"]), 0.01), float(row["entry_line"])
+            float(row["mu"]),
+            max(float(row["sigma"]), 0.01),
+            float(row["entry_line"]),
+            market=row.get("market"),
         )
         implied_over, implied_under = market_implied_probabilities(
             int(row["entry_price"]), row["entry_under_price"]

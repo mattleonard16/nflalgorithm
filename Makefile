@@ -82,8 +82,8 @@ help:
 	@echo "  make install             Install Python dependencies (UV preferred, venv fallback)"
 	@echo "  make frontend-install    Install locked frontend dependencies"
 	@echo "  make migrate             Back up and migrate the local SQLite database"
-	@echo "  make doctor              Validate tools, config, database, migrations, keys, and modules"
-	@echo "  make doctor-production   Require live-odds key and private execution modules"
+	@echo "  make doctor              Validate tools, config, database, migrations, keys, and modules (private files WARN on a public clone)"
+	@echo "  make doctor-production   Require live-odds key, private execution modules, and api/server.py"
 	@echo "  make doctor-season SEASON=2026 WEEK=1 [SEASON_PHASE=post-run]"
 	@echo "  make doctor-preseason SEASON=2026 WEEK=1"
 	@echo ""
@@ -202,13 +202,17 @@ validate:
 	duration=$$((end_time - start_time)); \
 	echo "Evaluation complete in $${duration}s."
 
-# Absolute per-position MAE gate. Exits non-zero when a position regresses past
-# its ceiling, so this is safe to chain into a release check.
+# Per-position MAE gate. Exits non-zero when a position regresses past its
+# ceiling, so this is safe to chain into a release check. With BASELINE set to
+# a walk-forward report (make nfl-backtest ... --output), ceilings are that
+# run's per-position MAE plus TOLERANCE_PCT instead of the absolute table.
+# Usage: make mae-gate SEASON=2026 WEEK=1 [BASELINE=logs/metrics/nfl-backtest-2025.json] [TOLERANCE_PCT=10]
 mae-gate:
 	$(call require_season_week)
 	@echo "Checking per-position MAE for season=$(SEASON) week=$(WEEK) with $(ENV_TYPE)..."
 	$(DB_ENV) $(PYTHON) -m scripts.evaluate_nfl_projections mae-gate \
 		--season $(SEASON) --week $(WEEK) \
+		$(if $(strip $(BASELINE)),--baseline $(BASELINE) --tolerance-pct $(or $(strip $(TOLERANCE_PCT)),10),) \
 		--output logs/metrics/nfl-mae-gate-$(SEASON)-w$(WEEK).json
 
 # Hyperparameter optimization with environment detection
@@ -241,13 +245,16 @@ api-preflight:
 
 migrate: api-preflight
 
+# Shared by the durable pipeline workers and the API. api/server.py is tracked,
+# so every checkout has it and no caller needs a stricter variant.
 runtime-preflight:
 	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema
 
 runtime-production-preflight:
 	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-demo-mode-off
 
-# Validate a migrated local environment. Warnings identify optional live/private features.
+# Validate a migrated local environment. Warnings identify optional live/private features;
+# on a public clone `private_modules` always WARNs and that is expected.
 doctor:
 	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --check-frontend
 
@@ -399,10 +406,13 @@ backfill-accuracy:
 # Walk-forward backtest: retrains the weekly model per historical week.
 # Artifacts go to a temp dir and weekly_projections is never written, so
 # production models and stored pregame evidence stay untouched.
-# Usage: make nfl-backtest SEASON=2025 [WEEKS="5 6 7"] [LABEL=baseline]
+# CONTEXT_FACTORS=on|off pins the context-factors flag for the run (default:
+# inherit the environment, which is off); OUTPUT saves the report JSON, which
+# is what `compare` and `make mae-gate BASELINE=...` consume.
+# Usage: make nfl-backtest SEASON=2025 [WEEKS="5 6 7"] [LABEL=baseline] [CONTEXT_FACTORS=on] [OUTPUT=logs/metrics/nfl-backtest-2025-ctx.json]
 nfl-backtest:
 	@test -n "$(SEASON)" || { echo "SEASON is required, e.g. make nfl-backtest SEASON=2025"; exit 1; }
-	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest run --season $(SEASON) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),)
+	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest run --season $(SEASON) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),)
 
 run-agents:
 	$(call require_season_week)

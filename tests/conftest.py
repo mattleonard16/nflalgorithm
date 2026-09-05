@@ -12,50 +12,37 @@ _project_root = str(Path(__file__).parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-_private_algorithm_files = (
-    Path(_project_root) / "data_pipeline.py",
-    Path(_project_root) / "prop_integration.py",
-    Path(_project_root) / "value_betting_engine.py",
-    Path(_project_root) / "models" / "position_specific" / "weekly.py",
+# Tests are fenced per module, not as one group: publishing a single private
+# module must unlock exactly its own tests. A file needed by two modules is
+# skipped when either is absent.
+_private_module_tests = {
+    Path(_project_root) / "data_pipeline.py": (
+        "test_augmentation_wr.py",
+        "test_basic.py",
+        "test_market_mu_wr.py",
+        "test_qb_decomposition.py",
+        "test_qb_gating.py",
+        "test_synthetic_odds_wr.py",
+        "test_weekly_pipeline.py",
+    ),
+    Path(_project_root) / "value_betting_engine.py": (
+        "test_backtest_replay.py",
+        "test_basic.py",
+        "test_constraint_handling.py",
+        "test_dry_run_validation.py",
+        "test_kelly_cap.py",
+        "test_no_vig_probability.py",
+        "test_value_engine_side.py",
+        "test_weekly_pipeline.py",
+    ),
+    Path(_project_root) / "models" / "position_specific" / "weekly.py": (
+        "test_nfl_weekly_model.py",
+        "test_qb_gating.py",
+    ),
+}
+collect_ignore = sorted(
+    {test for path, tests in _private_module_tests.items() if not path.is_file() for test in tests}
 )
-_private_algorithm_tests = [
-    "test_augmentation_wr.py",
-    "test_backtest_replay.py",
-    "test_basic.py",
-    "test_constraint_handling.py",
-    "test_dry_run_validation.py",
-    "test_kelly_cap.py",
-    "test_market_mu_wr.py",
-    "test_merge_suffix_handling.py",
-    "test_nfl_weekly_model.py",
-    "test_no_vig_probability.py",
-    "test_prop_integration_matching.py",
-    "test_prop_integration_season_week.py",
-    "test_prop_integration_wr.py",
-    "test_qb_decomposition.py",
-    "test_synthetic_odds_wr.py",
-    "test_value_engine_side.py",
-    "test_weekly_pipeline.py",
-]
-collect_ignore = []
-if not all(path.is_file() for path in _private_algorithm_files):
-    collect_ignore.extend(_private_algorithm_tests)
-
-_private_api_server = Path(_project_root) / "api" / "server.py"
-_private_api_tests = [
-    "test_api_contract.py",
-    "test_api_visibility.py",
-    "test_export_api.py",
-    "test_nba_api.py",
-    "test_nba_api_contract.py",
-    "test_pipeline_run_api.py",
-    "test_projections_api.py",
-    "test_readiness.py",
-    "test_record_bet_api.py",
-    "test_risk_api.py",
-]
-if not _private_api_server.is_file():
-    collect_ignore.extend(_private_api_tests)
 
 # The suite shares one process and one TestClient address, so the API rate
 # limiter would 429 unrelated tests once the global budget is spent. Disable

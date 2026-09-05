@@ -132,3 +132,50 @@ def test_regular_season_training_weeks_are_last_two_seasons_without_playoffs() -
         (2025, 1),
         (2025, 18),
     ]
+
+
+def test_default_wr_role_priors_values() -> None:
+    from config import config
+    from utils.season_priors import DEFAULT_WR_ROLE_PRIORS, calibrate_wr_role_priors
+
+    assert DEFAULT_WR_ROLE_PRIORS == {
+        "alpha": 58.0,
+        "secondary": 43.0,
+        "slot": 30.0,
+        "fringe": 10.0,
+    }
+    assert config.integration.role_priors == {
+        "alpha": 58.0,
+        "secondary": 43.0,
+        "slot": 30.0,
+        "fringe": 10.0,
+    }
+
+    # Empty frame falls back to defaults
+    empty_priors = calibrate_wr_role_priors(pd.DataFrame())
+    assert empty_priors == DEFAULT_WR_ROLE_PRIORS
+
+
+def test_calibrate_wr_role_priors_computes_tier_means() -> None:
+    from utils.season_priors import calibrate_wr_role_priors
+
+    # Create synthetic history with 10 players in each tier
+    rows = []
+    for _ in range(10):
+        # alpha tier: >= 80% snap
+        rows.append({"position": "WR", "snap_percentage": 85.0, "receiving_yards": 60.0, "week": 5})
+        # secondary tier: 60-80% snap
+        rows.append({"position": "WR", "snap_percentage": 70.0, "receiving_yards": 45.0, "week": 5})
+        # slot tier: 40-60% snap
+        rows.append({"position": "WR", "snap_percentage": 50.0, "receiving_yards": 32.0, "week": 5})
+        # fringe tier: < 40% snap
+        rows.append({"position": "WR", "snap_percentage": 25.0, "receiving_yards": 12.0, "week": 5})
+
+    df = pd.DataFrame(rows)
+    priors = calibrate_wr_role_priors(df)
+
+    assert priors["alpha"] == 60.0
+    assert priors["secondary"] == 45.0
+    assert priors["slot"] == 32.0
+    assert priors["fringe"] == 12.0
+

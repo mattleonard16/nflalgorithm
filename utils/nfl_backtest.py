@@ -13,8 +13,9 @@ no week survives raises instead of returning an empty "pass".
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 import numpy as np
 import pandas as pd
@@ -36,6 +37,9 @@ class WalkForwardConfig:
     weeks: tuple[int, ...]
     label: str = "walk_forward"
     min_week_rows: int = 20
+    # Feature flags in effect for the run (name -> bool), recorded on the
+    # report so a compare can say what actually differed between two runs.
+    features: Mapping[str, bool] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -194,9 +198,7 @@ def run_walk_forward(
         weeks_evaluated.append(week)
 
     if not evaluated_frames:
-        raise ValueError(
-            f"No week produced enough evaluable rows; problems: {problems}"
-        )
+        raise ValueError(f"No week produced enough evaluable rows; problems: {problems}")
 
     evaluated = pd.concat(evaluated_frames, ignore_index=True)
     report = {
@@ -205,16 +207,42 @@ def run_walk_forward(
         "season": config.season,
         "weeks_requested": sorted(set(config.weeks)),
         "weeks_evaluated": weeks_evaluated,
+        "features": dict(config.features),
         "problems": problems,
         "overall": _metric_group(evaluated),
         "by_market": _grouped_metrics(evaluated, "market"),
         "by_position": _grouped_metrics(evaluated, "position"),
         "by_market_position": _market_position_metrics(evaluated),
-        "by_week": {
-            str(week): _metric_group(group) for week, group in evaluated.groupby("week")
-        },
+        "by_week": {str(week): _metric_group(group) for week, group in evaluated.groupby("week")},
     }
     return WalkForwardResult(report=report, evaluated=evaluated)
+
+
+@contextmanager
+def feature_overrides(features: Any, **overrides: bool) -> Iterator[dict[str, bool]]:
+    """Pin feature flags on a ``config.features`` namespace for one run.
+
+    Yields the full flag state in effect (every boolean attribute, overrides
+    applied) so the caller can stamp it on the report, and restores the
+    original values on exit — including on error — so a backtest never leaks
+    a flag into whatever runs next in the same process.
+
+    An override naming an attribute the namespace does not have raises rather
+    than silently creating one the model would never read.
+    """
+    missing = [name for name in overrides if not hasattr(features, name)]
+    if missing:
+        raise AttributeError(f"unknown feature flag(s): {', '.join(sorted(missing))}")
+    saved = {name: getattr(features, name) for name in overrides}
+    try:
+        for name, value in overrides.items():
+            setattr(features, name, bool(value))
+        yield {
+            name: bool(value) for name, value in vars(features).items() if isinstance(value, bool)
+        }
+    finally:
+        for name, value in saved.items():
+            setattr(features, name, value)
 
 
 def _improvement_pct(baseline: float, candidate: float) -> float | None:
@@ -267,6 +295,8 @@ def compare_walk_forward(
         "schema_version": 1,
         "baseline_label": baseline.get("label"),
         "candidate_label": candidate.get("label"),
+        "baseline_features": dict(baseline.get("features") or {}),
+        "candidate_features": dict(candidate.get("features") or {}),
         "season": candidate.get("season"),
         "weeks_evaluated": candidate.get("weeks_evaluated"),
         "passed": not blockers,

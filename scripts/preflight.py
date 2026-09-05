@@ -25,11 +25,10 @@ REQUIRED_API_TABLES = (
     "pipeline_runs",
     "users",
 )
-PRIVATE_API_FILE = "api/server.py"
-PRIVATE_API_VISIBILITY_CONTRACT = "publication-safe-v1"
+API_SERVER_FILE = "api/server.py"
+API_VISIBILITY_CONTRACT = "publication-safe-v1"
 PRIVATE_NFL_FILES = (
     "data_pipeline.py",
-    "prop_integration.py",
     "value_betting_engine.py",
     "models/position_specific/weekly.py",
 )
@@ -297,24 +296,31 @@ def check_allowed_origins(*, production: bool) -> Diagnostic:
     )
 
 
-def check_private_api(root: Path = PROJECT_ROOT) -> Diagnostic:
-    api_file = root / PRIVATE_API_FILE
+def check_api_server(root: Path = PROJECT_ROOT) -> Diagnostic:
+    """Validate that api/server.py is present and applies the current visibility contract.
+
+    The file is tracked, so a missing copy means an incomplete checkout rather than a
+    public clone. A copy that parses but declares a stale contract is worse than a
+    missing one: it serves legacy unjoinable and SimBook rows as if they were real.
+    """
+    api_file = root / API_SERVER_FILE
     if not api_file.is_file():
         return _result(
-            "private_api",
+            "api_server",
             "fail",
-            f"Private API module is unavailable: {PRIVATE_API_FILE}",
-            "Install the deployment-supplied API module before starting API services.",
+            f"{API_SERVER_FILE} is missing.",
+            "The file is tracked in git. Check `git status` for a deletion, "
+            "or re-clone the repository.",
         )
 
     try:
         module = ast.parse(api_file.read_text(encoding="utf-8"), filename=str(api_file))
     except (OSError, SyntaxError) as exc:
         return _result(
-            "private_api",
+            "api_server",
             "fail",
-            f"Private API module cannot be validated: {type(exc).__name__}: {exc}",
-            "Replace the deployment-supplied API module with a valid release copy.",
+            f"{API_SERVER_FILE} cannot be validated: {type(exc).__name__}: {exc}",
+            "Restore the file from git.",
         )
 
     contract = None
@@ -326,17 +332,17 @@ def check_private_api(root: Path = PROJECT_ROOT) -> Diagnostic:
             if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
                 contract = node.value.value
             break
-    if contract != PRIVATE_API_VISIBILITY_CONTRACT:
+    if contract != API_VISIBILITY_CONTRACT:
         return _result(
-            "private_api",
+            "api_server",
             "fail",
-            "Deployment-supplied API module does not implement the current public visibility contract.",
-            f"Install api/server.py with PUBLIC_VALUE_VISIBILITY_CONTRACT={PRIVATE_API_VISIBILITY_CONTRACT!r}.",
+            f"{API_SERVER_FILE} does not implement the current public visibility contract.",
+            f"Set PUBLIC_VALUE_VISIBILITY_CONTRACT={API_VISIBILITY_CONTRACT!r} in {API_SERVER_FILE}.",
         )
     return _result(
-        "private_api",
+        "api_server",
         "pass",
-        f"Deployment-supplied API module implements {PRIVATE_API_VISIBILITY_CONTRACT}.",
+        f"{API_SERVER_FILE} implements {API_VISIBILITY_CONTRACT}.",
     )
 
 
@@ -728,7 +734,7 @@ def collect_diagnostics(
             and not any(item.failed for item in database_diagnostics)
         ):
             diagnostics.extend(check_nfl_week_readiness(season, week, phase=season_phase))
-    diagnostics.append(check_private_api())
+    diagnostics.append(check_api_server())
     diagnostics.append(check_private_modules(required=require_private_modules))
     if check_frontend_dependencies:
         diagnostics.extend(check_frontend())

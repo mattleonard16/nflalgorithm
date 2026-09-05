@@ -41,6 +41,26 @@ CONTEXT_COLUMNS = (
     "is_indoor",
 )
 
+GAME_CONTEXT_COLUMNS = (
+    "spread_margin",
+    "implied_team_total",
+    "game_total",
+    "wind_speed",
+    "temperature",
+    "is_indoor",
+    "div_game",
+)
+
+GAME_CONTEXT_DEFAULTS: dict[str, float | int] = {
+    "spread_margin": 0.0,
+    "implied_team_total": 22.5,
+    "game_total": 45.0,
+    "wind_speed": 0.0,
+    "temperature": 70.0,
+    "is_indoor": 0,
+    "div_game": 0,
+}
+
 
 def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
     """Coerce a schedule column to float, or all-null when it is absent."""
@@ -141,3 +161,160 @@ def implied_team_totals(spread_line: Any, total_line: Any) -> Optional[tuple[flo
     if spread is None or total is None:
         return None
     return (total / 2.0 + spread / 2.0, total / 2.0 - spread / 2.0)
+
+
+def _safe_float(val: Any, default: float) -> float:
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return default
+    try:
+        f = float(val)
+        return default if pd.isna(f) else f
+    except (TypeError, ValueError):
+        return default
+
+
+def attach_game_context_to_player_frame(
+    player_df: pd.DataFrame, games_df: Optional[pd.DataFrame] = None
+) -> pd.DataFrame:
+    """Attach pregame contest context to player rows matching (season, week, team).
+
+    Extracts team-specific perspective:
+    - ``spread_margin``: points favored by (>0 favored, <0 underdog)
+    - ``implied_team_total``: Vegas implied points scored
+    - ``game_total``: Vegas over/under line
+    - ``wind_speed``: 0.0 if indoor, else wind (or outdoor default)
+    - ``temperature``: 70.0 if indoor, else temp (or outdoor default)
+    - ``is_indoor``: 1 if dome/closed, else 0
+    - ``div_game``: 1 if divisional, else 0
+    """
+    df = player_df.copy()
+    if df.empty:
+        for col, default in GAME_CONTEXT_DEFAULTS.items():
+            if col not in df.columns:
+                df[col] = pd.Series(dtype=type(default))
+        return df
+
+    if games_df is None or games_df.empty:
+        for col, default in GAME_CONTEXT_DEFAULTS.items():
+            if col not in df.columns:
+                df[col] = default
+            else:
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(default)
+        return df
+
+    records: list[dict[str, Any]] = []
+    for row in games_df.itertuples(index=False):
+        row_dict = row._asdict() if hasattr(row, "_asdict") else dict(zip(games_df.columns, row))
+        season = row_dict.get("season")
+        week = row_dict.get("week")
+        home = row_dict.get("home_team")
+        away = row_dict.get("away_team")
+        if season is None or week is None or not home or not away:
+            continue
+
+        try:
+            s_val = int(season)
+            w_val = int(week)
+        except (TypeError, ValueError):
+            continue
+
+        spread = home_favored_by(row_dict.get("spread_line"))
+        total = home_favored_by(row_dict.get("total_line"))
+        roof = row_dict.get("roof")
+        indoor = is_indoor_roof(roof)
+        indoor_flag = 1 if indoor is True else 0
+
+        temp = row_dict.get("temp")
+        wind = row_dict.get("wind")
+        div = row_dict.get("div_game")
+        div_flag = 1 if (div is not None and not pd.isna(div) and int(bool(div)) == 1) else 0
+
+        if indoor_flag == 1:
+            eff_temp = 70.0
+            eff_wind = 0.0
+        else:
+            eff_temp = _safe_float(temp, 65.0)
+            eff_wind = _safe_float(wind, 5.0)
+
+        game_tot = total if total is not None else 45.0
+
+        # Home team perspective
+        home_spread = spread if spread is not None else 0.0
+        home_implied = game_tot / 2.0 + home_spread / 2.0
+        records.append({
+            "season": s_val,
+            "week": w_val,
+            "team": str(home).strip().upper(),
+            "spread_margin": float(home_spread),
+            "implied_team_total": float(home_implied),
+            "game_total": float(game_tot),
+            "wind_speed": float(eff_wind),
+            "temperature": float(eff_temp),
+            "is_indoor": int(indoor_flag),
+            "div_game": int(div_flag),
+        })
+
+        # Away team perspective
+        away_spread = -spread if spread is not None else 0.0
+        away_implied = game_tot / 2.0 + away_spread / 2.0
+        records.append({
+            "season": s_val,
+            "week": w_val,
+            "team": str(away).strip().upper(),
+            "spread_margin": float(away_spread),
+            "implied_team_total": float(away_implied),
+            "game_total": float(game_tot),
+            "wind_speed": float(eff_wind),
+            "temperature": float(eff_temp),
+            "is_indoor": int(indoor_flag),
+            "div_game": int(div_flag),
+        })
+
+    if not records:
+        for col, default in GAME_CONTEXT_DEFAULTS.items():
+            if col not in df.columns:
+                df[col] = default
+            else:
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(default)
+        return df
+
+    context_df = pd.DataFrame(records).drop_duplicates(subset=["season", "week", "team"], keep="last")
+
+    if "team" in df.columns and "season" in df.columns and "week" in df.columns:
+        # The merge joins on the _clean_* helpers (not on "team" itself), so
+        # the player's own "team" column survives untouched and the schedule's
+        # copy lands as "team_context_dup" for disposal below. Do NOT restore
+        # via `df["team"] = <saved series>`: after the merge the frame carries
+        # a fresh RangeIndex, and assigning a series saved under the caller's
+        # original (e.g. non-default) index realigns by label — wiping every
+        # team to NaN and silently breaking the odds join downstream.
+        df["_clean_team"] = df["team"].astype(str).str.strip().str.upper()
+        df["_clean_season"] = pd.to_numeric(df["season"], errors="coerce").fillna(0).astype(int)
+        df["_clean_week"] = pd.to_numeric(df["week"], errors="coerce").fillna(0).astype(int)
+
+        cols_to_drop = [c for c in GAME_CONTEXT_COLUMNS if c in df.columns]
+        if cols_to_drop:
+            df = df.drop(columns=cols_to_drop)
+
+        df = df.merge(
+            context_df,
+            left_on=["_clean_season", "_clean_week", "_clean_team"],
+            right_on=["season", "week", "team"],
+            how="left",
+            suffixes=("", "_context_dup"),
+        )
+        df = df.drop(columns=["_clean_team", "_clean_season", "_clean_week"], errors="ignore")
+        if "team_context_dup" in df.columns:
+            df = df.drop(columns=["team_context_dup"], errors="ignore")
+        if "season_context_dup" in df.columns:
+            df = df.drop(columns=["season_context_dup"], errors="ignore")
+        if "week_context_dup" in df.columns:
+            df = df.drop(columns=["week_context_dup"], errors="ignore")
+
+    for col, default in GAME_CONTEXT_DEFAULTS.items():
+        if col not in df.columns:
+            df[col] = default
+        else:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(default)
+
+    return df

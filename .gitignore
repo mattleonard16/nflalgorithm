@@ -104,27 +104,15 @@ models/*.pkl
 *.joblib
 *.pkl
 
-# Configuration with thresholds
+# Configuration with thresholds. Optional: config/ holds tracked defaults, and
+# config.py only overrides them, so a clone runs without it.
 config.py
-
-# Prop integration matching logic
-prop_integration.py
-
-# Scripts with algorithm details
-scripts/materialize_value_view.py
-scripts/record_outcomes.py
-
-# API with edge calculation logic
-api/server.py
 
 # Agent artifacts
 .agent/
 .gemini/
 .claude/
 
-# AI-DLC rule details (vendor rules, regeneratable from release zip)
-.aidlc-rule-details/
-aidlc-docs/
 
 # Archive and exports
 archive/

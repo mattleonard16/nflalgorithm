@@ -24,6 +24,8 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from utils.nfl_markets import prob_over
+
 # Key identifying one book's quote on one player prop.
 SNAPSHOT_KEY = ["event_id", "player_id", "market", "sportsbook"]
 
@@ -153,24 +155,29 @@ def _fair_prob(
     *,
     mu: float | None,
     sigma: float | None,
+    market: str | None = None,
 ) -> float:
     """Fair (no-vig) probability that ``side`` wins at ``line``.
 
     Uses the two-sided book quote when both prices exist, which removes the
     bookmaker margin. When only one price is quoted, vig cannot be isolated
     from a single number, so fall back to the model's own distribution — that
-    keeps both sides of the CLV comparison on the same scale.
+    keeps both sides of the CLV comparison on the same scale. ``market`` is
+    forwarded so anytime-touchdown rows price via Poisson survival instead of
+    the Gaussian CDF.
 
     Callers must guarantee one of the two paths is available; the raise is a
     programming-error guard, not an expected branch.
 
-    ``value_betting_engine`` is imported here rather than at module scope: it is
-    gitignored, so a top-level import makes this module — and every test that
-    touches it — fail to import in CI, which is the opposite of why the math
-    lives in a tracked file. Tests that exercise the no-vig path must inject
-    prices and are skipped when the private module is absent.
+    ``implied_probability_no_vig`` is imported here rather than at module scope:
+    it still lives in gitignored ``value_betting_engine``, so a top-level import
+    makes this module — and every test that touches it — fail to import in CI,
+    which is the opposite of why the math lives in a tracked file. Tests that
+    exercise the no-vig path must inject prices and are skipped when the private
+    module is absent. The single-price fallback has no such constraint: it takes
+    ``prob_over`` from tracked ``utils.nfl_markets``, so CI covers it.
     """
-    from value_betting_engine import implied_probability_no_vig, prob_over
+    from value_betting_engine import implied_probability_no_vig
 
     over_odds = _as_odds(price)
     under_odds = _as_odds(under_price)
@@ -178,7 +185,7 @@ def _fair_prob(
     if over_odds is not None and under_odds is not None:
         p_over, p_under = implied_probability_no_vig(over_odds, under_odds)
     elif mu is not None and sigma is not None and sigma > 0:
-        p_over = prob_over(mu, sigma, float(line))
+        p_over = prob_over(mu, sigma, float(line), market=market)
         p_under = 1.0 - p_over
     else:
         raise ValueError("fair probability needs a two-sided quote or a positive sigma")
@@ -245,9 +252,26 @@ def compute_clv(entry: Mapping[str, Any], close: Mapping[str, Any] | None) -> di
         and _as_odds(close.get("close_under_price")) is not None
     )
 
+    # The market rides along so model-fallback probabilities price count
+    # props (anytime TD) with Poisson survival rather than a Gaussian CDF.
+    # Normalized to str-or-None: a NaN cell must not reach prob_over, whose
+    # `"touchdown" in market` check assumes an iterable.
+    candidate = entry.get("market") or close.get("market")
+    market = (
+        None
+        if candidate is None or (not isinstance(candidate, str) and pd.isna(candidate))
+        else str(candidate)
+    )
+
     if (two_sided_entry or has_model) and (two_sided_close or has_model):
         entry_prob = _fair_prob(
-            entry_line, entry.get("price"), entry.get("under_price"), side, mu=mu, sigma=sigma
+            entry_line,
+            entry.get("price"),
+            entry.get("under_price"),
+            side,
+            mu=mu,
+            sigma=sigma,
+            market=market,
         )
         close_prob = _fair_prob(
             close_line,
@@ -256,6 +280,7 @@ def compute_clv(entry: Mapping[str, Any], close: Mapping[str, Any] | None) -> di
             side,
             mu=mu,
             sigma=sigma,
+            market=market,
         )
         # We beat the close when the fair probability of our side rose after we
         # took it: the number we hold is now better than the market's.

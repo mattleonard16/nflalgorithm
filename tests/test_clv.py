@@ -297,6 +297,68 @@ def test_compute_clv_rejects_unknown_side():
 
 
 @needs_engine
+def test_fair_prob_prices_anytime_touchdown_with_poisson_survival():
+    """Model-fallback CLV on a TD row must use Poisson, not the Gaussian CDF."""
+    import math
+
+    from utils.clv import _fair_prob
+
+    mu, sigma, line = 0.65, 0.45, 0.5
+    assert _fair_prob(
+        line, -110, None, "over", mu=mu, sigma=sigma, market="anytime_touchdown"
+    ) == pytest.approx(1.0 - math.exp(-mu))
+
+
+@needs_engine
+def test_fair_prob_keeps_gaussian_pricing_for_yardage_markets():
+    """The market parameter must not disturb continuous-prop pricing."""
+    from scipy.stats import norm
+
+    from utils.clv import _fair_prob
+
+    mu, sigma, line = 55.0, 20.0, 50.5
+    assert _fair_prob(
+        line, -110, None, "over", mu=mu, sigma=sigma, market="receiving_yards"
+    ) == pytest.approx(float(1.0 - norm.cdf(line, loc=mu, scale=sigma)))
+
+
+@needs_engine
+def test_compute_clv_carries_market_into_model_fallback():
+    """One-sided TD quotes fall back to the model distribution — via Poisson."""
+    import math
+
+    entry = {
+        "line": 0.5,
+        "side": "over",
+        "price": -110,
+        "under_price": None,
+        "mu": 0.65,
+        "sigma": 0.45,
+        "market": "anytime_touchdown",
+    }
+    close = {
+        "close_line": 0.5,
+        "close_price": -110,
+        "close_under_price": None,
+        "closed_at": "2025-11-27T18:00:00+00:00",
+        "snapshot_count": 3,
+        "market": "anytime_touchdown",
+    }
+
+    result = compute_clv(entry, close)
+
+    assert result["status"] == STATUS_OK
+    # Same line at entry and close with the same model distribution: no movement.
+    assert result["clv_bp"] == pytest.approx(0.0)
+    # And the probability actually used is the Poisson figure, not Gaussian.
+    from utils.clv import _fair_prob
+
+    assert _fair_prob(
+        0.5, -110, None, "over", mu=0.65, sigma=0.45, market="anytime_touchdown"
+    ) == pytest.approx(1.0 - math.exp(-0.65))
+
+
+@needs_engine
 def test_resolve_then_compute_end_to_end():
     """The two functions compose on a realistic multi-snapshot frame."""
     odds = pd.DataFrame(

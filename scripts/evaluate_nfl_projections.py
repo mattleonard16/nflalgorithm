@@ -14,7 +14,12 @@ from typing import Any, Iterable, Mapping
 import pandas as pd
 
 from utils.db import read_dataframe
-from utils.nfl_markets import MARKET_TO_STAT, error_summary, melt_actuals, player_positions
+from utils.nfl_markets import (
+    DATABASE_STAT_COLUMNS,
+    error_summary,
+    melt_actuals,
+    player_positions,
+)
 
 MAX_PROJECTION_AGE = pd.Timedelta(days=7)
 PROJECTION_KEYS = ("season", "week", "player_id", "market")
@@ -39,6 +44,12 @@ POSITION_MAE_THRESHOLDS = {
 # Below this many eligible projections a position MAE is noise. Such positions
 # are reported as skipped, never counted as passing.
 MIN_POSITION_SAMPLE = 30
+
+# Continuous markets whose errors share the position MAE ceilings. Count props
+# (anytime_touchdown, receptions) err on a ~0.3 scale and would deflate yardage
+# MAEs if mixed in, so the gate aggregates positions over these markets only.
+# Non-yardage visibility is preserved separately in `by_market_position`.
+YARDAGE_MARKETS = frozenset({"rushing_yards", "receiving_yards", "passing_yards"})
 
 UNKNOWN_POSITION = "UNKNOWN"
 
@@ -224,6 +235,7 @@ def evaluate_projections(
         by_market: dict[str, Any] = {}
         by_model_version: dict[str, Any] = {}
         by_position: dict[str, Any] = {}
+        by_market_position: dict[str, Any] = {}
     else:
         overall = _metric_group(eligible)
         by_market = {
@@ -239,9 +251,22 @@ def evaluate_projections(
             if "position" in eligible.columns
             else pd.Series(pd.NA, index=eligible.index)
         )
+        eligible = eligible.copy()
+        eligible["position_label"] = positions.fillna(UNKNOWN_POSITION).astype(str)
+        # The gate ceilings are yardage ceilings: aggregate positions over
+        # yardage markets only so ~0.3-scale TD/count errors cannot deflate
+        # them. Full position detail per market stays in by_market_position.
+        yardage_rows = eligible[eligible["market"].isin(YARDAGE_MARKETS)]
         by_position = {
             str(name): _metric_group(group)
-            for name, group in eligible.groupby(positions.fillna(UNKNOWN_POSITION), dropna=False)
+            for name, group in yardage_rows.groupby("position_label", dropna=False)
+        }
+        by_market_position = {
+            str(market): {
+                str(position): _metric_group(group)
+                for position, group in market_group.groupby("position_label", dropna=False)
+            }
+            for market, market_group in eligible.groupby("market", dropna=False)
         }
 
     return {
@@ -259,8 +284,47 @@ def evaluate_projections(
             "by_market": by_market,
             "by_model_version": by_model_version,
             "by_position": by_position,
+            "by_market_position": by_market_position,
         },
     }
+
+
+def thresholds_from_backtest(
+    backtest_report: Mapping[str, Any],
+    *,
+    tolerance_pct: float = 10.0,
+) -> dict[str, float]:
+    """Derive per-position ceilings from a walk-forward backtest report.
+
+    The absolute ceilings in POSITION_MAE_THRESHOLDS predate any real
+    measurement; the 2025 walk-forward baseline sits 2-3x above every one of
+    them, so on real data the gate fires on every position and teaches
+    operators to ignore it. This turns the gate into a regression check
+    instead: each position's ceiling is its backtest MAE plus `tolerance_pct`.
+
+    Positions the backtest flagged as `small_sample` are left out — a ceiling
+    derived from noise is noise — so they fall back to the absolute table (or
+    the config default) exactly as an unlisted position would.
+
+    Raises ValueError when the report carries no usable per-position MAE, so
+    an empty or mis-shaped baseline can never quietly become "no ceilings".
+    """
+    if tolerance_pct < 0:
+        raise ValueError("tolerance_pct must be non-negative")
+    by_position = backtest_report.get("by_position")
+    if not isinstance(by_position, Mapping) or not by_position:
+        raise ValueError("backtest report has no by_position metrics")
+
+    ceilings: dict[str, float] = {}
+    for position, group in by_position.items():
+        if not isinstance(group, Mapping) or group.get("mae") is None:
+            continue
+        if group.get("small_sample"):
+            continue
+        ceilings[str(position)] = float(group["mae"]) * (1.0 + tolerance_pct / 100.0)
+    if not ceilings:
+        raise ValueError("backtest report has no position with a usable MAE")
+    return ceilings
 
 
 def check_position_mae(
@@ -274,6 +338,10 @@ def check_position_mae(
     The `compare` path only asks whether a candidate beats a baseline, so a
     model can regress for years while still "improving". This is the absolute
     floor: each position must project within its own ceiling.
+
+    `by_position` aggregates yardage markets only (see YARDAGE_MARKETS), so
+    the ceilings judge yard-scale errors; count-prop detail lives in the
+    report's `by_market_position` and never reaches this gate.
 
     Positions with fewer than `min_sample` eligible projections are reported in
     `skipped` — too little data to judge, and never silently counted as a pass.
@@ -477,7 +545,7 @@ def _load_inputs(season: int, weeks: Iterable[int]) -> tuple[pd.DataFrame, ...]:
         f"featureset_hash, generated_at FROM weekly_projections WHERE {where}",
         params=params,
     )
-    actual_columns = ", ".join(sorted(set(MARKET_TO_STAT.values())))
+    actual_columns = ", ".join(DATABASE_STAT_COLUMNS)
     actuals = read_dataframe(
         f"SELECT season, week, player_id, position, {actual_columns} "
         f"FROM player_stats_enhanced WHERE {where}",
@@ -517,6 +585,22 @@ def main() -> None:
     mae_gate.add_argument("--season", type=int, required=True)
     mae_gate.add_argument("--week", type=int, required=True)
     mae_gate.add_argument("--output", type=Path, default=None)
+    mae_gate.add_argument(
+        "--baseline",
+        type=Path,
+        default=None,
+        help=(
+            "walk-forward backtest report (scripts.run_nfl_backtest run --output); "
+            "per-position ceilings become its MAE plus --tolerance-pct instead of "
+            "the absolute POSITION_MAE_THRESHOLDS table"
+        ),
+    )
+    mae_gate.add_argument(
+        "--tolerance-pct",
+        type=float,
+        default=10.0,
+        help="headroom above the baseline MAE before a position blocks (with --baseline)",
+    )
     args = parser.parse_args()
 
     if args.command == "evaluate":
@@ -529,7 +613,20 @@ def main() -> None:
             *_load_inputs(args.season, [args.week]),
             candidate_sha=_git_sha(),
         )
-        report = check_position_mae(evaluation)
+        thresholds = None
+        threshold_source: dict[str, Any] = {"kind": "absolute"}
+        if args.baseline is not None:
+            baseline_report = json.loads(args.baseline.read_text(encoding="utf-8"))
+            thresholds = thresholds_from_backtest(baseline_report, tolerance_pct=args.tolerance_pct)
+            threshold_source = {
+                "kind": "backtest",
+                "path": str(args.baseline),
+                "label": baseline_report.get("label"),
+                "season": baseline_report.get("season"),
+                "tolerance_pct": args.tolerance_pct,
+            }
+        report = check_position_mae(evaluation, thresholds)
+        report["threshold_source"] = threshold_source
         # The evaluation's own blockers (provenance, freshness, coverage) gate
         # the numbers the MAE check reads, so they must fail the gate too.
         if evaluation["passed"] is not True:

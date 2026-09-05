@@ -37,7 +37,7 @@ python -m scripts.preflight --check-schema --require-live-odds --require-private
 
 ## CORS
 
-The deployment-supplied `api/server.py` reads `ALLOWED_ORIGINS` (comma-separated); tracked startup goes through `api/application.py` to attach operational probes. Unset CORS origins fall back to `localhost:3000/3001`. Set the frontend Render URL before the frontend can reach the API.
+`api/server.py` reads `ALLOWED_ORIGINS` (comma-separated); tracked startup goes through `api/application.py` to attach operational probes. Unset CORS origins fall back to `localhost:3000/3001`. Set the frontend Render URL before the frontend can reach the API.
 
 ## Known gaps before going live
 
