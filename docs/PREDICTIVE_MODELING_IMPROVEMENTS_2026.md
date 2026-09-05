@@ -119,14 +119,17 @@ High-volume betting markets for player receptions and anytime touchdowns could n
 #### Solution
 - **Market Registration**: Registered `receptions` (unit: receptions, positions: WR/TE/RB) and `anytime_touchdown` (unit: touchdowns, positions: RB/WR/TE/QB, stat column: `anytime_td`) in `sports/markets.py` and `sports/nfl.py`.
 - **Volume Floors & Sigma Defaults**:
-  - `MARKET_MIN_EXPECTED_VOLUME`: 1.5 receptions; 2.5 red zone touches for anytime touchdown.
+  - `MARKET_MIN_EXPECTED_VOLUME`: 1.5 receptions; 0.5 red zone touches for anytime touchdown.
   - Added sigma floors and defaults in `utils/nfl_sigma.py` (e.g., reception sigma floor 1.4, default 2.2; anytime TD floor 0.35, default 0.48).
 - **Stacking Regressor Models**:
   - Added `receptions` and `anytime_touchdown` configurations to `MARKET_CONFIGS` and `_MARKET_STATS` in `models/position_specific/weekly.py`.
-  - Synthesized `anytime_td` on-the-fly from `rushing_tds` and `receiving_tds`:
+  - Synthesized `anytime_td` on-the-fly from `rushing_tds` and `receiving_tds`
+    via the shared `utils.nfl_markets.synthesize_anytime_td` helper:
     \[
-    \text{anytime\_td} = \mathbb{I}(\text{rushing\_tds} + \text{receiving\_tds} > 0)
+    \text{anytime\_td} = \text{rushing\_tds} + \text{receiving\_tds}
     \]
+    (integer count — the expectation \(\mu\) this trains is the Poisson rate
+    the pricing engine consumes, not a binary flag).
 - **Poisson Pricing Engine**:
   - In `value_betting_engine.py:prob_over()`, binary anytime touchdown props (line == 0.5) are priced using a **Poisson survival function** rather than a Gaussian CDF:
     \[
