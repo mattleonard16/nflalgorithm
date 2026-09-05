@@ -5,7 +5,57 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Exactly what an outside contributor gets: a clone with none of the gitignored
+  # private modules. Setup must succeed and `make doctor` must exit 0 (private
+  # checks WARN, never FAIL). This is the path that broke for a first-time
+  # contributor in 2026-09; keep it green.
+  fresh-clone-setup:
+    runs-on: ubuntu-latest
+    env:
+      DB_BACKEND: sqlite
+      SQLITE_DB_PATH: nfl_data.db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv venv
+          uv pip install -r requirements.txt
+      - name: Private modules must not be tracked
+        run: |
+          tracked=$(git ls-files config.py data_pipeline.py value_betting_engine.py prop_integration.py models/position_specific/weekly.py api/server.py)
+          if [ -n "$tracked" ]; then
+            echo "::error::Proprietary files are tracked in git: $tracked"
+            exit 1
+          fi
+      - name: Migrate an empty database
+        run: uv run python -m scripts.run_migrations
+      - name: make doctor exits 0 on a public clone
+        run: |
+          uv run python -m scripts.preflight --check-schema --json | tee doctor.json
+          uv run python - <<'PY'
+          import json
+          report = json.load(open("doctor.json"))
+          failed = [c["name"] for c in report["checks"] if c["status"] == "fail"]
+          assert report["ok"] and not failed, f"doctor FAIL on a public clone: {failed}"
+          statuses = {c["name"]: c["status"] for c in report["checks"]}
+          assert statuses["private_api"] == "warn", statuses
+          assert statuses["private_modules"] == "warn", statuses
+          PY
+      - name: Test collection has no import errors without private modules
+        run: uv run python -m pytest tests/ --collect-only -q
+
   test:
     runs-on: ubuntu-latest
     steps:
