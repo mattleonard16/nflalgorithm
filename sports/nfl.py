@@ -23,7 +23,7 @@ MARKET_MIN_EXPECTED_VOLUME = {
     "receiving_yards": 2.0,
     "passing_yards": 12.0,
     "receptions": 1.5,
-    "anytime_touchdown": 2.5,
+    "anytime_touchdown": 0.5,
 }
 
 __all__ = ["INACTIVE_ROSTER_STATUSES", "MARKETS", "MARKET_MIN_EXPECTED_VOLUME"]

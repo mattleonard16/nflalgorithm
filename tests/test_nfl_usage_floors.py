@@ -7,5 +7,5 @@ def test_usage_floors_keep_rotation_players_not_depth_chart_leftovers() -> None:
         "receiving_yards": 2.0,
         "passing_yards": 12.0,
         "receptions": 1.5,
-        "anytime_touchdown": 2.5,
+        "anytime_touchdown": 0.5,
     }

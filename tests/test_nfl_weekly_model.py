@@ -303,7 +303,7 @@ class TestCausalTrainingWindows:
                 "expected_targets": [0.4, 2.0, 6.0],
                 "expected_rushing_attempts": [0.2, 3.0, 12.0],
                 "expected_passing_attempts": [4.0, 12.0, 30.0],
-                "expected_red_zone_touches": [1.0, 2.5, 5.0],
+                "expected_red_zone_touches": [0.2, 2.5, 5.0],
             }
         )
 
