@@ -102,6 +102,45 @@ def test_evaluation_scores_only_pregame_production_outputs() -> None:
     assert report["metrics"]["by_market"]["rushing_yards"]["mae"] == 10.0
 
 
+def test_position_mae_excludes_touchdown_count_errors() -> None:
+    """~0.3-scale TD errors must not deflate the yardage MAE gate."""
+    projections, actuals, games, runs = _inputs(candidate_sha="e" * 40)
+    projections = pd.concat(
+        [
+            projections,
+            pd.DataFrame(
+                [
+                    {
+                        "season": 2025,
+                        "week": 1,
+                        "player_id": "p1",
+                        "team": "BUF",
+                        "market": "anytime_touchdown",
+                        "mu": 0.6,
+                        "model_version": "candidate-v1",
+                        "featureset_hash": "features-v1",
+                        "generated_at": "2025-09-03T12:00:00Z",
+                    }
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+    actuals = actuals.assign(rushing_tds=[1, 0], receiving_tds=[0, 0])
+
+    report = evaluate_projections(projections, actuals, games, runs, candidate_sha="e" * 40)
+
+    assert report["passed"] is True
+    # Yardage errors only: |55-50| and |40-50| averaged by position, with no
+    # position column present both rows land in UNKNOWN.
+    assert report["metrics"]["by_position"]["UNKNOWN"]["mae"] == pytest.approx(7.5)
+    # The TD row is still visible per-market and per-market-position.
+    assert report["metrics"]["by_market"]["anytime_touchdown"]["mae"] == pytest.approx(0.4)
+    assert report["metrics"]["by_market_position"]["anytime_touchdown"]["UNKNOWN"][
+        "mae"
+    ] == pytest.approx(0.4)
+
+
 def test_evaluation_rejects_run_from_another_commit() -> None:
     report = evaluate_projections(*_inputs(), candidate_sha="b" * 40)
 
