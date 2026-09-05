@@ -175,6 +175,20 @@ def test_blank_projection_team_falls_back_to_the_roster_team() -> None:
     assert set(lines["team"]) == {"SEA"}
 
 
+@pytest.mark.parametrize("mu", [0.22, 0.48, 0.85])
+def test_anytime_touchdown_mints_a_fixed_half_point_line(mu: float) -> None:
+    # A binary over/under 0.5 prop must hang 0.5 however small or large mu is;
+    # rounding mu to an increment would mint 0.0 or 1.0 and break edge math.
+    lines = build_internal_lines(
+        DEFAULT_UNIVERSE,
+        _projections(("SEA_bravo_back", "anytime_touchdown", mu, 0.45)),
+        computed_at=COMPUTED_AT,
+    )
+    assert len(lines) == 1
+    assert lines.iloc[0]["line"] == 0.5
+    assert lines.iloc[0]["mu"] == pytest.approx(mu)
+
+
 def test_negative_mu_fails_loud() -> None:
     projections = _projections(("SEA_alpha_receiver", "receiving_yards", -3.0, 20.0))
     with pytest.raises(ValueError, match="mu is negative"):

@@ -198,7 +198,13 @@ def _assemble(
 ) -> pd.DataFrame:
     """Shape the joined frame into the published line rows."""
     lines = joined.copy()
-    lines["line"] = [round_to_line(value, increment) for value in lines["mu"]]
+    # Anytime touchdown is a binary over/under 0.5 prop: mint the line fixed
+    # at 0.5 instead of rounding mu to an increment (which would hang 0.0 or
+    # 1.0 and break fair-odds and edge math downstream).
+    lines["line"] = [
+        0.5 if market == "anytime_touchdown" else round_to_line(value, increment)
+        for market, value in zip(lines["market"], lines["mu"])
+    ]
     # The projection's team is the club for *this* week's game; fall back to
     # the roster's when a legacy projection row left it blank (see CLAUDE.md's
     # note on empty weekly_projections.team on 2025 rows).

@@ -43,7 +43,7 @@ from utils.nfl_backtest import (
     feature_overrides,
     run_walk_forward,
 )
-from utils.nfl_markets import MARKET_TO_STAT
+from utils.nfl_markets import DATABASE_STAT_COLUMNS
 
 DEFAULT_WEEKS = tuple(range(1, 19))
 
@@ -89,7 +89,7 @@ def _training_tuples(season: int, week: int, history_seasons: int) -> list[tuple
 
 def _load_actuals(season: int, weeks: tuple[int, ...]) -> pd.DataFrame:
     placeholders = ",".join("?" for _ in weeks)
-    stat_columns = ", ".join(sorted(set(MARKET_TO_STAT.values())))
+    stat_columns = ", ".join(DATABASE_STAT_COLUMNS)
     return read_dataframe(
         f"SELECT season, week, player_id, position, {stat_columns} "
         f"FROM player_stats_enhanced WHERE season = ? AND week IN ({placeholders})",

@@ -20,7 +20,7 @@ from utils.clv import STATUS_OK, compute_clv, resolve_closing_lines
 from utils.db import execute, executemany, get_backend, get_connection, read_dataframe
 from utils.grading import calculate_profit_units, get_confidence_tier, grade_bet
 from utils.live_odds import kickoffs_from_games
-from utils.nfl_markets import MARKET_TO_STAT
+from utils.nfl_markets import MARKET_TO_STAT, synthesize_anytime_td
 
 
 def make_bet_id(
@@ -90,10 +90,7 @@ def grade_bets(season: int, week: int) -> List[Dict]:
         print("All bets will be marked as pushes")
     else:
         print(f"Found actual stats for {len(actuals)} players")
-        if "anytime_td" not in actuals.columns:
-            rush_td = pd.to_numeric(actuals.get("rushing_tds", 0), errors="coerce").fillna(0.0)
-            rec_td = pd.to_numeric(actuals.get("receiving_tds", 0), errors="coerce").fillna(0.0)
-            actuals["anytime_td"] = (rush_td + rec_td > 0).astype(int)
+        actuals = synthesize_anytime_td(actuals)
 
     # Grade each bet
     outcomes = []

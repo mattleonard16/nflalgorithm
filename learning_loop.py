@@ -483,7 +483,7 @@ def _model_accuracy_trends(
     """Weekly model accuracy (MAE) trends."""
     query = """
     SELECT p.week, p.market,
-           AVG(ABS(p.mu - s.{stat_col})) as mae,
+           AVG(ABS(p.mu - {stat_expr})) as mae,
            COUNT(*) as n
     FROM weekly_projections p
     INNER JOIN player_stats_enhanced s
@@ -496,7 +496,13 @@ def _model_accuracy_trends(
     """
     results = []
     for market, stat_col in MARKET_TO_STAT.items():
-        formatted_query = query.format(stat_col=stat_col)
+        # anytime_td is virtual: synthesize the count from the two physical
+        # TD columns instead of selecting a column that does not exist.
+        if market == "anytime_touchdown":
+            stat_expr = "(COALESCE(s.rushing_tds, 0) + COALESCE(s.receiving_tds, 0))"
+        else:
+            stat_expr = f"s.{stat_col}"
+        formatted_query = query.format(stat_expr=stat_expr)
         try:
             df = read_dataframe(formatted_query, params=(season, week_start, week_end))
             for _, row in df.iterrows():
@@ -579,15 +585,24 @@ def _load_actual_stat(
     if stat_col is None:
         return None
 
+    # anytime_td is virtual: synthesize the count from the two physical
+    # TD columns instead of selecting a column that does not exist.
+    if market == "anytime_touchdown":
+        select_expr = "(COALESCE(rushing_tds, 0) + COALESCE(receiving_tds, 0)) AS anytime_td"
+        result_col = "anytime_td"
+    else:
+        select_expr = stat_col
+        result_col = stat_col
+
     query = f"""
-    SELECT {stat_col} FROM player_stats_enhanced
+    SELECT {select_expr} FROM player_stats_enhanced
     WHERE season = ? AND week = ? AND player_id = ?
     """
     try:
         df = read_dataframe(query, params=(season, week, player_id))
         if df.empty:
             return None
-        val = df.iloc[0][stat_col]
+        val = df.iloc[0][result_col]
         return float(val) if pd.notna(val) else None
     except Exception:
         return None
