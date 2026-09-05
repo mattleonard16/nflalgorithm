@@ -52,13 +52,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Proprietary files must not be tracked
-        run: |
-          tracked=$(git ls-files config.py data_pipeline.py value_betting_engine.py prop_integration.py models/position_specific/weekly.py api/server.py)
-          if [ -n "$tracked" ]; then
-            echo "::error::Proprietary files are tracked in git: $tracked"
-            exit 1
-          fi
+      - name: Private files must not be tracked
+        run: ./scripts/check_private_files_untracked.sh
       - name: Gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:

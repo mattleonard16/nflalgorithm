@@ -32,13 +32,8 @@ jobs:
           pip install uv
           uv venv
           uv pip install -r requirements.txt
-      - name: Private modules must not be tracked
-        run: |
-          tracked=$(git ls-files config.py data_pipeline.py value_betting_engine.py models/position_specific/weekly.py)
-          if [ -n "$tracked" ]; then
-            echo "::error::Proprietary files are tracked in git: $tracked"
-            exit 1
-          fi
+      - name: Private files must not be tracked
+        run: ./scripts/check_private_files_untracked.sh
       - name: Migrate an empty database
         run: uv run python -m scripts.run_migrations
       - name: make doctor exits 0 on a public clone
