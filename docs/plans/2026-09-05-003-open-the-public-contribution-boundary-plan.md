@@ -24,7 +24,7 @@ what needed protecting. Six files were gitignored. Only two of them held anythin
 
 Publishing those two bought three things:
 
-- **196 API tests now run in CI.** They never had, because `tests/conftest.py` skipped ten files
+- **182 API tests now run in CI.** They never had, because `tests/conftest.py` skipped ten files
   whenever `api/server.py` was absent, which in CI was always.
 - **`docs/DEPLOYMENT_MANIFEST.md` lost two sections.** That file hand-checks what git does for free,
   and every entry exists only because version control is off for something. It is now shorter.

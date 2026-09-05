@@ -44,7 +44,7 @@ Excluded from version control. This is the complete set — verify with
 **Four files that are not on this list, though older versions of it said otherwise.**
 `materialized_value_view.py` and `scripts/record_outcomes.py` are tracked with long commit
 histories and never were gitignored. `api/server.py` and `prop_integration.py` were published on
-2026-09-05: neither held modeling edge, and hiding the API kept 196 tests out of CI. See
+2026-09-05: neither held modeling edge, and hiding the API kept 182 tests out of CI. See
 `docs/plans/2026-09-05-003-open-the-public-contribution-boundary-plan.md`.
 
 **Consequence for the gitignored set**: edits to those files live only on the local machine and in
