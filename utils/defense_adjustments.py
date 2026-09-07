@@ -30,6 +30,8 @@ Estimation pipeline (per (position, stat_type) group, pure math in
 WR/TE rushing yards are supported matchups but deliberately NEUTRAL (always
 1.0): those stats are zero-inflated gadget plays with no per-defense signal —
 on real 2025 data even the robust estimator clamped 10+ of 32 teams.
+Anytime touchdowns are neutral for the same reason: a 0/1/2 count per game
+has no per-defense signal a trimmed mean can recover.
 """
 
 import logging
@@ -63,8 +65,11 @@ MIN_PLAYER_GAMES = 3
 # would only drag the group estimate toward 0.
 MIN_BASELINE_YARDS = 1.0
 
-# (position, stat_type) pairs with enough per-defense signal to estimate —
-# mirrors MARKET_CONFIGS positions in models/position_specific/weekly.py.
+# (position, stat_type) pairs with enough per-defense signal to estimate.
+# Every (position, stat_column) the tracked registry in sports/markets.py
+# projects must appear here or in NEUTRAL_MATCHUPS; tests/test_defense_adjustments.py
+# enforces that, because a market added to the model without a matchup entry
+# fails the whole production run at prepare_week.
 COMPUTED_MATCHUPS: FrozenSet[Tuple[str, str]] = frozenset(
     {
         ("RB", "rushing_yards"),
@@ -73,6 +78,9 @@ COMPUTED_MATCHUPS: FrozenSet[Tuple[str, str]] = frozenset(
         ("TE", "receiving_yards"),
         ("RB", "receiving_yards"),
         ("QB", "passing_yards"),
+        ("WR", "receptions"),
+        ("TE", "receptions"),
+        ("RB", "receptions"),
     }
 )
 
@@ -82,6 +90,10 @@ NEUTRAL_MATCHUPS: FrozenSet[Tuple[str, str]] = frozenset(
     {
         ("WR", "rushing_yards"),
         ("TE", "rushing_yards"),
+        ("RB", "anytime_td"),
+        ("WR", "anytime_td"),
+        ("TE", "anytime_td"),
+        ("QB", "anytime_td"),
     }
 )
 
@@ -238,7 +250,7 @@ def compute_defense_vs_position_multipliers(
 
     stats = read_dataframe(f'''
         SELECT season, week, player_id, name, team, position,
-               rushing_yards, receiving_yards, passing_yards
+               {", ".join(_STAT_COLUMNS)}
         FROM player_stats_enhanced
         WHERE season = {season} AND week <= {through_week}
         AND position IN ('QB', 'RB', 'WR', 'TE')
