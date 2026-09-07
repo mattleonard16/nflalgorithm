@@ -20,7 +20,8 @@ export function PerformanceWidget({ collapsed = false }: PerformanceWidgetProps)
         async function fetchData() {
             try {
                 const data = await getWeeklySummary(4);
-                setWeeks(data.weeks ?? []);
+                // A week with nothing graded yet says nothing about performance.
+                setWeeks((data.weeks ?? []).filter((week) => week.wins + week.losses > 0));
                 setError(null);
             } catch {
                 setError("Failed to load");
@@ -80,9 +81,7 @@ export function PerformanceWidget({ collapsed = false }: PerformanceWidgetProps)
 }
 
 function WeekCard({ week }: { week: WeeklySummaryItem }) {
-    const decided = week.wins + week.losses;
-    const hasResults = decided > 0;
-    const winRate = hasResults ? (week.wins / decided) * 100 : 0;
+    const winRate = (week.wins / (week.wins + week.losses)) * 100;
     const isPositive = week.roi_pct > 0;
 
     return (
@@ -91,51 +90,39 @@ function WeekCard({ week }: { week: WeeklySummaryItem }) {
                 <span className="text-sm font-medium text-slate-200">
                     Week {week.week}
                 </span>
-                {hasResults ? (
-                    <span
-                        className={cn(
-                            "text-xs font-semibold flex items-center gap-1",
-                            isPositive ? "text-emerald-400" : "text-red-400"
-                        )}
-                    >
-                        {isPositive ? (
-                            <TrendingUp className="h-3 w-3" />
-                        ) : (
-                            <TrendingDown className="h-3 w-3" />
-                        )}
-                        {isPositive ? "+" : ""}
-                        {week.roi_pct.toFixed(1)}%
-                    </span>
-                ) : (
-                    <span className="text-xs text-slate-500">Pending</span>
-                )}
+                <span
+                    className={cn(
+                        "text-xs font-semibold flex items-center gap-1",
+                        isPositive ? "text-emerald-400" : "text-red-400"
+                    )}
+                >
+                    {isPositive ? (
+                        <TrendingUp className="h-3 w-3" />
+                    ) : (
+                        <TrendingDown className="h-3 w-3" />
+                    )}
+                    {isPositive ? "+" : ""}
+                    {week.roi_pct.toFixed(1)}%
+                </span>
             </div>
 
-            {hasResults ? (
-                <>
-                    <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-                        <span>
-                            {week.wins}-{week.losses}
-                            {week.pushes > 0 && `-${week.pushes}`}
-                        </span>
-                        <span>{winRate.toFixed(0)}% win</span>
-                    </div>
-                    {/* Progress bar */}
-                    <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                        <div
-                            className={cn(
-                                "h-full rounded-full transition-all",
-                                winRate >= 50 ? "bg-emerald-500" : "bg-red-500"
-                            )}
-                            style={{ width: `${Math.min(winRate, 100)}%` }}
-                        />
-                    </div>
-                </>
-            ) : (
-                <div className="text-xs text-slate-500">
-                    {week.total_bets} picks awaiting results
-                </div>
-            )}
+            <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
+                <span>
+                    {week.wins}-{week.losses}
+                    {week.pushes > 0 && `-${week.pushes}`}
+                </span>
+                <span>{winRate.toFixed(0)}% win</span>
+            </div>
+            {/* Progress bar */}
+            <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                    className={cn(
+                        "h-full rounded-full transition-all",
+                        winRate >= 50 ? "bg-emerald-500" : "bg-red-500"
+                    )}
+                    style={{ width: `${Math.min(winRate, 100)}%` }}
+                />
+            </div>
         </div>
     );
 }

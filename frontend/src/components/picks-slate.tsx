@@ -21,11 +21,13 @@ import {
 
 const MARKET_DOTS: Record<string, string> = {
   Pass: "#d4a84b",
-  Rec: "#c4b08a",
   Rush: "#8a9a7b",
+  Rec: "#c4b08a",
+  Recs: "#7b9aa8",
+  TD: "#b07b8a",
 };
 
-const MARKET_ORDER = ["Pass", "Rec", "Rush"];
+const MARKET_ORDER = ["Pass", "Rush", "Rec", "Recs", "TD"];
 const POSITION_ORDER = ["QB", "RB", "WR", "TE"];
 
 const MONO = "font-[family-name:var(--font-jetbrains)]";
@@ -414,7 +416,7 @@ export function PicksSlate({
               <th className={`${headCell} sticky top-0 z-20 bg-[#0d1220]`}>Market</th>
               <th className={`${headCell} sticky top-0 z-20 bg-[#0d1220] text-right`}>
                 <SortHeader
-                  label="μ"
+                  label="Proj"
                   sortKey="mu"
                   activeKey={sortKey}
                   direction={direction}
@@ -424,7 +426,7 @@ export function PicksSlate({
               </th>
               <th className={`${headCell} sticky top-0 z-20 bg-[#0d1220] text-right`}>
                 <SortHeader
-                  label="σ"
+                  label="±"
                   sortKey="sigma"
                   activeKey={sortKey}
                   direction={direction}
