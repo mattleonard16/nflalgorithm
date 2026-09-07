@@ -12,7 +12,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Container, Dict, List, Optional, cast
 
 import pandas as pd
 
@@ -22,7 +22,7 @@ from config import config
 from scripts.simple_cache import redact_api_key, simple_cached_client
 from utils.db import execute, get_connection, read_dataframe
 from utils.event_keys import UnresolvableEventError, resolve_event_id
-from utils.player_id_utils import canonicalize_team, make_player_id
+from utils.player_id_utils import canonicalize_team, make_player_id, team_for_player
 from utils.two_sided_odds import pair_two_sided_prices
 
 # Set up logging
@@ -334,6 +334,8 @@ class NFLPropScraper:
         )
         self.last_weekly_audit["scheduled_events"] = len(schedule)
         events = self._select_scheduled_events(events, schedule)
+        roster_ids = self._roster_player_ids(season)
+        self.last_weekly_audit["team_unresolved"] = 0
 
         # Odds API market key -> stat column in sports/markets.py.
         stat_mapping = {
@@ -443,7 +445,7 @@ class NFLPropScraper:
                             if outcome.get("name") != "Over":
                                 continue
                             player_desc = outcome.get("description", "")
-                            info = self._extract_player_info(player_desc, home, away)
+                            info = self._extract_player_info(player_desc, home, away, roster_ids)
                             if not info:
                                 logger.debug(
                                     "Skipping outcome with unparsed player: raw=%s event=%s market=%s",
@@ -622,12 +624,37 @@ class NFLPropScraper:
         logger.info(f"Saved weekly prop lines CSV: {out}")
         return df
 
+    @staticmethod
+    def _roster_player_ids(season: int) -> frozenset[str]:
+        """Season roster ids; empty when the table is unavailable, so the team
+        falls back to the home-club guess and the audit counts each miss."""
+        try:
+            roster = read_dataframe(
+                "SELECT player_id FROM nfl_roster_players WHERE season = ?",
+                params=(season,),
+            )
+        except Exception as e:
+            logger.warning(
+                "Roster lookup failed for %s; player teams fall back to the home club: %s",
+                season,
+                e,
+            )
+            return frozenset()
+        return frozenset(roster["player_id"].dropna().astype(str))
+
     def _extract_player_info(
-        self, player_description: str, home_team: str, away_team: str
+        self,
+        player_description: str,
+        home_team: str,
+        away_team: str,
+        roster_ids: Container[str] = frozenset(),
     ) -> Optional[Dict]:
-        """Extract player name, team, and position from description"""
-        # This is a simplified version - in practice you'd need a player database
-        # to accurately map names to teams and positions
+        """Extract player name, team, and position from description.
+
+        The book names the player, not the club. The season roster decides
+        between the two clubs in the game; a name on neither roster falls
+        back to the old home-club guess, which is wrong for every away player.
+        """
 
         # Basic extraction (format varies by sportsbook)
         if " - " in player_description:
@@ -638,8 +665,12 @@ class NFLPropScraper:
             player_name = player_description.strip()
             team_info = ""
 
-        # Try to determine team
-        team = self._guess_team(player_name, home_team, away_team, team_info)
+        team = team_for_player(player_name, (home_team, away_team), roster_ids)
+        if not team:
+            self.last_weekly_audit["team_unresolved"] = (
+                self.last_weekly_audit.get("team_unresolved", 0) + 1
+            )
+            team = self._guess_team(player_name, home_team, away_team, team_info)
 
         # Try to determine position (would need player database for accuracy)
         position = self._guess_position(player_name)
