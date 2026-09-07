@@ -7,6 +7,7 @@ Removes database persistence layer for simplicity and maintainability.
 """
 
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
@@ -18,6 +19,17 @@ from requests.structures import CaseInsensitiveDict
 from config import config
 
 logger = logging.getLogger(__name__)
+
+_API_KEY_QUERY = re.compile(r"(apiKey=)[^&\s]*", re.IGNORECASE)
+
+
+def redact_api_key(text: str) -> str:
+    """Mask the apiKey query value in any text that may carry a request URL.
+
+    requests embeds the full URL in exception messages, so logging an
+    exception verbatim writes the credential to disk.
+    """
+    return _API_KEY_QUERY.sub(r"\1***", text)
 
 
 class SimpleRateLimiter:
@@ -136,7 +148,7 @@ class SimpleCachedClient:
 
         except requests.RequestException as e:
             # Try to serve stale cache if available
-            logger.warning(f"API request failed for {url}: {e}")
+            logger.warning("API request failed for %s: %s", url, redact_api_key(str(e)))
             cached_response = self._get_from_cache(url, params)
             if cached_response:
                 logger.info(f"Serving stale cache for {url}")

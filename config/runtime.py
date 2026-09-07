@@ -94,7 +94,7 @@ pipeline = SimpleNamespace(
         value.strip()
         for value in os.getenv(
             "NFL_ODDS_REQUIRED_MARKETS",
-            "player_pass_yds,player_rush_yds,player_rec_yds",
+            "player_pass_yds,player_rush_yds,player_reception_yds,player_receptions",
         ).split(",")
         if value.strip()
     ),
