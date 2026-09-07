@@ -2,8 +2,9 @@
 
 The predict path writes every rotation-eligible row. The Board should not.
 This helper keeps players the depth chart says will see the field: starting
-QBs, RB1/RB2, WR1–WR3, TE1/TE2. Inactive roster statuses and OUT/IR/Doubtful
-injuries are excluded.
+QBs, RB1/RB2, WR1–WR3, TE1/TE2. Receptions follow the receiving rule and
+anytime touchdown keeps anyone likely to rush or catch. Inactive roster
+statuses and OUT/IR/Doubtful injuries are excluded.
 """
 
 from __future__ import annotations
@@ -57,18 +58,36 @@ def likely_to_play(row: Mapping[str, Any], market: str) -> bool:
         return starter or depth == 1
 
     if market == "rushing_yards":
-        if position == "QB":
-            return starter or depth == 1
-        if depth is not None and depth <= 2:
-            return True
-        rush = _number(row.get("expected_rushing_attempts")) or 0.0
-        return rush >= MARKET_MIN_EXPECTED_VOLUME["rushing_yards"]
+        return _likely_rusher(row, position, starter, depth)
 
-    if market == "receiving_yards":
-        max_depth = 2 if position in {"TE", "RB", "FB"} else 3
-        if starter or (depth is not None and depth <= max_depth):
-            return True
-        targets = _number(row.get("expected_targets")) or 0.0
-        return targets >= MARKET_MIN_EXPECTED_VOLUME["receiving_yards"]
+    if market in {"receiving_yards", "receptions"}:
+        return _likely_receiver(row, position, starter, depth)
+
+    if market == "anytime_touchdown":
+        # A quarterback scores on the ground, so the backup-QB rule applies.
+        if position == "QB":
+            return _likely_rusher(row, position, starter, depth)
+        return _likely_rusher(row, position, starter, depth) or _likely_receiver(
+            row, position, starter, depth
+        )
 
     return False
+
+
+def _likely_rusher(row: Mapping[str, Any], position: str, starter: bool, depth: int | None) -> bool:
+    if position == "QB":
+        return starter or depth == 1
+    if depth is not None and depth <= 2:
+        return True
+    rush = _number(row.get("expected_rushing_attempts")) or 0.0
+    return rush >= MARKET_MIN_EXPECTED_VOLUME["rushing_yards"]
+
+
+def _likely_receiver(
+    row: Mapping[str, Any], position: str, starter: bool, depth: int | None
+) -> bool:
+    max_depth = 2 if position in {"TE", "RB", "FB"} else 3
+    if starter or (depth is not None and depth <= max_depth):
+        return True
+    targets = _number(row.get("expected_targets")) or 0.0
+    return targets >= MARKET_MIN_EXPECTED_VOLUME["receiving_yards"]

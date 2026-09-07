@@ -22,6 +22,8 @@ MARKET_LABELS = {
     "passing_yards": "Pass",
     "receiving_yards": "Rec",
     "rushing_yards": "Rush",
+    "receptions": "Recs",
+    "anytime_touchdown": "TD",
 }
 
 

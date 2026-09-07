@@ -85,3 +85,21 @@ def test_missing_depth_falls_back_to_usage_floor() -> None:
     }
     assert likely_to_play(unknown, "rushing_yards") is True
     assert likely_to_play(fringe, "rushing_yards") is False
+
+
+def test_receptions_follow_the_receiving_rule() -> None:
+    wr3 = {"position": "WR", "roster_status": "ACT", "depth_rank": 3, "is_starter": 0}
+    wr4 = {"position": "WR", "roster_status": "ACT", "depth_rank": 4, "is_starter": 0}
+    assert likely_to_play(wr3, "receptions") is True
+    assert likely_to_play(wr4, "receptions") is False
+
+
+def test_anytime_touchdown_keeps_anyone_who_rushes_or_catches() -> None:
+    rb2 = {"position": "RB", "roster_status": "ACT", "depth_rank": 2, "is_starter": 0}
+    te1 = {"position": "TE", "roster_status": "ACT", "depth_rank": 1, "is_starter": 1}
+    starting_qb = {"position": "QB", "roster_status": "ACT", "depth_rank": 1, "is_starter": 1}
+    backup_qb = {"position": "QB", "roster_status": "ACT", "depth_rank": 2, "is_starter": 0}
+    assert likely_to_play(rb2, "anytime_touchdown") is True
+    assert likely_to_play(te1, "anytime_touchdown") is True
+    assert likely_to_play(starting_qb, "anytime_touchdown") is True
+    assert likely_to_play(backup_qb, "anytime_touchdown") is False
