@@ -44,7 +44,7 @@ def select_live_odds(
     odds_df: pd.DataFrame,
     kickoffs_df: pd.DataFrame,
     *,
-    max_age_hours: float = 168.0,
+    max_age_hours: float = 240.0,
 ) -> pd.DataFrame:
     """Drop stale and post-kickoff quotes, then keep the newest remaining snapshot."""
     filtered = filter_stale_snapshots(odds_df, kickoffs_df, max_age_hours=max_age_hours)
