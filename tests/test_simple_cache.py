@@ -11,7 +11,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3 import HTTPResponse as U3HTTPResponse
 
-from scripts.simple_cache import SimpleCachedClient
+from scripts.simple_cache import SimpleCachedClient, redact_api_key
 
 
 def test_cache_provenance_includes_source_timestamp_and_age() -> None:
@@ -183,3 +183,34 @@ def test_get_cache_stats_counts_entries(tmp_path, monkeypatch) -> None:
     client.get("https://cache.test/odds", params={"week": 1})
 
     assert client.get_cache_stats()["cached_urls"] == 1
+
+
+def test_redact_api_key_masks_only_the_key_value() -> None:
+    text = (
+        "422 Client Error for url: https://api.test/odds?apiKey=sk-secret-123&regions=us&markets=x"
+    )
+
+    redacted = redact_api_key(text)
+
+    assert "sk-secret-123" not in redacted
+    assert redacted.endswith("?apiKey=***&regions=us&markets=x")
+
+
+def test_failed_request_log_never_carries_the_api_key(monkeypatch, caplog) -> None:
+    client = SimpleCachedClient.__new__(SimpleCachedClient)
+    client.rate_limiter = Mock()
+    client.rate_limiter.consume.return_value = True
+    client.session = Mock()
+    client.session.get.side_effect = requests.HTTPError(
+        "422 Client Error for url: https://api.test/odds?apiKey=sk-secret-123&markets=x"
+    )
+    monkeypatch.setattr(client, "_get_from_cache", Mock(return_value=None))
+    monkeypatch.setattr("scripts.simple_cache.config.api.cache_offline_mode", False)
+    monkeypatch.setattr("scripts.simple_cache.config.api.force_cache_refresh", False)
+
+    with caplog.at_level("WARNING", logger="scripts.simple_cache"):
+        with pytest.raises(requests.HTTPError):
+            client.get("https://api.test/odds", params={"apiKey": "sk-secret-123"})
+
+    assert "sk-secret-123" not in caplog.text
+    assert "apiKey=***" in caplog.text

@@ -74,7 +74,7 @@ def test_odds_safety_requirements_are_environment_configurable(tmp_path: Path) -
         "NFL_ODDS_MIN_EVENT_COVERAGE": "0.95",
         "NFL_ODDS_MIN_MARKET_COVERAGE": "0.90",
         "NFL_ODDS_MIN_SPORTSBOOKS_PER_EVENT_MARKET": "3",
-        "NFL_ODDS_REQUIRED_MARKETS": "player_pass_yds,player_rec_yds",
+        "NFL_ODDS_REQUIRED_MARKETS": "player_pass_yds,player_reception_yds",
         "DEMO_MODE": "false",
     }
     command = (
@@ -102,5 +102,5 @@ def test_odds_safety_requirements_are_environment_configurable(tmp_path: Path) -
         "events": 0.95,
         "markets": 0.9,
         "sportsbooks": 3,
-        "required": ["player_pass_yds", "player_rec_yds"],
+        "required": ["player_pass_yds", "player_reception_yds"],
     }

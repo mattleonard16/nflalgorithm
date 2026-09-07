@@ -22,7 +22,9 @@ from utils.defense_adjustments import (
     get_defense_multiplier,
 )
 
-STAT_COLS = ("rushing_yards", "receiving_yards", "passing_yards")
+# Derived from the module so a new computed stat cannot silently leave the
+# test frames missing a column.
+STAT_COLS = da._STAT_COLUMNS
 
 
 def make_stats(rows):
@@ -159,6 +161,42 @@ class TestPassingYardsSupported:
         assert len(group) == len(factors)
         assert len({round(v, 6) for v in group.values()}) > 1
         assert group["D0"] < 1.0 < group["D4"]
+
+
+class TestReceptionsSupported:
+    def test_receptions_is_a_computed_matchup_for_every_receiving_position(self):
+        for position in ("WR", "TE", "RB"):
+            assert (position, "receptions") in COMPUTED_MATCHUPS
+
+    def test_reception_multipliers_vary_by_defense(self):
+        factors = [0.8, 0.9, 1.0, 1.1, 1.2]
+        stats = make_stats(
+            balanced_group_rows("WR", "receptions", factors, n_players=10)
+        )
+        mults = compute_multipliers_from_game_stats(stats)
+        group = {opp: v for (opp, pos, st), v in mults.items()
+                 if pos == "WR" and st == "receptions"}
+
+        assert len(group) == len(factors)
+        assert group["D0"] < 1.0 < group["D4"]
+
+
+class TestEveryProjectedMarketIsAMatchup:
+    def test_registry_pairs_are_all_supported(self):
+        # The production run calls get_defense_multiplier once per projected
+        # (position, stat_column). A pair missing here raises at prepare_week
+        # and takes the whole week's card down, which is how receptions and
+        # anytime_td slipped through on 2026-09-07.
+        from sports.markets import NFL
+        from sports.nfl import MARKETS
+
+        missing = sorted(
+            (position, NFL.markets[market].stat_column)
+            for market in MARKETS
+            for position in NFL.markets[market].positions
+            if (position, NFL.markets[market].stat_column) not in SUPPORTED_MATCHUPS
+        )
+        assert missing == [], missing
 
 
 class TestFailLoud:
@@ -454,8 +492,8 @@ class TestDbEntryPoint:
                         "season": 2025, "week": w,
                         "player_id": f"{team}_{p}", "name": f"{team}_{p}",
                         "team": team, "position": "RB",
-                        "rushing_yards": yards, "receiving_yards": 0.0,
-                        "passing_yards": 0.0,
+                        **{col: 0.0 for col in STAT_COLS},
+                        "rushing_yards": yards,
                     })
         return rows
 

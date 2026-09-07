@@ -19,7 +19,7 @@ import pandas as pd
 from config import config
 
 # Import simplified caching system and validation
-from scripts.simple_cache import simple_cached_client
+from scripts.simple_cache import redact_api_key, simple_cached_client
 from utils.db import execute, get_connection, read_dataframe
 from utils.event_keys import UnresolvableEventError, resolve_event_id
 from utils.player_id_utils import canonicalize_team, make_player_id
@@ -191,7 +191,9 @@ class NFLPropScraper:
         Returns list of dicts with keys: player, team, position, book, stat, line, over_odds, under_odds,
         game_date, home_team, away_team
         """
-        markets = ["player_rush_yds", "player_rec_yds", "player_pass_yds"]
+        # The validator requires exactly these markets, so fetching any other
+        # list can never pass coverage.
+        markets = list(config.pipeline.odds_required_markets)
         results: List[Dict] = []
         source_statuses: set[str] = set()
         response_ages: List[float] = []
@@ -333,10 +335,12 @@ class NFLPropScraper:
         self.last_weekly_audit["scheduled_events"] = len(schedule)
         events = self._select_scheduled_events(events, schedule)
 
+        # Odds API market key -> stat column in sports/markets.py.
         stat_mapping = {
             "player_pass_yds": "passing_yards",
             "player_rush_yds": "rushing_yards",
-            "player_rec_yds": "receiving_yards",
+            "player_reception_yds": "receiving_yards",
+            "player_receptions": "receptions",
         }
 
         # Fetch props for each event and market
@@ -390,7 +394,7 @@ class NFLPropScraper:
                                 event_id,
                                 market,
                                 attempt,
-                                e,
+                                redact_api_key(str(e)),
                             )
                         else:
                             backoff = 0.4 * attempt
@@ -399,7 +403,7 @@ class NFLPropScraper:
                                 event_id,
                                 market,
                                 attempt,
-                                e,
+                                redact_api_key(str(e)),
                                 backoff,
                             )
                             time.sleep(backoff)
