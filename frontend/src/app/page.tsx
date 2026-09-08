@@ -16,30 +16,6 @@ import type { AvailableWeek, ProjectionPick } from "@/lib/types";
 import { PicksSlate } from "@/components/picks-slate";
 import { filterForWeek, useWatchlist } from "@/lib/slate-watchlist";
 
-/* ─── Compact tick: slate counts, not betting KPIs ─── */
-function Tick({
-  label,
-  value,
-  accent = false,
-}: {
-  label: string;
-  value: string | number;
-  accent?: boolean;
-}) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[10px] text-slate-600 uppercase tracking-[0.12em]">{label}</span>
-      <span
-        className={`text-lg font-bold font-display tabular-nums leading-none ${
-          accent ? "text-amber-400" : "text-slate-100"
-        }`}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
 export default function BoardPage() {
   const [weeks, setWeeks] = useState<AvailableWeek[] | null>(null);
   const [weeksError, setWeeksError] = useState<string | null>(null);
@@ -101,20 +77,10 @@ export default function BoardPage() {
     [weeks, selectedWeek]
   );
 
-  const uniquePlayers = useMemo(
-    () => new Set(picks.map((pick) => pick.player_id)).size,
-    [picks]
-  );
-
   const { watchlist } = useWatchlist();
   const watchedCount = selectedWeek
     ? filterForWeek(watchlist, selectedWeek.season, selectedWeek.week).length
     : 0;
-  const marketCount = (label: string) =>
-    picks.filter((pick) => pick.market_label === label).length;
-
-  const modelVersion = picks[0]?.model_version || "\u2014";
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -130,7 +96,7 @@ export default function BoardPage() {
                 <span className="font-[family-name:var(--font-jetbrains)] tabular-nums">
                   {picks.length}
                 </span>{" "}
-                {likely ? "projections" : "projections \u00b7 full projection file"}
+                {likely ? "projections" : "projections \u00b7 everyone on the roster"}
               </>
             ) : weeksError ? (
               "Projection weeks unavailable"
@@ -141,14 +107,6 @@ export default function BoardPage() {
             )}
           </p>
         </div>
-        <div className="text-right">
-          <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-0.5">
-            Model Version
-          </p>
-          <p className="text-xs text-slate-400 font-[family-name:var(--font-jetbrains)]">
-            {modelVersion}
-          </p>
-        </div>
       </div>
 
       {(weeksError || error) && (
@@ -157,7 +115,7 @@ export default function BoardPage() {
         </div>
       )}
 
-      {/* Week picker + slate ticks */}
+      {/* Week picker */}
       {selectedWeek && (
         <div className="rounded-lg border border-slate-800/60 bg-[#111827]/50 p-4">
           <div className="flex flex-wrap items-end gap-6">
@@ -231,16 +189,21 @@ export default function BoardPage() {
                 Likely to play
               </Label>
             </div>
-
-            <div className="flex items-end gap-7 ml-auto pb-1">
-              <Tick label="Picks" value={picks.length} />
-              <Tick label="Players" value={uniquePlayers} />
-              <Tick label="Pass" value={marketCount("Pass")} />
-              <Tick label="Rec" value={marketCount("Rec")} />
-              <Tick label="Rush" value={marketCount("Rush")} />
-              <Tick label="Watched" value={watchedCount} accent={watchedCount > 0} />
-            </div>
           </div>
+        </div>
+      )}
+
+      {!loading && !valuesVisible && picks.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-400/30 bg-amber-400/5 px-4 py-3 text-sm">
+          <span className="text-slate-300">
+            Projected numbers are hidden. Sign in to see each player&apos;s projection.
+          </span>
+          <Link
+            href="/login"
+            className="rounded-md bg-amber-400 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-[#0d1220] transition-colors hover:bg-amber-300"
+          >
+            Sign in
+          </Link>
         </div>
       )}
 
@@ -267,11 +230,6 @@ export default function BoardPage() {
       )}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
-        {!valuesVisible && picks.length > 0 && (
-          <Link href="/login" className="text-amber-400/80 hover:text-amber-300 transition-colors">
-            Sign in to see projected lines (μ/σ).
-          </Link>
-        )}
         <Link href="/bets" className="hover:text-slate-400 transition-colors">
           Value card lives under Bets after a published run.
         </Link>
