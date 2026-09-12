@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Optional
+from typing import Container, Iterable, Optional
 
 NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 VALID_NFL_TEAMS = {
@@ -174,6 +174,21 @@ def make_player_id(name: Optional[str], team: Optional[str]) -> str:
     if not team_token:  # Handle invalid/missing teams
         return normalized_name if normalized_name else ""
     return f"{team_token}_{normalized_name}" if normalized_name else team_token
+
+
+def team_for_player(
+    name: Optional[str], clubs: Iterable[str], roster_player_ids: Container[str]
+) -> str:
+    """Return the one club in ``clubs`` whose roster carries ``name``, else ``""``.
+
+    A sportsbook names the player but not the club, and a game has two.
+    Exactly one roster hit settles it; zero or both leave it unresolved so
+    the caller can fall back explicitly instead of joining to the wrong club.
+    """
+    hits = [
+        canonicalize_team(club) for club in clubs if make_player_id(name, club) in roster_player_ids
+    ]
+    return hits[0] if len(hits) == 1 else ""
 
 
 def name_from_player_id(player_id: Optional[str]) -> str:

@@ -182,7 +182,7 @@ class StaleFilterResult(NamedTuple):
 def filter_stale_snapshots(
     odds_df: pd.DataFrame,
     kickoffs_df: pd.DataFrame,
-    max_age_hours: float = 48.0,
+    max_age_hours: float = 240.0,
 ) -> StaleFilterResult:
     """Drop odds snapshots that are stale relative to their game's kickoff.
 
@@ -197,6 +197,10 @@ def filter_stale_snapshots(
         kickoffs_df: Rows with ``event_id`` and ``kickoff_utc``; conflicting
             kickoffs for one event raise.
         max_age_hours: Freshness window before kickoff; must be positive.
+            Defaults to ten days: a Monday run sits 7.3 days before that
+            week's Monday night game, and a shorter window emptied the
+            card on every run before Friday. Fetch-time freshness is
+            enforced separately by the odds validator.
 
     Raises:
         ValueError: on missing columns, unparseable timestamps, conflicting
