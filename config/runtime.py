@@ -78,6 +78,13 @@ betting = SimpleNamespace(
     max_odds=200,
     target_share_min_threshold=0.08,
     volatility_penalty_weight=0.15,
+    # Weight on the market's own implied mean when combining it with the model's
+    # (`utils/market_blend.py`). 0.5 is the equal-weight baseline from the M4/M5
+    # forecasting competitions, which fitted weights repeatedly fail to beat. It
+    # is *not* fitted to this data: fitting needs stored market lines sitting
+    # next to actuals, and `clv_weekly` is still empty. Re-derive it from a
+    # season of CLV before moving it off 0.5.
+    market_blend_weight=env_float("NFL_MARKET_BLEND_WEIGHT", 0.5),
 )
 
 pipeline = SimpleNamespace(

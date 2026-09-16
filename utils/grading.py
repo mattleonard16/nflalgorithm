@@ -72,3 +72,46 @@ def get_confidence_tier(edge_percentage: float) -> str:
         return "LOW"
     else:
         return "MINIMAL"
+
+
+def align_actuals_to_bets(actuals: pd.DataFrame, roster: pd.DataFrame) -> pd.DataFrame:
+    """Re-key actual stat rows to the player ids the bets are stored under.
+
+    Two tables mint ``player_id`` from different spellings of the same name and
+    the two never match. ``scripts/ingest_real_nfl_data.transform_to_enhanced_stats``
+    builds it from nflverse's abbreviated ``player_name`` ("M.Stafford"), giving
+    ``LAR_m_stafford``, while ``upsert_roster_players`` builds it from the full
+    ``player_name`` on the roster feed, giving ``LAR_matthew_stafford``. Bets
+    carry the roster form, so grading matched nothing and recorded every bet as
+    a push with zero profit. That is indistinguishable from a settled push once
+    it lands in ``bet_outcomes`` and the CLV average.
+
+    Both tables also carry nflverse's ``gsis_id``, which is stable across name
+    spellings, suffixes and mid-season trades, so that is what this joins on.
+    It is unique per season on the roster and per player-week in the stats, so
+    the mapping is unambiguous.
+
+    A stat row whose ``gsis_id`` is missing from the roster keeps the id it
+    already has rather than being dropped: some feeds carry players the roster
+    snapshot does not, and an id that was already aligned still matches.
+    """
+    for column in ("player_id", "gsis_id"):
+        if column not in actuals.columns:
+            raise ValueError(f"actuals missing required column: {column}")
+        if column not in roster.columns:
+            raise ValueError(f"roster missing required column: {column}")
+
+    if actuals.empty or roster.empty:
+        return actuals
+
+    usable = roster[["gsis_id", "player_id"]].copy()
+    usable["gsis_id"] = usable["gsis_id"].fillna("").astype(str).str.strip()
+    usable = usable[usable["gsis_id"] != ""].drop_duplicates("gsis_id")
+    bet_id_by_gsis = dict(zip(usable["gsis_id"], usable["player_id"]))
+
+    out = actuals.copy()
+    keys = out["gsis_id"].fillna("").astype(str).str.strip()
+    out["player_id"] = [
+        bet_id_by_gsis.get(key, current) for key, current in zip(keys, out["player_id"])
+    ]
+    return out

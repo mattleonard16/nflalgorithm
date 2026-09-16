@@ -125,8 +125,23 @@ class NFLPropScraper:
         return status, age, created_at
 
     @staticmethod
-    def _select_scheduled_events(events: List[Dict], schedule: pd.DataFrame) -> List[Dict]:
-        """Return every API event whose kickoff belongs to the requested NFL week."""
+    def _select_scheduled_events(
+        events: List[Dict],
+        schedule: pd.DataFrame,
+        now: pd.Timestamp | None = None,
+    ) -> List[Dict]:
+        """Return every API event whose kickoff belongs to the requested NFL week.
+
+        Coverage is only required for games that have not kicked off yet. The
+        Odds API's events endpoint lists upcoming games, so a Thursday game is
+        gone by Saturday and demanding the whole week would fail every scrape
+        after the week's first kickoff. A game already under way has no pregame
+        line left to capture, so its absence is expected, not a fault. Missing
+        odds for a game still to come is still a hard failure: that is the case
+        where the card would quietly be built from a partial slate.
+
+        ``now`` is injectable so tests can pin the clock.
+        """
         if schedule.empty or "kickoff_utc" not in schedule:
             raise RuntimeError("Requested-week schedule has no kickoff timestamps")
         kickoffs = pd.to_datetime(schedule["kickoff_utc"], errors="coerce", utc=True)
@@ -141,9 +156,21 @@ class NFLPropScraper:
             kickoff = pd.to_datetime(event.get("commence_time"), errors="coerce", utc=True)
             if pd.notna(kickoff) and kickoff in scheduled_kickoffs:
                 selected.append(event)
-        if len(selected) != len(schedule):
+
+        as_of = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now).tz_convert("UTC")
+        upcoming = int((kickoffs > as_of).sum())
+        started = len(schedule) - upcoming
+        if len(selected) < upcoming:
             raise RuntimeError(
-                f"Live odds cover {len(selected)} of {len(schedule)} requested-week games"
+                f"Live odds cover {len(selected)} of {upcoming} requested-week games "
+                f"still to kick off ({started} already started, as of {as_of.isoformat()})"
+            )
+        if started:
+            logger.info(
+                "%d of %d week games already kicked off; scraping the remaining %d",
+                started,
+                len(schedule),
+                upcoming,
             )
         return selected
 

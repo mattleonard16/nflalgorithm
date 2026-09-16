@@ -147,6 +147,54 @@ def _drop_post_kickoff_snapshots(
     return merged.loc[~post_kickoff].drop(columns="_kickoff_ts")
 
 
+def _stored_fair_prob(row: Any, side: str) -> float | None:
+    """Fair probability of ``side`` from de-vigged probabilities on the row.
+
+    ``materialized_value_view`` stores ``implied_prob``/``implied_prob_under``,
+    already de-vigged at the time the bet was priced, but it does not store the
+    under price the pair came from. Without this, an entry row has no market
+    probability at all and the comparison silently falls back to the model.
+
+    Returns ``None`` unless both cells are present and sum to 1 within a
+    thousandth: a pair that does not sum to 1 was never de-vigged, and treating
+    a vigged number as fair biases every CLV in the same direction.
+    """
+    over = _as_float(_cell(row, "implied_prob"))
+    under = _as_float(_cell(row, "implied_prob_under"))
+    if over is None or under is None:
+        return None
+    if not 0.0 < over < 1.0 or not 0.0 < under < 1.0:
+        return None
+    if abs(over + under - 1.0) > 1e-3:
+        return None
+    return over if side == "over" else under
+
+
+def _market_fair_prob(row: Any, price_key: str, under_key: str, side: str) -> float | None:
+    """Fair probability of ``side`` from the market alone, or ``None``.
+
+    Never falls back to the model: a CLV that subtracts a market probability
+    from a model one measures the model's edge, not line movement.
+    """
+    over_odds = _as_odds(_cell(row, price_key))
+    under_odds = _as_odds(_cell(row, under_key))
+    if over_odds is not None and under_odds is not None:
+        from value_betting_engine import implied_probability_no_vig
+
+        p_over, p_under = implied_probability_no_vig(over_odds, under_odds)
+        # value_betting_engine is gitignored and untyped, so both are Any here.
+        return float(p_over if side == "over" else p_under)
+    return _stored_fair_prob(row, side)
+
+
+def _cell(row: Any, key: str) -> Any:
+    """Read ``key`` off a mapping or Series, returning None when absent."""
+    try:
+        return row.get(key)
+    except AttributeError:
+        return None
+
+
 def _fair_prob(
     line: float,
     price: Any,
@@ -175,14 +223,17 @@ def _fair_prob(
     which is the opposite of why the math lives in a tracked file. Tests that
     exercise the no-vig path must inject prices and are skipped when the private
     module is absent. The single-price fallback has no such constraint: it takes
-    ``prob_over`` from tracked ``utils.nfl_markets``, so CI covers it.
+    ``prob_over`` from tracked ``utils.nfl_markets``, so CI covers it. That is
+    only true if the import sits inside the two-sided branch: at the top of the
+    function it raised ImportError before the fallback was ever reached, which
+    took the model path down in CI too.
     """
-    from value_betting_engine import implied_probability_no_vig
-
     over_odds = _as_odds(price)
     under_odds = _as_odds(under_price)
 
     if over_odds is not None and under_odds is not None:
+        from value_betting_engine import implied_probability_no_vig
+
         p_over, p_under = implied_probability_no_vig(over_odds, under_odds)
     elif mu is not None and sigma is not None and sigma > 0:
         p_over = prob_over(mu, sigma, float(line), market=market)
@@ -244,14 +295,6 @@ def compute_clv(entry: Mapping[str, Any], close: Mapping[str, Any] | None) -> di
     sigma = _as_float(entry.get("sigma"))
     has_model = mu is not None and sigma is not None and sigma > 0
 
-    two_sided_entry = (
-        _as_odds(entry.get("price")) is not None and _as_odds(entry.get("under_price")) is not None
-    )
-    two_sided_close = (
-        _as_odds(close.get("close_price")) is not None
-        and _as_odds(close.get("close_under_price")) is not None
-    )
-
     # The market rides along so model-fallback probabilities price count
     # props (anytime TD) with Poisson survival rather than a Gaussian CDF.
     # Normalized to str-or-None: a NaN cell must not reach prob_over, whose
@@ -263,32 +306,39 @@ def compute_clv(entry: Mapping[str, Any], close: Mapping[str, Any] | None) -> di
         else str(candidate)
     )
 
-    if (two_sided_entry or has_model) and (two_sided_close or has_model):
+    # Both probabilities must come from the same source. Pricing the entry off
+    # the model and the close off the market subtracts a model probability from
+    # a market one, which is the model's edge with the sign flipped, not closing
+    # line value. That produced a -1929 bp weekly average on 2026 week 1 where
+    # entry and close were the identical line at the identical price, so the
+    # true answer was 0.
+    entry_market = _market_fair_prob(entry, "price", "under_price", side)
+    close_market = _market_fair_prob(close, "close_price", "close_under_price", side)
+
+    if entry_market is not None and close_market is not None:
+        entry_prob: float | None = entry_market
+        close_prob: float | None = close_market
+    elif has_model:
+        # No market probability on one side. The model's own distribution is a
+        # consistent basis for both, and it still measures the move: the same
+        # curve read at the entry line against the closing line.
         entry_prob = _fair_prob(
-            entry_line,
-            entry.get("price"),
-            entry.get("under_price"),
-            side,
-            mu=mu,
-            sigma=sigma,
-            market=market,
+            entry_line, None, None, side, mu=mu, sigma=sigma, market=market
         )
         close_prob = _fair_prob(
-            close_line,
-            close.get("close_price"),
-            close.get("close_under_price"),
-            side,
-            mu=mu,
-            sigma=sigma,
-            market=market,
+            close_line, None, None, side, mu=mu, sigma=sigma, market=market
         )
-        # We beat the close when the fair probability of our side rose after we
-        # took it: the number we hold is now better than the market's.
-        clv_bp = round((close_prob - entry_prob) * 10_000.0, 4)
     else:
         # One-sided quote and no model distribution: probability-space CLV is
         # not computable. Report unknown rather than inventing a 0.
+        entry_prob = close_prob = None
+
+    if entry_prob is None or close_prob is None:
         clv_bp = None
+    else:
+        # We beat the close when the fair probability of our side rose after we
+        # took it: the number we hold is now better than the market's.
+        clv_bp = round((close_prob - entry_prob) * 10_000.0, 4)
 
     return {
         "status": STATUS_OK,

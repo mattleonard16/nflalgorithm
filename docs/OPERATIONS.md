@@ -78,11 +78,35 @@ needs the private modules and real data.
    ```
    No improvement means remove `NFL_FEATURE_CONTEXT_FACTORS=1` from `week-auto` before Wednesday.
 5. `make week-refresh SEASON=2026 WEEK=1` and `make doctor-season SEASON=2026 WEEK=1`.
-6. After week 1 results land, grade with a gate that can actually pass:
-   `make week-grade SEASON=2026 WEEK=1` then
-   `make mae-gate SEASON=2026 WEEK=1 BASELINE=logs/metrics/bt-2025-off.json`. The absolute
-   ceilings without `BASELINE` are 2-3x below the measured baseline and will block every
-   position.
+6. After week 1 results land, pull the actuals and then grade:
+   ```bash
+   make ingest-nfl NFL_SEASONS=2026 THROUGH_WEEK=1
+   make week-grade SEASON=2026 WEEK=1
+   make mae-gate SEASON=2026 WEEK=1 BASELINE=logs/metrics/bt-2025-off.json
+   ```
+   The ingest has to run first. Grading reads `player_stats_enhanced`, and week 1 is empty there
+   until nflverse publishes and the ingest pulls it.
+
+   Watch the `Matched N of M stat rows to bets` line. A 0 there means grading is about to
+   record the whole week as pushes. `player_stats_enhanced` and `nfl_roster_players` mint
+   `player_id` from different spellings of the same name, so `utils.grading.align_actuals_to_bets`
+   re-keys the stats onto the bets' ids through nflverse's `gsis_id`; a zero match means the
+   roster is missing for that season.
+
+   Grading is safe to run mid-week and safe to re-run. `utils/game_completion.classify_games`
+   settles only games whose kickoff is at least four hours past *and* whose stats have published;
+   everything else is listed as pending with a reason and skipped. Re-running after the rest of
+   the slate lands grades the new games and overwrites the old rows in place, since `bet_id` is a
+   hash of the bet's natural key. A week that spans Thursday to Monday therefore takes two or three
+   runs, which is expected rather than a failure.
+
+   Before the gate existed, a mid-week run marked every unplayed bet as a `push` with zero profit,
+   which is indistinguishable from a settled push once it reaches `bet_outcomes` and
+   `weekly_performance.clv_avg`. `--include-unfinished` restores the old behavior and exists only
+   for backfilling a historical week whose schedule rows are incomplete.
+
+   `make mae-gate` without `BASELINE` uses absolute ceilings 2-3x below the measured baseline and
+   will block every position.
 7. `make week-auto` is the Wednesday entrypoint from week 2 on; it grades the previous week and
    writes its research memo, degrading to a warning so a results hiccup never blocks new lines.
 

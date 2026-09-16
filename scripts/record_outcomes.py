@@ -18,7 +18,13 @@ import pandas as pd
 from config import config
 from utils.clv import STATUS_OK, compute_clv, resolve_closing_lines
 from utils.db import execute, executemany, get_backend, get_connection, read_dataframe
-from utils.grading import calculate_profit_units, get_confidence_tier, grade_bet
+from utils.game_completion import classify_games
+from utils.grading import (
+    align_actuals_to_bets,
+    calculate_profit_units,
+    get_confidence_tier,
+    grade_bet,
+)
 from utils.live_odds import kickoffs_from_games
 from utils.nfl_markets import MARKET_TO_STAT, synthesize_anytime_td
 
@@ -43,13 +49,21 @@ def make_bet_id(
 
 
 # Market to stat column mapping
-def grade_bets(season: int, week: int) -> List[Dict]:
+def grade_bets(season: int, week: int, include_unfinished: bool = False) -> List[Dict]:
     """
     Compare predictions to actuals for a given week.
+
+    Only games that have actually finished are graded. A week runs Thursday to
+    Monday, so a run before the last game would otherwise mark every unplayed
+    bet as a ``push`` with zero profit, which is indistinguishable from a real
+    settled push once it reaches ``bet_outcomes`` and the CLV average. Pending
+    games are skipped and named in the output; re-run once they land.
 
     Args:
         season: NFL season year
         week: NFL week number
+        include_unfinished: grade every bet regardless of game state. Only for
+            backfilling a historical week whose schedule rows are incomplete.
 
     Returns:
         List of outcome dictionaries with bet results
@@ -77,7 +91,7 @@ def grade_bets(season: int, week: int) -> List[Dict]:
     # Load actual stats
     actuals_query = """
         SELECT
-            player_id, season, week, name, team, position,
+            player_id, gsis_id, season, week, name, team, position,
             rushing_yards, receiving_yards, passing_yards,
             receptions, targets, rushing_tds, receiving_tds
         FROM player_stats_enhanced
@@ -90,7 +104,48 @@ def grade_bets(season: int, week: int) -> List[Dict]:
         print("All bets will be marked as pushes")
     else:
         print(f"Found actual stats for {len(actuals)} players")
+        # Bets and stats mint `player_id` from different spellings of the same
+        # name, so matching on it alone finds nothing and grades the week as
+        # pushes. Re-key the stats onto the bets' ids via nflverse's gsis_id.
+        roster = read_dataframe(
+            "SELECT gsis_id, player_id FROM nfl_roster_players WHERE season = ?",
+            params=(season,),
+        )
+        if roster.empty:
+            print(
+                f"WARNING: no roster rows for {season}; cannot align stat ids to bet ids, "
+                "so bets will only match where the two already agree"
+            )
+        else:
+            actuals = align_actuals_to_bets(actuals, roster)
+        matched = actuals["player_id"].isin(set(predictions["player_id"])).sum()
+        print(f"Matched {matched} of {len(actuals)} stat rows to bets")
         actuals = synthesize_anytime_td(actuals)
+
+    # Screen out games that have not finished. `actuals` is empty for a game the
+    # stats feed has not published yet, and an empty row set is what used to be
+    # graded as a push.
+    if include_unfinished:
+        print("WARNING: --include-unfinished, grading bets on games that may not have finished")
+    else:
+        games = read_dataframe(
+            "SELECT game_id, home_team, away_team, kickoff_utc FROM games "
+            "WHERE season = ? AND week = ?",
+            params=(season, week),
+        )
+        report = classify_games(games, actuals)
+        print(report.summary())
+        if not report.final:
+            print(f"No finished games for {season} Week {week}; nothing to grade yet")
+            return []
+        before = len(predictions)
+        predictions = predictions[predictions["event_id"].isin(set(report.final))]
+        skipped = before - len(predictions)
+        if skipped:
+            print(f"Skipping {skipped} bet(s) in games that have not settled")
+        if predictions.empty:
+            print("No bets in the finished games")
+            return []
 
     # Grade each bet
     outcomes = []
@@ -133,8 +188,12 @@ def grade_bets(season: int, week: int) -> List[Dict]:
         # Calculate profit
         profit_units = calculate_profit_units(result, price)
 
-        # Determine confidence tier
-        confidence_tier = get_confidence_tier(edge_pct)
+        # `materialized_value_view.edge_percentage` holds a fraction despite the
+        # name — `materialized_value_view.py:87` clips it to [-0.5, 0.5] — while
+        # `get_confidence_tier` takes a percent. Passing the fraction straight
+        # through put every bet below the 3.0 floor and labelled the whole card
+        # MINIMAL, including 40% edges.
+        confidence_tier = get_confidence_tier(edge_pct * 100.0)
 
         # Create outcome record
         outcome = {
@@ -494,12 +553,21 @@ def main():
     )
     parser.add_argument("--season", type=int, required=True, help="NFL season year (e.g., 2025)")
     parser.add_argument("--week", type=int, required=True, help="NFL week number (e.g., 13)")
+    parser.add_argument(
+        "--include-unfinished",
+        action="store_true",
+        help=(
+            "Grade bets in games that have not finished. Records a push for any "
+            "player with no stats row, so use it only to backfill a historical "
+            "week whose schedule rows are incomplete."
+        ),
+    )
 
     args = parser.parse_args()
 
     try:
         # Grade bets
-        outcomes = grade_bets(args.season, args.week)
+        outcomes = grade_bets(args.season, args.week, include_unfinished=args.include_unfinished)
 
         # Save outcomes
         if outcomes:

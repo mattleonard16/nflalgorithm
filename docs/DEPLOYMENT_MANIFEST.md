@@ -12,6 +12,9 @@ Last verified: 2026-08-16, including live-odds selection, kickoff-aware producti
 priors. The context-factors section below was added 2026-09-02 from the tracked side only and is
 unverified.
 
+The market-mean blend section under `value_betting_engine.py` was added 2026-09-12, also from
+the tracked side only, and is unverified.
+
 `api/server.py` and `prop_integration.py` left this file on 2026-09-05. Both are tracked now, so
 git verifies them and nothing here needs to.
 
@@ -30,6 +33,7 @@ the private half is missing, so start there.
 | Portfolio stake cap | `risk_manager.normalize_portfolio_stakes`, called from `materialized_value_view.py:105` | — (fully tracked) | None. This one is safe. |
 | Position-keyed sigma | `utils/nfl_sigma.py` | `weekly.py:977` passes `position=position` | Falls back to the `(market, None)` legacy floors. Dispersion silently reverts to the old miscalibrated values (WR/TE rushing ~2.5x too wide). |
 | Live-odds stale filter | `utils/live_odds.py` | `value_betting_engine.rank_weekly_value` | Ranking takes SQL `MAX(as_of)` and can price an in-game quote. |
+| Market-mean blend | `utils/market_blend.py`, `config/runtime.py` (`betting.market_blend_weight`) | `value_betting_engine.rank_weekly_value` | Prices off the raw model `mu`, so a projection far from the line reads as a large edge. Measured on the 2026 W1 slate: 118 flagged bets at 19.3% average edge instead of 68 at 14.1%. |
 | Kickoff-aware production CLV | `utils/clv.py`, `utils/live_odds.py` | `scripts/record_outcomes.py` `compute_and_save_clv` | Closing line is `MAX(as_of)`, including post-kickoff scrapes. |
 | Early-season 70/30 role prior | `utils/season_priors.py` | `weekly.py` `_engineer_rolling_features` and `get_nfl_feature_cols` | Week 1 expected_* stays last-6 EWM; last_season_*_pg features are missing so a restored private weekly.py ignores the new helper. |
 
@@ -86,10 +90,40 @@ spanning 1.0000-1.1500 across 472 distinct values (it was a constant 1.075 on ev
 - `rank_weekly_value` loads raw `weekly_odds`, applies `utils.live_odds.select_live_odds` with
   `kickoffs_from_games`, then joins projections. It must **not** take SQL `MAX(as_of)` before the
   stale filter — that would keep a post-kickoff scrape and drop the last live line.
+- **Market-mean blend, added 2026-09-12. Tracked side only, NOT yet applied to a private
+  checkout.** `rank_weekly_value` must route its quote frame through
+  `utils.market_blend.blend_quotes` before pricing. Contract:
+  1. Build the frame it already builds (live odds joined to projections), and add a
+     `p_market_over` column holding the **de-vigged** over probability, from
+     `implied_probability_no_vig(price, under_price)` in this same module. A raw implied
+     probability carries the book's margin and pushes the recovered mean up.
+  2. Call `blend_quotes(frame)`. Required columns are `player_id`, `market`, `line`, `mu`,
+     `sigma`, `p_market_over`. It returns a copy with `market_mean`,
+     `market_mean_consensus`, `mu_blended` and `skew_reliable` added.
+  3. Price off `mu_blended`, not `mu`, in every `prob_over` call and in anything that
+     reports the projection next to the line.
+  4. Drop rows where `mu_blended` is null (the book's price implied no positive mean) and
+     rows where `skew_reliable` is false (gamma shape under 1, where the curve's median was
+     measured 5 to 14 points off). On the 2026 W1 slate the skew screen dropped 96 of 915
+     quotes, none of which had reached the graded card.
+  5. **Do not filter on `model_skilled`.** The function exists and is tested, but re-grading
+     the real 2026 week-1 card with it applied returned -6.6% ROI against +0.8% for the blend
+     alone, and the market it screens (`passing_yards`, weeks 1 to 4) was the only profitable
+     market on that card at +35.9% ROI over 69 bets. It is argued from 2025 backtest
+     correlation that the first week of real results contradicted. Leave it unwired pending
+     more weeks, or delete it. See `docs/MODEL_CARD.md` under **Market Combination**.
+  The weight lives in `config.betting.market_blend_weight` (0.5, env `NFL_MARKET_BLEND_WEIGHT`)
+  and needs no `config.py` change: `_fill_missing_settings` fills tracked defaults into the
+  private override. Reasoning and measurements are in `docs/MODEL_CARD.md` under
+  **Market Combination**.
 
 Verify: `command grep -n "apply_volatility_widening" value_betting_engine.py` returns the call site,
 and `command grep -n "fillna(50.0)" value_betting_engine.py` returns nothing.
 `command grep -n "select_live_odds" value_betting_engine.py` must return the ranking call site.
+`command grep -n "blend_quotes\|mu_blended\|skew_reliable" value_betting_engine.py` must return
+the blend call site and the pricing and filter uses; no output means the card is still built off
+the raw `mu`. `command grep -n "model_skilled" value_betting_engine.py` must return nothing, per
+step 5 above.
 
 ### `scripts/record_outcomes.py`
 - `compute_and_save_clv` loads `games.game_id` / `kickoff_utc` for the week and passes

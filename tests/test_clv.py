@@ -291,6 +291,83 @@ def test_compute_clv_one_sided_quote_falls_back_to_model_distribution():
     assert result["clv_bp"] < 0
 
 
+@needs_engine
+def test_an_unmoved_line_with_only_stored_entry_probabilities_is_zero():
+    """The 2026 week 1 bug. materialized_value_view stores de-vigged
+    probabilities but no under price, so the entry priced off the model while
+    the close priced off the market. Subtracting those gave -3608 bp on a bet
+    whose line and price never moved."""
+    entry = {
+        "line": 20.5,
+        "side": "over",
+        "price": -116,
+        "implied_prob": 0.537037,
+        "implied_prob_under": 0.462963,
+        "mu": 40.7,
+        "sigma": 19.6,
+    }
+    close = {
+        "close_line": 20.5,
+        "close_price": -116,
+        "close_under_price": -108,
+        "closed_at": "2026-09-10T00:00:00+00:00",
+        "snapshot_count": 5,
+    }
+
+    result = compute_clv(entry, close)
+
+    assert result["status"] == STATUS_OK
+    assert result["clv_points"] == pytest.approx(0.0)
+    assert abs(result["clv_bp"]) < 500
+
+
+@needs_engine
+def test_stored_entry_probabilities_are_ignored_when_they_still_carry_vig():
+    """A pair that does not sum to 1 was never de-vigged. Using it anyway
+    biases every bet the same way."""
+    entry = {
+        "line": 20.5,
+        "side": "over",
+        "price": -116,
+        "implied_prob": 0.537,
+        "implied_prob_under": 0.537,
+        "mu": 20.5,
+        "sigma": 10.0,
+    }
+    close = {
+        "close_line": 20.5,
+        "close_price": -110,
+        "close_under_price": -110,
+        "closed_at": "2026-09-10T00:00:00+00:00",
+        "snapshot_count": 5,
+    }
+
+    result = compute_clv(entry, close)
+
+    # Falls back to the model on both sides: same line, same curve, no movement.
+    assert result["clv_bp"] == pytest.approx(0.0, abs=1e-6)
+
+
+@needs_engine
+def test_a_model_priced_entry_is_never_compared_against_a_market_priced_close():
+    """Mixing the two measures the model's edge, not line movement. With no
+    market probability on the entry and no model to fall back on, the answer is
+    unknown."""
+    entry = {"line": 20.5, "side": "over", "price": -116}
+    close = {
+        "close_line": 20.5,
+        "close_price": -110,
+        "close_under_price": -110,
+        "closed_at": "2026-09-10T00:00:00+00:00",
+        "snapshot_count": 5,
+    }
+
+    result = compute_clv(entry, close)
+
+    assert result["status"] == STATUS_OK
+    assert result["clv_bp"] is None
+
+
 def test_compute_clv_rejects_unknown_side():
     with pytest.raises(ValueError, match="unsupported bet side"):
         compute_clv({"line": 50.5, "side": "middle"}, None)
@@ -310,16 +387,18 @@ def test_fair_prob_prices_anytime_touchdown_with_poisson_survival():
 
 
 @needs_engine
-def test_fair_prob_keeps_gaussian_pricing_for_yardage_markets():
-    """The market parameter must not disturb continuous-prop pricing."""
-    from scipy.stats import norm
+def test_fair_prob_prices_yardage_markets_the_same_way_the_model_does():
+    """CLV must read the same curve the bet was priced on. Yardage moved from
+    the normal CDF to gamma survival in utils.nfl_markets; pricing CLV off the
+    old curve would book a probability change that never happened."""
+    from utils.nfl_markets import prob_over
 
     from utils.clv import _fair_prob
 
     mu, sigma, line = 55.0, 20.0, 50.5
     assert _fair_prob(
         line, -110, None, "over", mu=mu, sigma=sigma, market="receiving_yards"
-    ) == pytest.approx(float(1.0 - norm.cdf(line, loc=mu, scale=sigma)))
+    ) == pytest.approx(prob_over(mu, sigma, line, market="receiving_yards"))
 
 
 @needs_engine

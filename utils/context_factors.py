@@ -795,7 +795,20 @@ def context_factor_lookup(
 
     The intended shape at the mu site: call this once per market, then look up
     each player with a 1.0 default. An unknown player is never a silent zero.
+
+    A market this module does not model returns ``{}``, which the 1.0 default
+    turns into "no adjustment" — the same result as the feature flag being off.
+    The projection path in ``models/position_specific/weekly.py`` loops over
+    every registered market, so ``receptions`` and ``anytime_td`` reach here as
+    soon as they join the slate; raising there would take down the whole week's
+    predictions over a market that was never meant to carry a game-script
+    multiplier. The lower-level ``context_factors_for_week`` and
+    ``load_context_inputs`` still raise, because a direct call naming a market
+    they cannot compute is a caller bug.
     """
+    if market not in SUPPORTED_MARKETS:
+        return {}
+
     frame = context_factors_for_week(
         season, week, market, players=players, params=params, conn=conn
     )

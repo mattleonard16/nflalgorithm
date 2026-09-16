@@ -139,7 +139,13 @@ def test_weekly_event_selection_uses_entire_requested_schedule() -> None:
     ]
     unrelated = [{"id": "other-week", "commence_time": "2026-10-10T17:00:00Z"}]
 
-    selected = NFLPropScraper._select_scheduled_events(unrelated + requested, schedule)
+    # Pinned before the first kickoff. Coverage is only demanded for games that
+    # have not started, so a wall-clock run would stop exercising that as these
+    # dates age. Full coverage rules live in tests/test_odds_event_coverage.py,
+    # which CI runs; this file is skipped there (it imports private data_pipeline).
+    selected = NFLPropScraper._select_scheduled_events(
+        unrelated + requested, schedule, now=pd.Timestamp("2026-09-09T12:00:00Z")
+    )
 
     assert [event["id"] for event in selected] == [f"week-event-{day}" for day in range(12)]
 

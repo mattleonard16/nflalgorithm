@@ -812,3 +812,25 @@ class TestDatabaseBackedEntryPoints:
             conn.commit()
             frame = context_factors_for_week(2025, 10, "receiving_yards", conn=conn)
         assert int(frame.iloc[0]["context_n_games"]) == 9
+
+
+def test_lookup_skips_a_market_it_does_not_model():
+    """The projection path loops over every registered market. `receptions`
+    joining the slate crashed the whole 2026 week 2 run before this; an empty
+    dict plus the caller's 1.0 default means no adjustment, not no predictions."""
+    from utils.context_factors import context_factor_lookup
+
+    assert context_factor_lookup(2026, 2, "receptions") == {}
+    assert context_factor_lookup(2026, 2, "anytime_td") == {}
+
+
+def test_computing_an_unmodeled_market_directly_still_fails_loud():
+    """Only the lookup tolerates it. Naming a market the math cannot produce is
+    a caller bug everywhere else."""
+    import pandas as pd
+    import pytest
+
+    from utils.context_factors import context_factors_for_week
+
+    with pytest.raises(ValueError, match="Unsupported market"):
+        context_factors_for_week(2026, 2, "receptions", players=pd.DataFrame())

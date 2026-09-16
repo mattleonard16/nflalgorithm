@@ -6,11 +6,27 @@ import math
 
 import numpy as np
 import pandas as pd
-from scipy.stats import norm, poisson
+from scipy.stats import gamma, norm, poisson
 
 from sports.markets import get_sport
 
 MARKET_TO_STAT = {market: spec.stat_column for market, spec in get_sport("nfl").markets.items()}
+
+# Markets priced off a gamma distribution instead of a normal one. Weekly
+# yardage is right-skewed: a receiver clears his own season mean about 39% of
+# the time, so a normal centred on mu calls every over a coin flip and
+# overstates it. Measured on the 2025 walk-forward rows
+# (`reports/nfl_backtest_2025_sigma_v2_rows.csv`, 25,585 priced lines) the
+# normal curve ran +10.84pp long on receiving_yards, +7.53pp on rushing_yards
+# and +4.43pp on passing_yards. Gamma matched to the same mu and sigma cut
+# those to +1.46pp, -0.92pp and +0.69pp, and won on Brier score in all six
+# market-position buckets.
+#
+# `receptions` and `targets` are deliberately absent. They are counts, and the
+# walk-forward output carries no rows for either, so there is nothing to
+# calibrate a replacement against yet. `anytime_touchdown` keeps the Poisson
+# branch in `prob_over`.
+GAMMA_MARKETS = frozenset({"passing_yards", "rushing_yards", "receiving_yards"})
 
 # Physical stat columns present in `player_stats_enhanced` that cover every
 # market. `anytime_touchdown` maps to the virtual `anytime_td` column, which
@@ -57,13 +73,32 @@ def synthesize_anytime_td(df: pd.DataFrame) -> pd.DataFrame:
 def prob_over(mu: float, sigma: float, line: float, market: str | None = None) -> float:
     """Probability of going OVER a line.
 
-    Continuous yardage/reception props use the Gaussian normal CDF
-    ``1 - Phi((line - mu) / sigma)``. Touchdown props are a small count, not a
-    continuous quantity, so they price off Poisson survival instead, which
-    avoids Gaussian tail distortion. The line still chooses the threshold:
-    ``P(X > floor(line))``, so 0.5 asks for 1+ and 1.5 asks for 2+. Answering
-    1+ for every touchdown line regardless would roughly double the price of a
-    1.5 line.
+    Three curves, chosen by market:
+
+    Yardage markets (``GAMMA_MARKETS``) use gamma survival, matched to the
+    caller's mu and sigma by method of moments: shape ``(mu / sigma) ** 2``,
+    scale ``sigma ** 2 / mu``. Mean and variance come out equal to mu and
+    sigma squared, so sigma keeps the meaning ``utils/nfl_sigma.py`` calibrated
+    it to, and only the shape changes. Gamma is bounded at zero and
+    right-skewed, which is what a weekly yardage line looks like. See
+    ``GAMMA_MARKETS`` for the measured bias it removes.
+
+    Touchdown props are a small count, not a continuous quantity, so they price
+    off Poisson survival, which avoids Gaussian tail distortion. The line still
+    chooses the threshold: ``P(X > floor(line))``, so 0.5 asks for 1+ and 1.5
+    asks for 2+. Answering 1+ for every touchdown line regardless would roughly
+    double the price of a 1.5 line.
+
+    Everything else, and any yardage row with a non-positive mu where gamma is
+    undefined, falls back to the normal CDF ``1 - Phi((line - mu) / sigma)``.
+
+    A non-positive sigma is a degenerate distribution, a point mass at mu, so it
+    prices 1.0 above the line and 0.0 at or below it. ``scipy`` divides by the
+    scale and would return NaN, which a caller then averages into a report or
+    compares against an edge threshold, where it silently drops the row instead
+    of failing. ``nba_value_engine.prob_over`` already uses this convention.
+    ``compute_player_sigma`` floors every bucket, so production never reaches
+    here; bad input and direct callers do.
 
     Lives in this tracked module (rather than gitignored
     ``value_betting_engine.py``) so public market tests run in clean CI
@@ -71,6 +106,10 @@ def prob_over(mu: float, sigma: float, line: float, market: str | None = None) -
     """
     if market is not None and "touchdown" in market:
         return float(poisson.sf(math.floor(line), max(0.0, mu)))
+    if sigma <= 0:
+        return 1.0 if mu > line else 0.0
+    if market in GAMMA_MARKETS and mu > 0:
+        return float(gamma.sf(line, a=(mu / sigma) ** 2, scale=sigma**2 / mu))
     return float(1 - norm.cdf(line, loc=mu, scale=sigma))
 
 

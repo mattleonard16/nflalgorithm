@@ -5,13 +5,13 @@ from __future__ import annotations
 import math
 import pandas as pd
 import pytest
-from scipy.stats import norm, poisson
+from scipy.stats import gamma, norm, poisson
 
 from sports.markets import get_sport
 from sports.nfl import MARKETS, MARKET_MIN_EXPECTED_VOLUME
 from utils.nfl_markets import DATABASE_STAT_COLUMNS, melt_actuals, synthesize_anytime_td
 from utils.nfl_sigma import SIGMA_DEFAULTS, SIGMA_FLOORS, compute_player_sigma
-from utils.nfl_markets import prob_over
+from utils.nfl_markets import GAMMA_MARKETS, prob_over
 
 
 def test_nfl_markets_registration() -> None:
@@ -66,11 +66,73 @@ def test_poisson_probability_for_anytime_touchdown() -> None:
     expected_poisson = 1.0 - math.exp(-mu)
     assert p_td == pytest.approx(expected_poisson)
 
-    # Continuous market uses normal distribution
-    p_norm = prob_over(mu, sigma, line, market="rushing_yards")
+    # A continuous market does not get the Poisson branch. `receptions` is the
+    # one used here because it is still normal-priced; the yardage markets moved
+    # to gamma (see the GAMMA_MARKETS tests below).
+    p_norm = prob_over(mu, sigma, line, market="receptions")
     expected_norm = float(1.0 - norm.cdf(line, loc=mu, scale=sigma))
     assert p_norm == pytest.approx(expected_norm)
     assert p_td != p_norm
+
+
+def test_gamma_markets_are_the_yardage_markets_only() -> None:
+    # Receptions and targets are counts with no walk-forward rows to calibrate
+    # against, and anytime_touchdown prices off Poisson. Adding one here without
+    # measuring it first is the mistake this guards.
+    assert GAMMA_MARKETS == {"passing_yards", "rushing_yards", "receiving_yards"}
+
+
+@pytest.mark.parametrize("market", sorted(GAMMA_MARKETS))
+def test_gamma_preserves_mu_and_sigma(market: str) -> None:
+    # Method of moments: only the shape of the curve changes, so sigma keeps the
+    # meaning utils/nfl_sigma.py calibrated it to. A swapped shape/scale passes
+    # the "under 0.5" test below but fails this one.
+    mu, sigma = 62.0, 31.0
+    shape, scale = (mu / sigma) ** 2, sigma**2 / mu
+    assert gamma.mean(a=shape, scale=scale) == pytest.approx(mu)
+    assert gamma.std(a=shape, scale=scale) == pytest.approx(sigma)
+
+    expected = float(gamma.sf(55.5, a=shape, scale=scale))
+    assert prob_over(mu, sigma, 55.5, market=market) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("market", sorted(GAMMA_MARKETS))
+def test_yardage_line_at_mu_prices_below_even(market: str) -> None:
+    # The defect this change fixes. Weekly yardage is right-skewed, so a player
+    # clears his own mean less than half the time. The normal curve said exactly
+    # 50% and overstated every over by 4 to 11 percentage points.
+    mu, sigma = 62.0, 31.0
+    p_gamma = prob_over(mu, sigma, mu, market=market)
+    p_normal = prob_over(mu, sigma, mu, market="receptions")
+
+    assert p_normal == pytest.approx(0.5)
+    assert p_gamma < 0.47
+    assert p_gamma > 0.35
+
+
+@pytest.mark.parametrize("market", sorted(GAMMA_MARKETS))
+def test_prob_over_falls_as_the_line_rises(market: str) -> None:
+    prices = [prob_over(62.0, 31.0, line, market=market) for line in (20.5, 61.5, 99.5)]
+    assert prices == sorted(prices, reverse=True)
+    assert all(0.0 <= p <= 1.0 for p in prices)
+
+
+@pytest.mark.parametrize("mu", [0.0, -5.0])
+def test_yardage_falls_back_to_normal_when_mu_is_not_positive(mu: float) -> None:
+    # Gamma needs a positive mean. A zero-volume projection must still price.
+    p = prob_over(mu, 20.0, 30.5, market="receiving_yards")
+    assert p == pytest.approx(float(1.0 - norm.cdf(30.5, loc=mu, scale=20.0)))
+
+
+@pytest.mark.parametrize("market", ["receiving_yards", "receptions", None])
+def test_zero_sigma_prices_a_point_mass_rather_than_nan(market: str | None) -> None:
+    # scipy divides by the scale and returns NaN here. A NaN probability does not
+    # raise: it flows into edge, fails the >= threshold comparison, and the row
+    # vanishes from the card with no error logged anywhere.
+    assert prob_over(40.0, 0.0, 30.5, market=market) == 1.0
+    assert prob_over(20.0, 0.0, 30.5, market=market) == 0.0
+    assert prob_over(30.5, 0.0, 30.5, market=market) == 0.0
+    assert not math.isnan(prob_over(40.0, -1.0, 30.5, market=market))
 
 
 def test_touchdown_line_selects_the_threshold_not_just_one_plus() -> None:

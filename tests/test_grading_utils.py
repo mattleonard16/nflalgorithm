@@ -4,14 +4,22 @@ Covers:
 - grade_bet: over/under win/loss/push, NaN handling, exact line push
 - calculate_profit_units: positive/negative odds, win/loss/push, edge cases
 - get_confidence_tier: threshold boundaries and exact boundary values
+- align_actuals_to_bets: re-keying stat rows onto the ids the bets carry
 """
 
 from __future__ import annotations
 
 import math
 
+import pandas as pd
+import pytest
 
-from utils.grading import calculate_profit_units, get_confidence_tier, grade_bet
+from utils.grading import (
+    align_actuals_to_bets,
+    calculate_profit_units,
+    get_confidence_tier,
+    grade_bet,
+)
 
 
 # ======================================================================
@@ -267,3 +275,83 @@ class TestGetConfidenceTier:
     def test_3_boundary_is_inclusive_low_not_minimal(self):
         assert get_confidence_tier(3.0) == "LOW"
         assert get_confidence_tier(2.9) == "MINIMAL"
+
+
+# ======================================================================
+# align_actuals_to_bets
+# ======================================================================
+
+
+class TestAlignActualsToBets:
+    """Stat rows and bets mint player ids from different name spellings.
+
+    The bug: nothing matched, so every bet graded as a push with zero profit,
+    which is indistinguishable from a settled push in bet_outcomes and the CLV
+    average.
+    """
+
+    @staticmethod
+    def _roster() -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {"gsis_id": "00-0026498", "player_id": "LAR_matthew_stafford"},
+                {"gsis_id": "00-0039075", "player_id": "LAR_puka_nacua"},
+            ]
+        )
+
+    @staticmethod
+    def _actuals() -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {"gsis_id": "00-0026498", "player_id": "LAR_m_stafford", "passing_yards": 310.0},
+                {"gsis_id": "00-0039075", "player_id": "LAR_p_nacua", "receiving_yards": 88.0},
+            ]
+        )
+
+    def test_stat_rows_take_the_player_id_the_bets_use(self):
+        aligned = align_actuals_to_bets(self._actuals(), self._roster())
+        assert list(aligned["player_id"]) == ["LAR_matthew_stafford", "LAR_puka_nacua"]
+
+    def test_the_stats_themselves_are_untouched(self):
+        aligned = align_actuals_to_bets(self._actuals(), self._roster())
+        assert aligned.loc[0, "passing_yards"] == 310.0
+        assert aligned.loc[1, "receiving_yards"] == 88.0
+
+    def test_the_caller_frame_is_not_mutated(self):
+        actuals = self._actuals()
+        align_actuals_to_bets(actuals, self._roster())
+        assert list(actuals["player_id"]) == ["LAR_m_stafford", "LAR_p_nacua"]
+
+    def test_a_player_the_roster_does_not_carry_keeps_its_own_id(self):
+        """Dropping the row would silently turn a real result into a push."""
+        actuals = self._actuals()
+        actuals.loc[1, "gsis_id"] = "00-0099999"
+        aligned = align_actuals_to_bets(actuals, self._roster())
+        assert list(aligned["player_id"]) == ["LAR_matthew_stafford", "LAR_p_nacua"]
+        assert len(aligned) == 2
+
+    def test_a_blank_gsis_id_keeps_its_own_id(self):
+        actuals = self._actuals()
+        actuals.loc[0, "gsis_id"] = ""
+        actuals.loc[1, "gsis_id"] = None
+        aligned = align_actuals_to_bets(actuals, self._roster())
+        assert list(aligned["player_id"]) == ["LAR_m_stafford", "LAR_p_nacua"]
+
+    def test_a_roster_row_with_no_gsis_id_is_ignored_rather_than_matching_blanks(self):
+        roster = self._roster()
+        roster.loc[2] = {"gsis_id": "", "player_id": "LAR_ghost"}
+        actuals = self._actuals()
+        actuals.loc[0, "gsis_id"] = ""
+        aligned = align_actuals_to_bets(actuals, roster)
+        assert aligned.loc[0, "player_id"] == "LAR_m_stafford"
+
+    def test_an_empty_roster_leaves_the_ids_alone(self):
+        empty = pd.DataFrame(columns=["gsis_id", "player_id"])
+        aligned = align_actuals_to_bets(self._actuals(), empty)
+        assert list(aligned["player_id"]) == ["LAR_m_stafford", "LAR_p_nacua"]
+
+    def test_a_frame_missing_gsis_id_fails_loud(self):
+        with pytest.raises(ValueError, match="actuals missing required column: gsis_id"):
+            align_actuals_to_bets(self._actuals().drop(columns=["gsis_id"]), self._roster())
+        with pytest.raises(ValueError, match="roster missing required column: gsis_id"):
+            align_actuals_to_bets(self._actuals(), self._roster().drop(columns=["gsis_id"]))
