@@ -1,7 +1,7 @@
 """Closing Line Value (CLV) math for NFL weekly bets.
 
-Pure functions only — no database access — so the logic stays testable in CI
-even though the caller (``scripts/record_outcomes.py``) is gitignored.
+Pure functions only, with no database access and no import from a gitignored
+module, so CI can test all of it.
 
 CLV answers the only question that separates a lucky week from a real edge:
 did the market move toward the number we took? Two representations are
@@ -179,12 +179,29 @@ def _market_fair_prob(row: Any, price_key: str, under_key: str, side: str) -> fl
     over_odds = _as_odds(_cell(row, price_key))
     under_odds = _as_odds(_cell(row, under_key))
     if over_odds is not None and under_odds is not None:
-        from value_betting_engine import implied_probability_no_vig
-
-        p_over, p_under = implied_probability_no_vig(over_odds, under_odds)
-        # value_betting_engine is gitignored and untyped, so both are Any here.
-        return float(p_over if side == "over" else p_under)
+        p_over, p_under = no_vig_pair(over_odds, under_odds)
+        return p_over if side == "over" else p_under
     return _stored_fair_prob(row, side)
+
+
+def _raw_implied(odds: int) -> float:
+    """American odds to implied probability, bookmaker margin included."""
+    if odds < 0:
+        return -odds / (-odds + 100.0)
+    return 100.0 / (odds + 100.0)
+
+
+def no_vig_pair(over_odds: int, under_odds: int) -> tuple[float, float]:
+    """``(p_over, p_under)`` with the margin removed by normalizing to sum 1.
+
+    Same proportional de-vig as ``value_betting_engine.implied_probability_no_vig``.
+    It lives here too because grading must run from a public clone: importing
+    the gitignored engine broke CLV for every bet with a two-sided quote.
+    """
+    raw_over = _raw_implied(over_odds)
+    raw_under = _raw_implied(under_odds)
+    total = raw_over + raw_under
+    return raw_over / total, raw_under / total
 
 
 def _cell(row: Any, key: str) -> Any:
@@ -217,24 +234,14 @@ def _fair_prob(
     Callers must guarantee one of the two paths is available; the raise is a
     programming-error guard, not an expected branch.
 
-    ``implied_probability_no_vig`` is imported here rather than at module scope:
-    it still lives in gitignored ``value_betting_engine``, so a top-level import
-    makes this module — and every test that touches it — fail to import in CI,
-    which is the opposite of why the math lives in a tracked file. Tests that
-    exercise the no-vig path must inject prices and are skipped when the private
-    module is absent. The single-price fallback has no such constraint: it takes
-    ``prob_over`` from tracked ``utils.nfl_markets``, so CI covers it. That is
-    only true if the import sits inside the two-sided branch: at the top of the
-    function it raised ImportError before the fallback was ever reached, which
-    took the model path down in CI too.
+    Both paths use tracked code only (``no_vig_pair`` and
+    ``utils.nfl_markets.prob_over``), so CI covers them.
     """
     over_odds = _as_odds(price)
     under_odds = _as_odds(under_price)
 
     if over_odds is not None and under_odds is not None:
-        from value_betting_engine import implied_probability_no_vig
-
-        p_over, p_under = implied_probability_no_vig(over_odds, under_odds)
+        p_over, p_under = no_vig_pair(over_odds, under_odds)
     elif mu is not None and sigma is not None and sigma > 0:
         p_over = prob_over(mu, sigma, float(line), market=market)
         p_under = 1.0 - p_over
