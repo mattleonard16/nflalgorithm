@@ -380,6 +380,21 @@ class TestNbaValueBets:
         assert data["bets"][0]["sportsbook"] == "DraftKings"
         assert data["bets"][0]["edge_percentage"] == pytest.approx(0.12)
 
+    def test_value_bets_load_when_one_row_lacks_an_under_price(self, client, db):
+        # pandas reads the NULL as NaN beside real prices, and int(NaN) raises.
+        _seed_value_bet()
+        _seed_value_bet_second()
+        execute(
+            "UPDATE nba_materialized_value_view SET under_price = NULL WHERE player_id = ?",
+            params=(1628384,),
+        )
+
+        resp = client.get("/api/nba/value-bets", params={"game_date": "2026-02-17"})
+
+        assert resp.status_code == 200
+        unders = {b["player_name"]: b["under_price"] for b in resp.json()["bets"]}
+        assert unders == {"Jayson Tatum": -105, "Jaylen Brown": None}
+
     def test_value_bets_filters_echoed_in_response(self, client, db):
         resp = client.get(
             "/api/nba/value-bets",

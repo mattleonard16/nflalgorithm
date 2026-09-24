@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from api.cache import nba_cache, make_cache_key
 from api.pipeline_router import require_pipeline_operator
 from api.nba_explainability import build_why_payload, build_why_payloads_batch
+from api.records import json_records
 from utils.db import fetchall, fetchone, read_dataframe
 
 log = logging.getLogger(__name__)
@@ -400,7 +401,7 @@ def nba_projections(
         team_matchup[g["away_team"]] = f"{g['away_team']} @ {g['home_team']}"
 
     projections = []
-    for _, row in df.iterrows():
+    for row in json_records(df):
         matchup = team_matchup.get(row["team"])
         projections.append(
             NbaProjection(
@@ -487,7 +488,7 @@ def nba_players(
             avg_fg3m=float(row["avg_fg3m"] or 0),
             avg_min=float(row["avg_min"] or 0),
         )
-        for _, row in df.iterrows()
+        for row in json_records(df)
     ]
 
     result = NbaPlayersResponse(players=players, season=season, total=len(players))
@@ -605,7 +606,7 @@ def _build_bet_items(df: Any) -> list[NbaValueBetItem]:
             generated_at=str(row["generated_at"]) if row.get("generated_at") is not None else None,
             side=str(row["side"]) if row.get("side") is not None else None,
         )
-        for _, row in df.iterrows()
+        for row in json_records(df)
     ]
 
 

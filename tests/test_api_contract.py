@@ -161,6 +161,39 @@ class TestValueBetsContract:
         assert data["total"] == 0
         assert "filters" in data
 
+    def test_a_row_missing_a_text_field_does_not_fail_the_week(self, client, db):
+        # pandas reads NULL text as NaN when other rows have a value, and the
+        # response model rejects NaN, so one such row used to 500 the request.
+        _seed_value_bet(db, player_id="P001", week=20)
+        _seed_value_bet(db, player_id="P002", week=20, confidence_tier=None)
+
+        resp = client.get("/api/value-bets?season=2025&week=20")
+
+        assert resp.status_code == 200
+        tiers = {b["player_id"]: b["confidence_tier"] for b in resp.json()["bets"]}
+        assert tiers == {"P001": "Premium", "P002": None}
+
+    def test_outcomes_with_an_ungraded_push_still_load(self, client, db):
+        # A push for a player with no stats row stores NULL actual_result next
+        # to real numbers. That NaN is not valid JSON and failed the request.
+        for bet_id, actual in (("graded", 71.0), ("no-stats", None)):
+            execute(
+                """
+                INSERT INTO bet_outcomes (
+                    bet_id, season, week, player_id, market, sportsbook, side,
+                    line, price, actual_result, result, profit_units, recorded_at
+                ) VALUES (?, 2025, 19, 'P001', 'receiving_yards', 'draftkings', 'over',
+                          64.5, -110, ?, 'win', 0.91, '2026-01-20T12:00:00Z')
+                """,
+                (bet_id, actual),
+            )
+
+        resp = client.get("/api/outcomes?season=2025&week=19")
+
+        assert resp.status_code == 200
+        results = {o["bet_id"]: o["actual_result"] for o in resp.json()["outcomes"]}
+        assert results == {"graded": 71.0, "no-stats": None}
+
     def test_include_why_param(self, client, db):
         _seed_value_bet(db)
         resp = client.get("/api/value-bets?season=2025&week=22&include_why=true")
