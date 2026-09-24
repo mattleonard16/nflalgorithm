@@ -6,6 +6,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 # Ensure project root is on sys.path so tests can import top-level modules
 # like schema_migrations, config, utils, scripts, etc.
 _project_root = str(Path(__file__).parent.parent)
@@ -73,9 +75,33 @@ else:
 
 # Apply the schema deliberately instead of relying on a test-specific
 # MigrationManager call to mutate this shared database as a side effect.
+from config import config
 from schema_migrations import MigrationManager
 
 MigrationManager(TEST_DB_PATH if TEST_DB_BACKEND == "sqlite" else "unused-mysql-path").run()
+
+
+@pytest.fixture()
+def matrix_database(tmp_path, monkeypatch) -> str:
+    """Point the app at the backend TEST_DB_BACKEND selects, migrated, and return its name.
+
+    SQLite gets a fresh file per test. MySQL is one shared server database, so a
+    test clears the tables it writes before relying on row counts.
+    """
+    if TEST_DB_BACKEND == "sqlite":
+        db_path = str(tmp_path / "matrix.db")
+        monkeypatch.setenv("DB_BACKEND", "sqlite")
+        monkeypatch.setenv("SQLITE_DB_PATH", db_path)
+        monkeypatch.setattr(config.database, "backend", "sqlite")
+        monkeypatch.setattr(config.database, "path", db_path)
+        MigrationManager(db_path).run()
+    else:
+        monkeypatch.setenv("DB_BACKEND", "mysql")
+        monkeypatch.setenv("DB_URL", os.environ["TEST_DB_URL"])
+        monkeypatch.setattr(config.database, "backend", "mysql")
+        monkeypatch.setattr(config.database, "db_url", os.environ["TEST_DB_URL"])
+        MigrationManager("unused-mysql-path").run()
+    return TEST_DB_BACKEND
 
 
 # Shared fixture for clearing NBA cache before tests that use TestClient
