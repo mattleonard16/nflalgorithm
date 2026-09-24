@@ -14,6 +14,7 @@ import json
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 from learning_loop import (
     MARKET_TO_STAT,
@@ -25,6 +26,7 @@ from learning_loop import (
     recommend_threshold_updates,
     update_agent_performance,
 )
+from utils.db import execute, fetchone
 
 
 # ======================================================================
@@ -197,6 +199,34 @@ class TestUpdateAgentPerformance:
         result = update_agent_performance(2025, 19)
         assert result == 2
         mock_exec.assert_called_once()
+
+
+class TestAgentPerformanceUpsert:
+    """Relearning a week replaces its records, on SQLite and MySQL."""
+
+    @pytest.fixture()
+    def graded_week(self, matrix_database):
+        for table in ("agent_performance", "agent_decisions", "bet_outcomes"):
+            execute(f"DELETE FROM {table}")
+        execute(
+            "INSERT INTO agent_decisions (season, week, player_id, market, decision, "
+            "merged_confidence, votes, rationale, coordinator_override, agent_reports, "
+            "decided_at) VALUES (2026, 1, 'P1', 'rushing_yards', 'APPROVED', 0.8, '{}', "
+            "'test', 0, ?, '2026-09-10T00:00:00Z')",
+            (json.dumps([{"agent": "odds_agent", "recommendation": "APPROVE"}]),),
+        )
+        execute(
+            "INSERT INTO bet_outcomes (bet_id, season, week, player_id, market, sportsbook, "
+            "side, line, price, result, profit_units, recorded_at) VALUES ('b1', 2026, 1, "
+            "'P1', 'rushing_yards', 'DraftKings', 'over', 64.5, -110, 'win', 0.91, "
+            "'2026-09-15T00:00:00Z')"
+        )
+
+    def test_relearning_a_week_replaces_its_records(self, graded_week):
+        update_agent_performance(2026, 1)
+
+        assert update_agent_performance(2026, 1) == 1
+        assert fetchone("SELECT COUNT(*) FROM agent_performance")[0] == 1
 
 
 # ======================================================================
