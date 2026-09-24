@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 # Minimum number of agents that must agree for consensus approval
 CONSENSUS_THRESHOLD = 3
 
+# Lower is more cautious. An agent that rejects one report on a prop and
+# approves another has not approved the prop.
+_CAUTION = {"REJECT": 0, "NEUTRAL": 1, "APPROVE": 2}
+
 
 def _group_reports(
     all_reports: List[AgentReport],
@@ -38,6 +42,20 @@ def _group_reports(
         key = (report.player_id, report.market)
         groups[key].append(report)
     return dict(groups)
+
+
+def _one_vote_per_agent(reports: List[AgentReport]) -> List[AgentReport]:
+    """Keep each agent's most cautious report, so the threshold counts agents.
+
+    The risk agent reads the value card, which can price one bet at several
+    books and list both sides of a prop. Each row used to be its own vote.
+    """
+    kept: Dict[str, AgentReport] = {}
+    for r in reports:
+        current = kept.get(r.agent_name)
+        if current is None or _CAUTION[r.recommendation] < _CAUTION[current.recommendation]:
+            kept[r.agent_name] = r
+    return list(kept.values())
 
 
 def _resolve_consensus(
@@ -59,7 +77,7 @@ def _resolve_consensus(
     rationale_parts: List[str] = []
     agent_summaries: List[Dict[str, Any]] = []
 
-    for r in reports:
+    for r in _one_vote_per_agent(reports):
         votes[r.recommendation] = votes.get(r.recommendation, 0) + 1
         weighted_conf_sum += r.confidence
         total_conf += 1.0

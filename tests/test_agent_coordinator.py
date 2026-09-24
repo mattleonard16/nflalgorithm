@@ -29,6 +29,7 @@ from agents.odds_agent import (
 from agents.model_diagnostics_agent import (
     _flag_suspicious,
 )
+from agents.risk_agent import RiskAgent
 
 
 # ======================================================================
@@ -298,6 +299,51 @@ class TestResolveConsensus:
         result = _resolve_consensus(reports)
         assert len(result["agent_reports"]) == 1
         assert result["agent_reports"][0]["agent"] == "odds"
+
+    def test_an_agent_votes_once_however_many_reports_it_sends(self):
+        # The threshold counts agents. Three reports from one agent are not
+        # three agents agreeing.
+        reports = [
+            _make_report("odds", "APPROVE"),
+            _make_report("model", "APPROVE"),
+            *[_make_report("risk", "REJECT") for _ in range(3)],
+        ]
+        result = _resolve_consensus(reports)
+        assert result["votes"] == {"APPROVE": 2, "REJECT": 1, "NEUTRAL": 0}
+
+    def test_an_agent_split_on_one_prop_votes_its_most_cautious_report(self):
+        reports = [_make_report("risk", "APPROVE"), _make_report("risk", "REJECT")]
+        result = _resolve_consensus(reports)
+        assert result["votes"] == {"APPROVE": 0, "REJECT": 1, "NEUTRAL": 0}
+
+
+class TestRiskAgent:
+    def test_a_bet_priced_at_several_books_gets_one_report(self, monkeypatch):
+        # Each book's copy of a bet shares its team, so the copies used to flag
+        # each other as a same-team stack and reject the bet.
+        card = pd.DataFrame(
+            [
+                {
+                    "player_id": "P001",
+                    "market": "receiving_yards",
+                    "side": "over",
+                    "team": "KC",
+                    "event_id": "2026_01_KC_BUF",
+                    "sportsbook": book,
+                    "price": -110,
+                    "p_win": 0.58,
+                    "edge_percentage": edge,
+                    "kelly_fraction": 0.01,
+                    "stake": 10.0,
+                }
+                for book, edge in (("DraftKings", 0.08), ("FanDuel", 0.12), ("Bovada", 0.06))
+            ]
+        )
+        monkeypatch.setattr(RiskAgent, "_load_value_view", lambda self, *args: card)
+
+        reports = RiskAgent().analyze(2026, 1)
+
+        assert [r.recommendation for r in reports] == ["APPROVE"]
 
 
 # ======================================================================
