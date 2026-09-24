@@ -278,6 +278,12 @@ from tracked modules only.
   inside `_rebuild_mvv_pk_if_needed`; schema changes must land in both copies.
 - Most proprietary logic is gitignored, but not all — see the Proprietary Files section for the
   exact set and why it matters for CI.
+- `materialized_value_view` has one row per sportsbook for each (player, market, side). Anything
+  that counts, stakes, grades, or votes on bets goes through `utils/best_line.best_line_per_bet`
+  first, or a bet priced at five books counts five times. Grading, the API panels, the risk
+  agent, and `make risk-check` already do. The portfolio stake cap in
+  `materialized_value_view.materialize_week` does not yet: it caps the sum over every book's row,
+  so on the 2026 week 1 card the best-line stakes total 230.81 of a 1000 bankroll.
 - Use `make fullstack` for complete local development environment
 - Front-end dashboard is in `/frontend` (Next.js + TypeScript)
 - Legacy Streamlit dashboard available via `make dashboard`
