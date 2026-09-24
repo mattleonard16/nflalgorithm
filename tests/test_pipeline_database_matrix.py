@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -11,30 +10,13 @@ from threading import Barrier
 
 import pytest
 
-from config import config
 from pipeline_jobs.service import JobService
 from pipeline_jobs.worker import PipelineWorker
-from schema_migrations import MigrationManager
 from utils.db import execute, fetchone, get_connection
 
 
 @pytest.fixture()
-def runtime_database(tmp_path, monkeypatch) -> str:
-    backend = os.getenv("TEST_DB_BACKEND", "sqlite").lower()
-    if backend == "sqlite":
-        db_path = str(tmp_path / "pipeline-matrix.db")
-        monkeypatch.setenv("DB_BACKEND", "sqlite")
-        monkeypatch.setenv("SQLITE_DB_PATH", db_path)
-        monkeypatch.setattr(config.database, "backend", "sqlite")
-        monkeypatch.setattr(config.database, "path", db_path)
-        MigrationManager(db_path).run()
-    else:
-        monkeypatch.setenv("DB_BACKEND", "mysql")
-        monkeypatch.setenv("DB_URL", os.environ["TEST_DB_URL"])
-        monkeypatch.setattr(config.database, "backend", "mysql")
-        monkeypatch.setattr(config.database, "db_url", os.environ["TEST_DB_URL"])
-        MigrationManager("unused-mysql-path").run()
-
+def runtime_database(matrix_database) -> str:
     with get_connection() as conn:
         for table in (
             "pipeline_artifacts",
@@ -46,7 +28,7 @@ def runtime_database(tmp_path, monkeypatch) -> str:
         ):
             execute(f"DELETE FROM {table}", conn=conn)
         conn.commit()
-    return backend
+    return matrix_database
 
 
 def test_concurrent_workers_never_double_claim(runtime_database) -> None:

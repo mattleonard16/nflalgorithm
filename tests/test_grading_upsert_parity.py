@@ -3,46 +3,24 @@
 The grading path previously used SQLite-only `INSERT OR REPLACE`, which MySQL
 rejects outright. Re-grading a week has to overwrite in place rather than
 duplicate or fail, so these run against whichever backend TEST_DB_BACKEND
-selects (MySQL side skips when no server is configured).
+selects.
 """
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
-from config import config
-from schema_migrations import MigrationManager
 from scripts.record_outcomes import save_outcomes
 from utils.db import execute, fetchone, get_connection
 
 
 @pytest.fixture()
-def graded_database(tmp_path, monkeypatch) -> str:
-    backend = os.getenv("TEST_DB_BACKEND", "sqlite").lower()
-    if backend == "sqlite":
-        db_path = str(tmp_path / "grading-parity.db")
-        monkeypatch.setenv("DB_BACKEND", "sqlite")
-        monkeypatch.setenv("SQLITE_DB_PATH", db_path)
-        monkeypatch.setattr(config.database, "backend", "sqlite")
-        monkeypatch.setattr(config.database, "path", db_path)
-        MigrationManager(db_path).run()
-    else:
-        test_db_url = os.getenv("TEST_DB_URL")
-        if not test_db_url:
-            pytest.skip("TEST_DB_BACKEND=mysql requires TEST_DB_URL")
-        monkeypatch.setenv("DB_BACKEND", "mysql")
-        monkeypatch.setenv("DB_URL", test_db_url)
-        monkeypatch.setattr(config.database, "backend", "mysql")
-        monkeypatch.setattr(config.database, "db_url", test_db_url)
-        MigrationManager("unused-mysql-path").run()
-
+def graded_database(matrix_database) -> str:
     with get_connection() as conn:
         for table in ("clv_weekly", "bet_outcomes", "weekly_performance", "weekly_odds"):
             execute(f"DELETE FROM {table}", conn=conn)
         conn.commit()
-    return backend
+    return matrix_database
 
 
 def _outcome(**overrides) -> dict:
