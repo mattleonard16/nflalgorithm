@@ -23,6 +23,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import config
+from utils.best_line import best_line_per_bet
 from utils.db import executemany, read_dataframe
 from utils.risk_utils import append_warning, monte_carlo_drawdown, risk_adjusted_kelly
 
@@ -295,7 +296,9 @@ def run_risk_check(game_date: str) -> pd.DataFrame:
     bankroll = config.betting.bankroll
     df = df.assign(stake=df["kelly_fraction"] * bankroll)
 
-    assessed = assess_risk(df, bankroll)
+    # One row per bet, not per book: see agents/nba_risk_agent.py.
+    bets = best_line_per_bet(df, keys=("player_id", "market"))
+    assessed = assess_risk(bets, bankroll)
     persisted = _persist_risk_assessments(assessed, game_date)
     _print_risk_report(assessed, persisted)
     return assessed
