@@ -363,8 +363,8 @@ async def get_value_bets(
 
         return result
     except Exception as e:
-        logger.error(f"Error fetching value bets: {e}")
-        raise HTTPException(status_code=500, detail=f"Error fetching value bets: {str(e)}")
+        logger.exception("Error fetching value bets")
+        raise HTTPException(status_code=500, detail="Value bets unavailable") from e
 
 
 @app.get("/api/performance")
@@ -797,8 +797,8 @@ async def get_explainability(
         payload = build_why_payload(season, week, player_id, market)
         return {"player_id": player_id, "market": market, "why": payload}
     except Exception as e:
-        logger.error(f"Error building explainability: {e}")
-        raise HTTPException(status_code=500, detail=f"Explainability error: {str(e)}")
+        logger.exception("Error building explainability")
+        raise HTTPException(status_code=500, detail="Explanation unavailable") from e
 
 
 # ── Risk & correlation endpoints (Feature 5) ─────────────────────────
@@ -868,8 +868,8 @@ async def get_correlation_analysis(
 
         return {"correlation_groups": groups, "team_stacks": team_stack_list}
     except Exception as e:
-        logger.error(f"Error in correlation analysis: {e}")
-        raise HTTPException(status_code=500, detail=f"Correlation analysis error: {str(e)}")
+        logger.exception("Error in correlation analysis")
+        raise HTTPException(status_code=500, detail="Correlation analysis unavailable") from e
 
 
 @app.get("/api/analytics/risk-summary")
@@ -950,8 +950,8 @@ async def get_risk_summary(
             "warnings": warnings,
         }
     except Exception as e:
-        logger.error(f"Error in risk summary: {e}")
-        raise HTTPException(status_code=500, detail=f"Risk summary error: {str(e)}")
+        logger.exception("Error in risk summary")
+        raise HTTPException(status_code=500, detail="Risk summary unavailable") from e
 
 
 # ── Export endpoints (P1: UX polish) ─────────────────────────────
@@ -1012,8 +1012,8 @@ async def export_csv(
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
     except Exception as e:
-        logger.error(f"Error exporting CSV: {e}")
-        raise HTTPException(status_code=500, detail=f"Export error: {str(e)}")
+        logger.exception("Error exporting CSV")
+        raise HTTPException(status_code=500, detail="CSV export unavailable") from e
 
 
 @app.get("/api/export/bundle")
@@ -1112,8 +1112,8 @@ async def export_bundle(
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
     except Exception as e:
-        logger.error(f"Error exporting bundle: {e}")
-        raise HTTPException(status_code=500, detail=f"Export bundle error: {str(e)}")
+        logger.exception("Error exporting bundle")
+        raise HTTPException(status_code=500, detail="Export bundle unavailable") from e
 
 
 # ── Agent review endpoint (P2: Agent teamwork) ──────────────────
