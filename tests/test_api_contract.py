@@ -263,6 +263,35 @@ class TestAnalyticsContract:
         assert sum(data["counts"]) == 2
 
 
+class TestPerformanceContract:
+    """Season totals weigh every settled bet equally, as each week's own ROI does."""
+
+    @pytest.fixture()
+    def a_big_week_and_a_small_one(self, db):
+        rows = (
+            # week, total_bets, wins, losses, pushes, profit_units, roi_pct
+            (1, 100, 60, 40, 0, 10.0, 10.0),
+            (2, 20, 0, 10, 10, -10.0, -100.0),
+        )
+        for week, total, wins, losses, pushes, profit, roi in rows:
+            execute(
+                "INSERT INTO weekly_performance (season, week, total_bets, wins, losses, "
+                "pushes, profit_units, roi_pct, updated_at) "
+                "VALUES (2025, ?, ?, ?, ?, ?, ?, ?, '2025-12-01T00:00:00Z')",
+                (week, total, wins, losses, pushes, profit, roi),
+            )
+
+    def test_overall_roi_is_profit_over_settled_bets(self, client, a_big_week_and_a_small_one):
+        data = client.get("/api/performance?season=2025").json()
+
+        assert data["overall_roi"] == pytest.approx(0.0)
+
+    def test_win_rate_leaves_out_pushes(self, client, a_big_week_and_a_small_one):
+        data = client.get("/api/performance?season=2025").json()
+
+        assert data["win_rate"] == pytest.approx(60 / 110 * 100)
+
+
 def _leaky_failure(*args, **kwargs):
     raise RuntimeError("connect failed for db password hunter2")
 

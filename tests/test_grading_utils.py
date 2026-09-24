@@ -19,6 +19,8 @@ from utils.grading import (
     calculate_profit_units,
     get_confidence_tier,
     grade_bet,
+    settled_roi_pct,
+    settled_win_rate_pct,
 )
 
 
@@ -355,3 +357,18 @@ class TestAlignActualsToBets:
             align_actuals_to_bets(self._actuals().drop(columns=["gsis_id"]), self._roster())
         with pytest.raises(ValueError, match="roster missing required column: gsis_id"):
             align_actuals_to_bets(self._actuals(), self._roster().drop(columns=["gsis_id"]))
+
+
+# ======================================================================
+# settled_roi_pct / settled_win_rate_pct
+# ======================================================================
+
+
+class TestSettledRates:
+    def test_pushes_are_neither_risked_nor_won(self):
+        assert settled_roi_pct(wins=6, losses=3, profit_units=2.5) == pytest.approx(2.5 / 9 * 100)
+        assert settled_win_rate_pct(wins=6, losses=3) == pytest.approx(6 / 9 * 100)
+
+    def test_a_week_of_only_pushes_is_zero_not_a_division_error(self):
+        assert settled_roi_pct(wins=0, losses=0, profit_units=0.0) == 0.0
+        assert settled_win_rate_pct(wins=0, losses=0) == 0.0
