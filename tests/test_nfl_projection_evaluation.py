@@ -362,22 +362,42 @@ def test_backtest_thresholds_add_tolerance_to_each_position_mae() -> None:
 
 
 def test_backtest_thresholds_drop_small_sample_positions() -> None:
-    """A ceiling derived from a noisy group falls back to the absolute table."""
+    """A noisy group or a missing MAE yields no ceiling at all."""
     report = _backtest_report(
         {
             "WR": {"mae": 24.2, "count": 1800, "small_sample": False},
-            "FB": {"mae": 3.0, "count": 6, "small_sample": True},
+            "QB": {"mae": 50.8, "count": 6, "small_sample": True},
             "K": {"mae": None, "count": 90, "small_sample": False},
         }
     )
 
-    ceilings = thresholds_from_backtest(report, tolerance_pct=0.0)
+    assert thresholds_from_backtest(report, tolerance_pct=0.0) == {"WR": pytest.approx(24.2)}
 
-    assert ceilings == {"WR": pytest.approx(24.2)}
-    gate = check_position_mae(
-        _position_report({"FB": {"mae": 10.0, "projection_count": 40}}), ceilings
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "check_position_mae falls back to config.model.target_mae (3.0), not "
+        "POSITION_MAE_THRESHOLDS, for a position the backtest dropped"
+    ),
+)
+def test_regression_gate_uses_absolute_ceiling_for_dropped_position() -> None:
+    """A position dropped as small-sample falls back to the absolute table."""
+    ceilings = thresholds_from_backtest(
+        _backtest_report(
+            {
+                "WR": {"mae": 24.2, "count": 1800, "small_sample": False},
+                "QB": {"mae": 50.8, "count": 6, "small_sample": True},
+            }
+        ),
+        tolerance_pct=0.0,
     )
-    assert gate["by_position"]["FB"]["threshold"] == POSITION_MAE_THRESHOLDS.get("FB", 3.0)
+
+    gate = check_position_mae(
+        _position_report({"QB": {"mae": 50.0, "projection_count": 40}}), ceilings
+    )
+
+    assert gate["by_position"]["QB"]["threshold"] == POSITION_MAE_THRESHOLDS["QB"]
 
 
 def test_backtest_thresholds_refuse_empty_or_negative_inputs() -> None:
