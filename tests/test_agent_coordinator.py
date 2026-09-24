@@ -23,6 +23,7 @@ from agents.coordinator import (
     run_all_agents,
 )
 from agents.odds_agent import (
+    OddsAgent,
     _best_prices,
     _detect_steam_moves,
 )
@@ -421,6 +422,25 @@ class TestSteamMoveDetection:
         ])
         result = _detect_steam_moves(df)
         assert result.empty
+
+
+class TestOddsAgent:
+    def test_a_line_move_flags_only_the_market_that_moved(self, monkeypatch):
+        odds = pd.DataFrame(
+            [
+                ("receiving_yards", 64.5, "2026-09-10T12:00:00Z"),
+                ("receiving_yards", 68.5, "2026-09-12T12:00:00Z"),
+                ("receptions", 5.5, "2026-09-10T12:00:00Z"),
+                ("receptions", 5.5, "2026-09-12T12:00:00Z"),
+            ],
+            columns=["market", "line", "as_of"],
+        ).assign(player_id="P001", sportsbook="DraftKings", price=-110)
+        monkeypatch.setattr(OddsAgent, "_load_odds", lambda self, *args: odds)
+
+        reports = OddsAgent().analyze(2026, 1)
+
+        verdicts = {r.market: r.recommendation for r in reports}
+        assert verdicts == {"receiving_yards": "REJECT", "receptions": "APPROVE"}
 
 
 class TestBestPrices:
