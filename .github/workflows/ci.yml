@@ -109,7 +109,7 @@ jobs:
           pip install uv
           uv venv
           uv pip install -r requirements.txt
-      - name: Run MySQL queue, lease, and grading tests
+      - name: Run MySQL queue, lease, grading, and agent write tests
         env:
           TEST_DB_BACKEND: mysql
           TEST_DB_URL: mysql://nfl:nfltest@127.0.0.1:3306/nfl_test
@@ -117,6 +117,8 @@ jobs:
           uv run python -m pytest -v
           tests/test_pipeline_database_matrix.py
           tests/test_grading_upsert_parity.py
+          tests/test_agent_coordinator.py::TestPersistDecisions
+          tests/test_learning_loop.py::TestAgentPerformanceUpsert
 
   lint-frontend:
     runs-on: ubuntu-latest
