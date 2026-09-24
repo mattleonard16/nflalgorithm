@@ -28,6 +28,7 @@ from utils.grading import (
 )
 from utils.live_odds import kickoffs_from_games
 from utils.nfl_markets import MARKET_TO_STAT, synthesize_anytime_td
+from utils.odds_quality import SYNTHETIC_SPORTSBOOK, is_synthetic_book
 
 
 def make_bet_id(
@@ -88,6 +89,17 @@ def grade_bets(season: int, week: int, include_unfinished: bool = False) -> List
         return []
 
     print(f"Found {len(predictions)} predictions")
+
+    # SimBook lines are derived from this week's actual stats, so a bet against
+    # one wins by construction. The dashboard never shows them; neither should
+    # the graded record.
+    synthetic = predictions["sportsbook"].map(is_synthetic_book)
+    if synthetic.any():
+        print(f"Skipping {int(synthetic.sum())} synthetic {SYNTHETIC_SPORTSBOOK} line(s)")
+        predictions = predictions[~synthetic]
+        if predictions.empty:
+            print("No real sportsbook lines to grade")
+            return []
 
     # Load actual stats
     actuals_query = """

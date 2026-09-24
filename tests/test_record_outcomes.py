@@ -62,3 +62,14 @@ def test_a_bet_priced_at_several_books_is_graded_once_at_the_best_one(card_datab
 
     graded = sorted((o["side"], o["sportsbook"], o["line"]) for o in outcomes)
     assert graded == [("over", "FanDuel", 63.5), ("under", "FanDuel", 90.5)]
+
+
+def test_synthetic_lines_are_never_graded(card_database) -> None:
+    # SimBook lines come from the week's own stats, so their edge is circular.
+    # The dashboard hides them; grading one would count a bet nobody was shown.
+    _card_row("SimBook", 60.5, 0.40)
+    _card_row("DraftKings", 64.5, 0.08)
+
+    outcomes = grade_bets(2026, 1)
+
+    assert [o["sportsbook"] for o in outcomes] == ["DraftKings"]

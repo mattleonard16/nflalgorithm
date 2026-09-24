@@ -1,7 +1,7 @@
 """Screen odds snapshots that must not reach the value or CLV path.
 
 Pure functions only — no database access — so the rules stay testable in CI
-even though the writers and the grading script are gitignored.
+even though the odds writers are gitignored.
 
 Two independent disqualifiers, deliberately kept separate because they have
 different lifetimes:
