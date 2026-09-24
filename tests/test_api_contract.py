@@ -263,6 +263,33 @@ class TestAnalyticsContract:
         assert sum(data["counts"]) == 2
 
 
+def _leaky_failure(*args, **kwargs):
+    raise RuntimeError("connect failed for db password hunter2")
+
+
+@pytest.mark.parametrize(
+    ("path", "failing_call"),
+    [
+        ("/api/value-bets?season=2025&week=22", "api.server.read_dataframe"),
+        (
+            "/api/explain/P001/receiving_yards?season=2025&week=22",
+            "api.explainability.build_why_payload",
+        ),
+        ("/api/analytics/correlation?season=2025&week=22", "api.server.read_dataframe"),
+        ("/api/analytics/risk-summary?season=2025&week=22", "api.server.read_dataframe"),
+        ("/api/export/csv?season=2025&week=22", "api.server.read_dataframe"),
+        ("/api/export/bundle?season=2025&week=22", "api.server.read_dataframe"),
+    ],
+)
+def test_a_server_error_never_shows_the_exception_text(client, monkeypatch, path, failing_call):
+    monkeypatch.setattr(failing_call, _leaky_failure)
+
+    resp = client.get(path)
+
+    assert resp.status_code == 500
+    assert "hunter2" not in resp.text
+
+
 class TestPipelineRunContract:
     def test_post_returns_run_fields(self, client):
         resp = client.post("/api/run?season=2025&week=22&skip_ingest=true&skip_odds=true")
