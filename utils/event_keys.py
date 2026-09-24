@@ -34,6 +34,10 @@ from utils.player_id_utils import canonicalize_team
 _CANONICAL_RE = re.compile(
     r"^(?P<season>\d{4})_(?P<week>\d{2})_(?P<away>[A-Z]{2,3})_(?P<home>[A-Z]{2,3})$"
 )
+# nflverse spells the Rams "LA" inside game_id while every other table and
+# the canonical club code use "LAR". The key must equal games.game_id byte
+# for byte or every Rams game loses its kickoff, its CLV, and its card rows.
+_GAME_ID_CODES = {"LAR": "LA"}
 
 
 class UnresolvableEventError(ValueError):
@@ -71,7 +75,9 @@ def canonical_event_id(season: int, week: int, away_team: str, home_team: str) -
     if away == home:
         raise UnresolvableEventError(f"team cannot play itself: {away}")
 
-    return f"{season_int}_{week_int:02d}_{away}_{home}"
+    away_code = _GAME_ID_CODES.get(away, away)
+    home_code = _GAME_ID_CODES.get(home, home)
+    return f"{season_int}_{week_int:02d}_{away_code}_{home_code}"
 
 
 def is_canonical_event_id(value: object) -> bool:

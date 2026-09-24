@@ -164,3 +164,9 @@ class TestEventIdForTeam:
         # A failed schedule load must not silently produce keys.
         with pytest.raises(UnresolvableEventError):
             event_id_for_team(2025, 1, "PHI", {})
+
+
+def test_rams_key_uses_the_nflverse_game_id_spelling():
+    """games.game_id says 2026_01_SF_LA; a key of ..._SF_LAR joins to nothing."""
+    assert canonical_event_id(2026, 1, "SF", "LAR") == "2026_01_SF_LA"
+    assert canonical_event_id(2026, 1, "Los Angeles Rams", "LAC") == "2026_01_LA_LAC"

@@ -74,3 +74,25 @@ def test_name_from_unscoped_player_id() -> None:
 
 def test_name_from_empty_player_id() -> None:
     assert name_from_player_id(None) == ""
+
+
+class TestTeamForPlayer:
+    ROSTER = frozenset({"DEN_bo_nix", "KC_patrick_mahomes", "DEN_jj_smith", "KC_jj_smith"})
+
+    def test_away_player_resolves_to_the_away_club(self):
+        from utils.player_id_utils import team_for_player
+
+        assert (
+            team_for_player("Bo Nix", ("Kansas City Chiefs", "Denver Broncos"), self.ROSTER)
+            == "DEN"
+        )
+
+    def test_unrostered_name_is_unresolved_rather_than_guessed(self):
+        from utils.player_id_utils import team_for_player
+
+        assert team_for_player("Nobody Here", ("KC", "DEN"), self.ROSTER) == ""
+
+    def test_name_on_both_rosters_is_unresolved(self):
+        from utils.player_id_utils import team_for_player
+
+        assert team_for_player("J.J. Smith", ("KC", "DEN"), self.ROSTER) == ""
