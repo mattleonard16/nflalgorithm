@@ -258,6 +258,8 @@ Key test files:
 - `tests/test_odds_quality.py` - screening unjoinable and circular snapshots out of grading
 - `tests/test_kelly_cap.py` - Kelly fraction capping
 - `tests/test_value_engine_side.py` - over/under side handling
+- `tests/test_best_line.py` - collapsing the per-book card to one row per bet
+- `tests/test_record_outcomes.py` - grading counts each bet once at its best line and skips SimBook
 - `tests/test_weekly_pipeline.py` - end-to-end ingest → train → predict → materialize. Seeds its
   own `games` rows: odds are keyed by game, so a club with no scheduled game gets no line and
   every later assertion would pass vacuously.
