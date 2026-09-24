@@ -21,7 +21,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sports.markets import get_sport
 from utils.db import execute, executemany, read_dataframe
-from utils.grading import calculate_profit_units, get_confidence_tier, grade_bet
+from utils.grading import (
+    calculate_profit_units,
+    get_confidence_tier,
+    grade_bet,
+    settled_roi_pct,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -220,8 +225,7 @@ def save_nba_outcomes(outcomes: List[Dict]) -> None:
     pushes = len(df[df["result"] == "push"])
     profit_units = df["profit_units"].sum()
 
-    units_risked = wins + losses
-    roi_pct = (profit_units / units_risked * 100) if units_risked > 0 else 0.0
+    roi_pct = settled_roi_pct(wins, losses, profit_units)
 
     avg_edge = df["edge_at_placement"].mean()
 

@@ -55,6 +55,21 @@ def calculate_profit_units(result: str, price: int) -> float:
         return 0.0
 
 
+def settled_roi_pct(wins: int, losses: int, profit_units: float) -> float:
+    """Profit per unit risked, in percent, with every bet staked at one unit.
+
+    A push returns its stake, so only wins and losses count as risked.
+    """
+    settled = wins + losses
+    return profit_units / settled * 100 if settled else 0.0
+
+
+def settled_win_rate_pct(wins: int, losses: int) -> float:
+    """Share of settled bets won, in percent. Pushes count as neither."""
+    settled = wins + losses
+    return wins / settled * 100 if settled else 0.0
+
+
 def get_confidence_tier(edge_percentage: float) -> str:
     """Determine confidence tier based on edge percentage.
 

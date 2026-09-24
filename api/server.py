@@ -37,6 +37,7 @@ from api.value_visibility import value_visibility_scope
 from config import config
 from utils.best_line import best_line_per_bet
 from utils.db import execute, fetchall, fetchone, get_connection, read_dataframe
+from utils.grading import settled_roi_pct, settled_win_rate_pct
 
 logger = logging.getLogger(__name__)
 
@@ -418,7 +419,6 @@ async def get_performance(season: Optional[int] = Query(None, description="Filte
         total_losses = int(df["losses"].sum())
         total_pushes = int(df["pushes"].sum())
         total_profit = float(df["profit_units"].sum())
-        win_rate = (total_wins / total_bets * 100) if total_bets > 0 else 0.0
 
         return {
             "weeks": weeks,
@@ -427,8 +427,8 @@ async def get_performance(season: Optional[int] = Query(None, description="Filte
             "total_losses": total_losses,
             "total_pushes": total_pushes,
             "total_profit": total_profit,
-            "overall_roi": float(df["roi_pct"].mean()) if not df.empty else 0.0,
-            "win_rate": win_rate,
+            "overall_roi": settled_roi_pct(total_wins, total_losses, total_profit),
+            "win_rate": settled_win_rate_pct(total_wins, total_losses),
         }
     except Exception as e:
         logger.error(f"Error fetching performance: {e}")

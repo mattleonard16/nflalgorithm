@@ -25,6 +25,7 @@ from utils.grading import (
     calculate_profit_units,
     get_confidence_tier,
     grade_bet,
+    settled_roi_pct,
 )
 from utils.live_odds import kickoffs_from_games
 from utils.nfl_markets import MARKET_TO_STAT, synthesize_anytime_td
@@ -494,9 +495,7 @@ def save_outcomes(outcomes: List[Dict]) -> None:
     pushes = len(df[df["result"] == "push"])
     profit_units = float(df["profit_units"].sum())
 
-    # ROI calculation: profit / units risked (excluding pushes)
-    units_risked = wins + losses  # Each bet risks 1 unit
-    roi_pct = (profit_units / units_risked * 100) if units_risked > 0 else 0.0
+    roi_pct = settled_roi_pct(wins, losses, profit_units)
 
     avg_edge = float(df["edge_at_placement"].mean())
 
