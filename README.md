@@ -123,42 +123,43 @@ Details and the measurements behind each choice are in [docs/MODEL_CARD.md](docs
 ### 2026 Week 1 (first graded week)
 
 All 16 games final. Every number here is read back out of `bet_outcomes` and `clv_weekly` after
-the fact, not simulated.
+the fact, not simulated. Each bet counts once, at the book with the best edge. The card lists the
+same bet at up to five books, and an earlier version of this table counted every book as its own
+bet (453 rows for 104 bets).
 
 | Metric | Result |
 |--------|--------|
-| Bets placed | 453 (447 graded, 6 pushes) |
-| Record | 238-209-6 |
-| Profit | +0.76 units |
-| ROI | +0.17% |
-| Average CLV | -11.5 basis points |
-| Coverage | 87 players across 16 games |
+| Bets placed | 104 (102 graded, 2 pushes) |
+| Record | 54-48-2 |
+| Profit | -0.33 units |
+| ROI | -0.3% |
+| Average CLV | -63 basis points |
+| Coverage | 88 players across 15 of the 16 games |
 
-Break-even. The negative CLV says the card was priced slightly worse than where the market
-closed, so the small profit came from outcomes rather than from beating the line.
+Break-even. Of the 101 bets with a closing quote, the market moved against 26 and toward 10. The
+other 65 never moved, so the average CLV rests on a quarter of the card.
 
 | Market | Bets | Win rate | ROI |
 |--------|------|----------|-----|
-| passing_yards | 69 | 72.5% | +35.9% |
-| receiving_yards | 242 | 50.4% | -5.4% |
-| rushing_yards | 132 | 47.0% | -11.6% |
-| receptions | 4 | 100.0% | +110.0% |
+| passing_yards | 17 | 64.7% | +21.3% |
+| receiving_yards | 55 | 50.0% | -6.2% |
+| rushing_yards | 31 | 50.0% | -5.8% |
+| receptions | 1 | 100.0% | +116.0% |
 
 Split by the edge the engine computed at placement:
 
 | Edge bucket | Bets | Win rate | ROI |
 |-------------|------|----------|-----|
-| 8-12% | 128 | 57.8% | +8.6% |
-| 12-16% | 144 | 57.6% | +8.5% |
-| 16-20% | 54 | 53.7% | +1.9% |
-| 20-25% | 58 | 46.6% | -12.6% |
-| 25%+ | 63 | 39.7% | -25.7% |
+| 8-12% | 23 | 56.5% | +5.7% |
+| 12-16% | 34 | 54.5% | +2.5% |
+| 16-20% | 18 | 61.1% | +16.6% |
+| 20-25% | 14 | 50.0% | -5.9% |
+| 25%+ | 15 | 35.7% | -33.0% |
 
-The ordering runs backwards from what the ranking assumes. A very large computed edge on a prop
-line more often means the projection is wrong than that the book is. The confidence tiers show
-the same split: HIGH took 211 bets for -15.1% ROI, MEDIUM took 236 for +13.8%. This is one week
-and 447 graded bets, so it is a flag to re-check after week 2, not yet a reason to move a
-threshold.
+The biggest edges did worst. A very large computed edge on a prop line more often means the
+projection is wrong than that the book is. The confidence tiers lean the same way: HIGH took 55
+bets for -5.5% ROI, MEDIUM took 49 for +5.5%. This is one week and 102 graded bets, too few to
+move a threshold on. Re-check once more weeks are graded.
 
 ### Projection Accuracy
 

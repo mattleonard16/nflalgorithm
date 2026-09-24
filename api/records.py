@@ -14,4 +14,7 @@ def json_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
     not valid JSON and ``int(NaN)`` raises, so one row with a missing field
     failed the whole request.
     """
-    return df.astype(object).where(df.notna(), None).to_dict(orient="records")
+    records: List[Dict[str, Any]] = (
+        df.astype(object).where(df.notna(), None).to_dict(orient="records")
+    )
+    return records
