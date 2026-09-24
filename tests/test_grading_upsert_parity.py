@@ -15,7 +15,7 @@ from utils.db import execute, fetchone, get_connection
 
 
 @pytest.fixture()
-def graded_database(matrix_database) -> str:
+def graded_database(matrix_database: str) -> str:
     with get_connection() as conn:
         for table in ("clv_weekly", "bet_outcomes", "weekly_performance", "weekly_odds"):
             execute(f"DELETE FROM {table}", conn=conn)
