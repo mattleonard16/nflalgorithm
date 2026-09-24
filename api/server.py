@@ -35,6 +35,7 @@ from api.pipeline_router import require_pipeline_operator, require_pipeline_read
 from api.records import json_records
 from api.value_visibility import value_visibility_scope
 from config import config
+from utils.best_line import best_line_per_bet
 from utils.db import execute, fetchall, fetchone, get_connection, read_dataframe
 
 logger = logging.getLogger(__name__)
@@ -321,10 +322,8 @@ async def get_value_bets(
                 },
             }
 
-        # If best_line_only, group by player_id + market and keep best edge
         if best_line_only:
-            df = df.sort_values("edge_percentage", ascending=False)
-            df = df.groupby(["player_id", "market", "side"]).first().reset_index()
+            df = best_line_per_bet(df)
 
         bets = json_records(df)
 

@@ -22,6 +22,7 @@ from api.cache import nba_cache, make_cache_key
 from api.pipeline_router import require_pipeline_operator
 from api.nba_explainability import build_why_payload, build_why_payloads_batch
 from api.records import json_records
+from utils.best_line import best_line_per_bet
 from utils.db import fetchall, fetchone, read_dataframe
 
 log = logging.getLogger(__name__)
@@ -572,13 +573,8 @@ def _query_value_bets(
 def _apply_best_line_filter(df: Any, best_line_only: bool) -> Any:
     """Keep only the highest-edge line per player+market if requested."""
     if best_line_only and not df.empty and "player_id" in df.columns:
-        return (
-            df.sort_values("edge_percentage", ascending=False)
-            .groupby(["player_id", "market"], dropna=False)
-            .first()
-            .reset_index()
-            .sort_values("edge_percentage", ascending=False)
-        )
+        # The NBA card prices overs only, so a bet is a player and a market.
+        return best_line_per_bet(df, keys=("player_id", "market"))
     return df
 
 

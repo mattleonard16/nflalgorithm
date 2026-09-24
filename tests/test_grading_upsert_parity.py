@@ -152,3 +152,41 @@ def test_clv_weekly_upsert_overwrites_in_place(graded_database) -> None:
 
     save_outcomes([_outcome()])
     assert fetchone("SELECT COUNT(*) FROM clv_weekly")[0] == 1
+
+
+def _clv_row(bet_id: str) -> None:
+    execute(
+        "INSERT INTO clv_weekly (bet_id, close_line, close_price, clv_bp, closed_at) "
+        "VALUES (?, 64.5, -115, 12.0, '2026-09-21T10:00:00+00:00')",
+        (bet_id,),
+    )
+
+
+def test_regrade_drops_bets_no_longer_on_the_graded_card(graded_database) -> None:
+    # A card graded once per book, then re-graded once per bet, must not keep
+    # the old per-book rows alongside the new ones.
+    save_outcomes([_outcome(), _outcome(bet_id="bet-other-book", sportsbook="FanDuel")])
+
+    save_outcomes([_outcome()])
+
+    assert fetchone("SELECT COUNT(*) FROM bet_outcomes")[0] == 1
+    assert fetchone("SELECT bet_id FROM bet_outcomes")[0] == "bet-parity-1"
+
+
+def test_regrade_drops_clv_rows_of_removed_bets(graded_database) -> None:
+    save_outcomes([_outcome(), _outcome(bet_id="bet-other-book", sportsbook="FanDuel")])
+    _clv_row("bet-parity-1")
+    _clv_row("bet-other-book")
+
+    save_outcomes([_outcome()])
+
+    assert fetchone("SELECT COUNT(*) FROM clv_weekly WHERE bet_id = ?", ("bet-other-book",))[0] == 0
+    assert fetchone("SELECT COUNT(*) FROM clv_weekly WHERE bet_id = ?", ("bet-parity-1",))[0] == 1
+
+
+def test_regrade_leaves_other_weeks_alone(graded_database) -> None:
+    save_outcomes([_outcome(bet_id="bet-week-2", week=2)])
+
+    save_outcomes([_outcome()])
+
+    assert fetchone("SELECT COUNT(*) FROM bet_outcomes WHERE week = 2")[0] == 1

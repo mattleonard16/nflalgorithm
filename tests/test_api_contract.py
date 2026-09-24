@@ -161,6 +161,23 @@ class TestValueBetsContract:
         assert data["total"] == 0
         assert "filters" in data
 
+    def test_best_line_only_returns_one_row_per_bet_ordered_by_edge(self, client, db):
+        _seed_value_bet(db, player_id="P001", week=21, sportsbook="draftkings", edge=0.10)
+        _seed_value_bet(db, player_id="P002", week=21, sportsbook="draftkings", edge=0.20)
+        execute("""
+            INSERT INTO materialized_value_view
+                (season, week, player_id, event_id, team, market, sportsbook,
+                 line, price, mu, sigma, p_win, edge_percentage, expected_roi,
+                 kelly_fraction, stake, generated_at)
+            VALUES (2025, 21, 'P001', 'evt1', 'KC', 'receiving_yards', 'fanduel',
+                    74.5, -105, 85.0, 8.0, 0.66, 0.15, 0.13, 0.02, 20.0, datetime('now'))
+            """)
+
+        resp = client.get("/api/value-bets?season=2025&week=21&best_line_only=true")
+
+        bets = [(b["player_id"], b["sportsbook"], b["line"]) for b in resp.json()["bets"]]
+        assert bets == [("P002", "draftkings", 75.5), ("P001", "fanduel", 74.5)]
+
     def test_a_row_missing_a_text_field_does_not_fail_the_week(self, client, db):
         # pandas reads NULL text as NaN when other rows have a value, and the
         # response model rejects NaN, so one such row used to 500 the request.
