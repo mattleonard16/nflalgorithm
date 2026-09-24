@@ -118,6 +118,11 @@ needs the private modules and real data.
    After each Wednesday run, check `launchctl list | grep nflalgorithm` (the middle column is the
    last exit status, `0` for success) and the end of the log.
 
+   `week-auto` does not scrape sportsbook odds or build the value card. Only
+   `make production-run` does, and nothing schedules it. A week nobody runs it for has no
+   `weekly_odds` rows, and odds that were never captured cannot be graded later. That is why 2026
+   week 2 has no card.
+
    The 2026 week 2 and week 3 runs both failed this way. The checkout was on a `main` from before
    `context_factor_lookup` returned `{}` for markets it does not model, so `receptions` raised
    `ValueError: Unsupported market` inside `week-predict`.
