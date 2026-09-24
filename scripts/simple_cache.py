@@ -78,6 +78,9 @@ class SimpleCachedClient:
             expire_after=config.cache.http_cache_expire_after,
             allowable_codes=(200, 304),
             allowable_methods=["GET", "HEAD"],
+            # Keeps the key out of cache keys and redacts it from stored
+            # requests. A committed copy of this cache once published it.
+            ignored_parameters=["apiKey"],
             stale_if_error=True,
         )
 

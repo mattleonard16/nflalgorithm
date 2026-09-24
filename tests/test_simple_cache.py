@@ -214,3 +214,15 @@ def test_failed_request_log_never_carries_the_api_key(monkeypatch, caplog) -> No
 
     assert "sk-secret-123" not in caplog.text
     assert "apiKey=***" in caplog.text
+
+
+def test_cache_file_never_stores_the_api_key(tmp_path, monkeypatch) -> None:
+    # A committed copy of this cache once published the live key.
+    client, _ = _offline_capable_client(tmp_path, monkeypatch)
+    client.get("https://cache.test/odds", params={"apiKey": "sk-secret-123", "week": 1})
+
+    stored = b"".join(path.read_bytes() for path in tmp_path.rglob("*") if path.is_file())
+
+    assert stored, "the request must have written a cache entry"
+    assert b"sk-secret-123" not in stored
+    assert client._get_from_cache("https://cache.test/odds", {"apiKey": "sk-secret-123", "week": 1})

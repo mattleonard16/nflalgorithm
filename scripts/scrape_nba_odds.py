@@ -20,6 +20,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from scripts.simple_cache import redact_api_key
 from utils.db import execute, get_connection, read_dataframe
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -277,15 +278,16 @@ def _get_with_retry(
             response.raise_for_status()
             return response.json()
         except Exception as exc:
+            reason = redact_api_key(str(exc))
             if attempt >= max_attempts:
-                logger.error("Request failed after %d attempts: %s — %s", max_attempts, url, exc)
+                logger.error("Request failed after %d attempts: %s — %s", max_attempts, url, reason)
                 return None
             backoff = 0.5 * (2 ** (attempt - 1))
             logger.warning(
                 "Attempt %d/%d failed (%s). Retrying in %.1fs",
                 attempt,
                 max_attempts,
-                exc,
+                reason,
                 backoff,
             )
             time.sleep(backoff)

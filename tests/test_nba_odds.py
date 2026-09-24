@@ -775,3 +775,25 @@ class TestModeledMarketsFilter:
         from scripts.scrape_nba_odds import MODELED_MARKETS
         assert isinstance(MODELED_MARKETS, frozenset)
         assert MODELED_MARKETS == frozenset({"pts", "reb", "ast", "fg3m"})
+
+
+def test_failed_request_log_never_carries_the_api_key(caplog):
+    """requests puts the full URL, apiKey included, into the HTTPError message."""
+    import requests
+    from unittest.mock import Mock
+
+    from scripts.scrape_nba_odds import _get_with_retry
+
+    session = Mock()
+    session.get.side_effect = requests.HTTPError(
+        "401 Client Error for url: https://api.test/v4/sports/basketball_nba/events"
+        "?apiKey=sk-secret-123"
+    )
+
+    with patch("scripts.scrape_nba_odds.time.sleep"):
+        with caplog.at_level("WARNING", logger="scripts.scrape_nba_odds"):
+            payload = _get_with_retry(session, "https://api.test", {"apiKey": "sk-secret-123"})
+
+    assert payload is None
+    assert "sk-secret-123" not in caplog.text
+    assert "apiKey=***" in caplog.text

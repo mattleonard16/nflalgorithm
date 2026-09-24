@@ -342,12 +342,12 @@ class NFLPropScraper:
             if fallback_snapshot:
                 logger.warning(
                     "Failed to fetch NFL events (%s); using fallback snapshot",
-                    e,
+                    redact_api_key(str(e)),
                 )
                 events = fallback_snapshot.get("events", [])
                 source_statuses.add("FALLBACK-SNAPSHOT")
             else:
-                logger.error(f"Failed to fetch NFL events: {e}")
+                logger.error("Failed to fetch NFL events: %s", redact_api_key(str(e)))
                 return []
 
         snapshot["events"] = events
