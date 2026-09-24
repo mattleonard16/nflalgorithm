@@ -1,8 +1,6 @@
 """Tests for closing-line-value math (utils/clv.py).
 
-Hand-built frames only, no database. The consumer is
-`scripts/record_outcomes.py`; its database path is tested in
-`tests/test_record_outcomes.py`.
+Hand-built frames only, no database.
 """
 
 from __future__ import annotations

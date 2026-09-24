@@ -25,7 +25,7 @@ from nba_confidence_engine import compute_nba_confidence_score, assign_nba_tier
 from utils.db import executemany, read_dataframe
 from utils.nba_injury_adjustments import apply_injury_adjustments, SIGMA_INFLATION
 from utils.nba_sigma import get_sigma_or_default
-from utils.odds_math import american_to_decimal, implied_probability, implied_probability_no_vig
+from utils.odds_math import implied_probability, implied_probability_no_vig
 import logging
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,13 @@ def _standard_norm_cdf(z: float) -> float:
 # ---------------------------------------------------------------------------
 # Core math helpers
 # ---------------------------------------------------------------------------
+
+
+def american_to_decimal(odds: int) -> float:
+    """Convert American odds to decimal (European) odds."""
+    if odds < 0:
+        return 1 + 100 / abs(odds)
+    return 1 + odds / 100
 
 
 def prob_over(mu: float, sigma: float, line: float) -> float:
