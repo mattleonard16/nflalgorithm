@@ -52,8 +52,8 @@ export function WatchedPicksTable({
             <th className={headCell}>Player</th>
             <th className={headCell}>Team</th>
             <th className={headCell}>Market</th>
-            <th className={`${headCell} text-right`}>μ</th>
-            <th className={`${headCell} text-right`}>σ</th>
+            <th className={`${headCell} text-right`}>Proj</th>
+            <th className={`${headCell} text-right`}>±</th>
           </tr>
         </thead>
         <tbody>

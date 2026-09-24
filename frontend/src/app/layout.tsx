@@ -1,25 +1,32 @@
 import type { Metadata } from "next";
-import { JetBrains_Mono, DM_Sans, Barlow_Condensed } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { AppShell } from "@/components/app-shell";
 
-const dmSans = DM_Sans({
+// Fonts ship in the repo (latin subset, OFL licenses alongside) instead of
+// next/font/google, which downloads them during `next build`. A changed Google
+// response broke the Turbopack build in CI with no code change on our side.
+const dmSans = localFont({
+  src: "./fonts/dm-sans-latin.woff2",
   variable: "--font-dm-sans",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: "400 700",
 });
 
-const jetbrains = JetBrains_Mono({
+const jetbrains = localFont({
+  src: "./fonts/jetbrains-mono-latin.woff2",
   variable: "--font-jetbrains",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: "400 700",
 });
 
-const barlow = Barlow_Condensed({
+const barlow = localFont({
+  src: [
+    { path: "./fonts/barlow-condensed-500-latin.woff2", weight: "500" },
+    { path: "./fonts/barlow-condensed-600-latin.woff2", weight: "600" },
+    { path: "./fonts/barlow-condensed-700-latin.woff2", weight: "700" },
+    { path: "./fonts/barlow-condensed-800-latin.woff2", weight: "800" },
+  ],
   variable: "--font-display",
-  subsets: ["latin"],
-  weight: ["500", "600", "700", "800"],
 });
 
 export const metadata: Metadata = {
