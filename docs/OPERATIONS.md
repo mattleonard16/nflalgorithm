@@ -105,8 +105,9 @@ needs the private modules and real data.
    `weekly_performance.clv_avg`. `--include-unfinished` restores the old behavior and exists only
    for backfilling a historical week whose schedule rows are incomplete.
 
-   `make mae-gate` without `BASELINE` uses absolute ceilings 2-3x below the measured baseline and
-   will block every position.
+   `make mae-gate` without `BASELINE` uses the absolute ceilings in
+   `scripts/evaluate_nfl_projections.py` (QB 65, RB 26, WR 29, TE 27), each about 10% above that
+   position's worst week in the 2025 walk-forward backtest.
 7. `make week-auto` is the Wednesday entrypoint from week 2 on; it grades the previous week and
    writes its research memo, degrading to a warning so a results hiccup never blocks new lines.
 
