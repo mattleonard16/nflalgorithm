@@ -16,7 +16,7 @@ from utils.db import execute, fetchone, get_connection
 
 
 @pytest.fixture()
-def runtime_database(matrix_database) -> str:
+def runtime_database(matrix_database: str) -> str:
     with get_connection() as conn:
         for table in (
             "pipeline_artifacts",
