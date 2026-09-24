@@ -111,6 +111,17 @@ needs the private modules and real data.
 7. `make week-auto` is the Wednesday entrypoint from week 2 on; it grades the previous week and
    writes its research memo, degrading to a warning so a results hiccup never blocks new lines.
 
+   The schedule is `~/Library/LaunchAgents/com.nflalgorithm.week-auto.plist`: Wednesdays at 09:00,
+   in this checkout, on whatever branch is checked out at that moment, logging to
+   `logs/week_auto.log`. Nothing alerts on failure. A failed ingest or prediction stops the run
+   before `week-lines`, so that week gets no internal lines and the previous week is not graded.
+   After each Wednesday run, check `launchctl list | grep nflalgorithm` (the middle column is the
+   last exit status, `0` for success) and the end of the log.
+
+   The 2026 week 2 and week 3 runs both failed this way. The checkout was on a `main` from before
+   `context_factor_lookup` returned `{}` for markets it does not model, so `receptions` raised
+   `ValueError: Unsupported market` inside `week-predict`.
+
 ## Migrations: re-run forward, no rollback
 
 There is no down-migration. Every migration is idempotent and gated on introspection — it checks
