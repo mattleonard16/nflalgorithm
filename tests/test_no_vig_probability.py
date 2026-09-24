@@ -15,44 +15,10 @@ import pytest
 
 from config import config
 from schema_migrations import MigrationManager
-from value_betting_engine import (
-    _implied_probability,
-    implied_probability_no_vig,
-    rank_weekly_value,
-)
+from value_betting_engine import _implied_probability, rank_weekly_value
 
-
-def test_implied_probability_no_vig_symmetric_book():
-    """-110/-110 → 50/50 after vig removal."""
-    p_over, p_under = implied_probability_no_vig(-110, -110)
-    assert abs(p_over - 0.5) < 1e-9
-    assert abs(p_under - 0.5) < 1e-9
-    assert abs(p_over + p_under - 1.0) < 1e-9
-
-
-def test_implied_probability_no_vig_asymmetric_book():
-    """Asymmetric quotes still sum to 1.0 after normalization."""
-    p_over, p_under = implied_probability_no_vig(-130, +110)
-    assert abs(p_over + p_under - 1.0) < 1e-9
-    # Over favored, so its no-vig prob > under
-    assert p_over > p_under
-
-
-def test_implied_probability_no_vig_strictly_below_raw():
-    """Removing vig must reduce the over-side implied prob relative to raw."""
-    raw_over = _implied_probability(-110)  # 0.5238
-    p_over, _ = implied_probability_no_vig(-110, -110)
-    assert p_over < raw_over
-
-
-def test_implied_probability_no_vig_raises_on_zero_total(monkeypatch):
-    """Guards against degenerate input — both raw probs sum to 0."""
-    import value_betting_engine
-
-    monkeypatch.setattr(value_betting_engine, "_implied_probability", lambda _: 0.0)
-    with pytest.raises(ValueError):
-        implied_probability_no_vig(-110, -110)
-
+# The no-vig math itself is tested in tests/test_odds_math.py, which runs without
+# the private engine.
 
 # ---------------------------------------------------------------------------
 # Integration: rank_weekly_value branches on the flag

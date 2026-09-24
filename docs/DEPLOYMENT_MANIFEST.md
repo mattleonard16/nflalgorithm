@@ -79,6 +79,16 @@ print(read_dataframe('SELECT COUNT(*) n, COUNT(volatility_score) scored FROM wee
 spanning 1.0000-1.1500 across 472 distinct values (it was a constant 1.075 on every row before).
 
 ### `value_betting_engine.py`
+- **Odds math comes from `utils.odds_math`, added 2026-09-23. Tracked side only, NOT yet applied
+  to a private checkout.** Delete the local `_american_to_decimal`, `_implied_probability` and
+  `implied_probability_no_vig` definitions and import them instead, keeping the private names:
+  ```python
+  from utils.odds_math import american_to_decimal as _american_to_decimal
+  from utils.odds_math import implied_probability as _implied_probability
+  from utils.odds_math import implied_probability_no_vig
+  ```
+  The bodies are identical, so prices do not change. `utils/clv.py` already grades with the
+  tracked copy; keeping a second one lets the two drift apart.
 - The per-bet Kelly cap is gated on `config.features.kelly_cap_enabled` (~line 266).
 - Sigma widening calls `apply_volatility_widening(df["sigma"], df.get("volatility_score"))` from
   `utils.volatility_scoring` and logs the unscored row count. **An older copy uses

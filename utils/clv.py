@@ -1,7 +1,7 @@
 """Closing Line Value (CLV) math for NFL weekly bets.
 
-Pure functions only — no database access — so the logic stays testable in CI
-even though the caller (``scripts/record_outcomes.py``) is gitignored.
+Pure functions only, with no database access, so CI tests the math directly.
+The caller is ``scripts/record_outcomes.py``.
 
 CLV answers the only question that separates a lucky week from a real edge:
 did the market move toward the number we took? Two representations are
@@ -25,6 +25,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 from utils.nfl_markets import prob_over
+from utils.odds_math import implied_probability_no_vig
 
 # Key identifying one book's quote on one player prop.
 SNAPSHOT_KEY = ["event_id", "player_id", "market", "sportsbook"]
@@ -179,11 +180,8 @@ def _market_fair_prob(row: Any, price_key: str, under_key: str, side: str) -> fl
     over_odds = _as_odds(_cell(row, price_key))
     under_odds = _as_odds(_cell(row, under_key))
     if over_odds is not None and under_odds is not None:
-        from value_betting_engine import implied_probability_no_vig
-
         p_over, p_under = implied_probability_no_vig(over_odds, under_odds)
-        # value_betting_engine is gitignored and untyped, so both are Any here.
-        return float(p_over if side == "over" else p_under)
+        return p_over if side == "over" else p_under
     return _stored_fair_prob(row, side)
 
 
@@ -216,24 +214,11 @@ def _fair_prob(
 
     Callers must guarantee one of the two paths is available; the raise is a
     programming-error guard, not an expected branch.
-
-    ``implied_probability_no_vig`` is imported here rather than at module scope:
-    it still lives in gitignored ``value_betting_engine``, so a top-level import
-    makes this module — and every test that touches it — fail to import in CI,
-    which is the opposite of why the math lives in a tracked file. Tests that
-    exercise the no-vig path must inject prices and are skipped when the private
-    module is absent. The single-price fallback has no such constraint: it takes
-    ``prob_over`` from tracked ``utils.nfl_markets``, so CI covers it. That is
-    only true if the import sits inside the two-sided branch: at the top of the
-    function it raised ImportError before the fallback was ever reached, which
-    took the model path down in CI too.
     """
     over_odds = _as_odds(price)
     under_odds = _as_odds(under_price)
 
     if over_odds is not None and under_odds is not None:
-        from value_betting_engine import implied_probability_no_vig
-
         p_over, p_under = implied_probability_no_vig(over_odds, under_odds)
     elif mu is not None and sigma is not None and sigma > 0:
         p_over = prob_over(mu, sigma, float(line), market=market)

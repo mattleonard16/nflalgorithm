@@ -25,6 +25,7 @@ from nba_confidence_engine import compute_nba_confidence_score, assign_nba_tier
 from utils.db import executemany, read_dataframe
 from utils.nba_injury_adjustments import apply_injury_adjustments, SIGMA_INFLATION
 from utils.nba_sigma import get_sigma_or_default
+from utils.odds_math import american_to_decimal, implied_probability, implied_probability_no_vig
 import logging
 
 logger = logging.getLogger(__name__)
@@ -59,33 +60,6 @@ def _standard_norm_cdf(z: float) -> float:
 # ---------------------------------------------------------------------------
 # Core math helpers
 # ---------------------------------------------------------------------------
-
-
-def implied_probability(odds: int) -> float:
-    """Convert American odds to implied win probability (no vig removed)."""
-    if odds < 0:
-        return abs(odds) / (abs(odds) + 100)
-    return 100 / (odds + 100)
-
-
-def implied_probability_no_vig(over_odds: int, under_odds: int) -> tuple[float, float]:
-    """Return (p_over, p_under) with vig removed by normalizing to sum=1.0.
-
-    Raw book probabilities sum to > 1.0 due to the bookmaker's margin (vig).
-    Dividing each raw probability by their sum removes this systematic bias,
-    giving fair-market implied probabilities that sum exactly to 1.0.
-    """
-    raw_over = implied_probability(over_odds)
-    raw_under = implied_probability(under_odds)
-    total = raw_over + raw_under
-    return raw_over / total, raw_under / total
-
-
-def american_to_decimal(odds: int) -> float:
-    """Convert American odds to decimal (European) odds."""
-    if odds < 0:
-        return 1 + 100 / abs(odds)
-    return 1 + odds / 100
 
 
 def prob_over(mu: float, sigma: float, line: float) -> float:

@@ -1,29 +1,16 @@
 """Tests for closing-line-value math (utils/clv.py).
 
-Hand-built frames only — no database. The consumer
-(`scripts/record_outcomes.py`) is gitignored, so this is the CI-reachable
-contract for the CLV computation.
-
-`resolve_closing_lines` is pure pandas and always runs. The probability
-conversion inside `compute_clv` delegates to the gitignored
-`value_betting_engine`, so tests that reach it are marked `needs_engine` and
-skip when that module is absent — the snapshot-resolution and
-insufficient-data contracts stay covered either way.
+Hand-built frames only, no database. The consumer is
+`scripts/record_outcomes.py`; its database path is tested in
+`tests/test_record_outcomes.py`.
 """
 
 from __future__ import annotations
-
-import importlib.util
 
 import pandas as pd
 import pytest
 
 from utils.clv import STATUS_INSUFFICIENT, STATUS_OK, compute_clv, resolve_closing_lines
-
-needs_engine = pytest.mark.skipif(
-    importlib.util.find_spec("value_betting_engine") is None,
-    reason="value_betting_engine is gitignored and absent in this checkout",
-)
 
 
 def _odds_row(as_of: str, line: float, price: int = -110, under_price: int | None = -110) -> dict:
@@ -117,7 +104,6 @@ def test_resolve_closing_lines_orders_by_time_not_string():
 # ---------------------------------------------------------------------------
 
 
-@needs_engine
 def test_compute_clv_over_beats_close_when_line_rises():
     """Took over 50.5, market closed at 54.5 → negative points CLV."""
     entry = {"line": 50.5, "side": "over", "price": -110, "under_price": -110}
@@ -137,7 +123,6 @@ def test_compute_clv_over_beats_close_when_line_rises():
     assert result["closed_at"] == "2025-11-27T18:00:00+00:00"
 
 
-@needs_engine
 def test_compute_clv_over_gains_when_line_drops():
     entry = {"line": 54.5, "side": "over", "price": -110, "under_price": -110}
     close = {
@@ -151,7 +136,6 @@ def test_compute_clv_over_gains_when_line_drops():
     assert compute_clv(entry, close)["clv_points"] == pytest.approx(4.0)
 
 
-@needs_engine
 def test_compute_clv_under_sign_is_corrected():
     """An under bettor gains when the line moves up — opposite sign to over."""
     close = {
@@ -169,7 +153,6 @@ def test_compute_clv_under_sign_is_corrected():
     assert under["clv_points"] == pytest.approx(4.0)
 
 
-@needs_engine
 def test_compute_clv_bp_uses_no_vig_probabilities():
     """Price movement alone moves clv_bp, with the book margin removed.
 
@@ -197,7 +180,6 @@ def test_compute_clv_bp_uses_no_vig_probabilities():
     assert result["clv_bp"] < (raw_over - 0.5) * 10_000
 
 
-@needs_engine
 def test_compute_clv_bp_zero_line_and_price_unchanged():
     """No movement at all → exactly zero bp, not noise."""
     quote = {"price": -110, "under_price": -110}
@@ -246,7 +228,6 @@ def test_compute_clv_missing_line_is_insufficient():
     assert result["status"] == STATUS_INSUFFICIENT
 
 
-@needs_engine
 def test_compute_clv_one_sided_quote_without_model_reports_unknown_bp():
     """Points CLV still resolves; probability CLV is unknown, not zero."""
     entry = {"line": 50.5, "side": "over", "price": -110, "under_price": None}
@@ -265,7 +246,6 @@ def test_compute_clv_one_sided_quote_without_model_reports_unknown_bp():
     assert result["clv_bp"] is None
 
 
-@needs_engine
 def test_compute_clv_one_sided_quote_falls_back_to_model_distribution():
     """With mu/sigma available, a one-sided book still yields a bp figure."""
     entry = {
@@ -291,7 +271,6 @@ def test_compute_clv_one_sided_quote_falls_back_to_model_distribution():
     assert result["clv_bp"] < 0
 
 
-@needs_engine
 def test_an_unmoved_line_with_only_stored_entry_probabilities_is_zero():
     """The 2026 week 1 bug. materialized_value_view stores de-vigged
     probabilities but no under price, so the entry priced off the model while
@@ -321,7 +300,6 @@ def test_an_unmoved_line_with_only_stored_entry_probabilities_is_zero():
     assert abs(result["clv_bp"]) < 500
 
 
-@needs_engine
 def test_stored_entry_probabilities_are_ignored_when_they_still_carry_vig():
     """A pair that does not sum to 1 was never de-vigged. Using it anyway
     biases every bet the same way."""
@@ -348,7 +326,6 @@ def test_stored_entry_probabilities_are_ignored_when_they_still_carry_vig():
     assert result["clv_bp"] == pytest.approx(0.0, abs=1e-6)
 
 
-@needs_engine
 def test_a_model_priced_entry_is_never_compared_against_a_market_priced_close():
     """Mixing the two measures the model's edge, not line movement. With no
     market probability on the entry and no model to fall back on, the answer is
@@ -373,7 +350,6 @@ def test_compute_clv_rejects_unknown_side():
         compute_clv({"line": 50.5, "side": "middle"}, None)
 
 
-@needs_engine
 def test_fair_prob_prices_anytime_touchdown_with_poisson_survival():
     """Model-fallback CLV on a TD row must use Poisson, not the Gaussian CDF."""
     import math
@@ -386,7 +362,6 @@ def test_fair_prob_prices_anytime_touchdown_with_poisson_survival():
     ) == pytest.approx(1.0 - math.exp(-mu))
 
 
-@needs_engine
 def test_fair_prob_prices_yardage_markets_the_same_way_the_model_does():
     """CLV must read the same curve the bet was priced on. Yardage moved from
     the normal CDF to gamma survival in utils.nfl_markets; pricing CLV off the
@@ -401,7 +376,6 @@ def test_fair_prob_prices_yardage_markets_the_same_way_the_model_does():
     ) == pytest.approx(prob_over(mu, sigma, line, market="receiving_yards"))
 
 
-@needs_engine
 def test_compute_clv_carries_market_into_model_fallback():
     """One-sided TD quotes fall back to the model distribution — via Poisson."""
     import math
@@ -437,7 +411,6 @@ def test_compute_clv_carries_market_into_model_fallback():
     ) == pytest.approx(1.0 - math.exp(-0.65))
 
 
-@needs_engine
 def test_resolve_then_compute_end_to_end():
     """The two functions compose on a realistic multi-snapshot frame."""
     odds = pd.DataFrame(

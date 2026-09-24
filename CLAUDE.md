@@ -299,9 +299,10 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 
 ### Tier 1 — HIGH IMPACT (MAE + ROI)
 7. Premium features dropped in `_CONTEXTUAL_COLS` (weekly.py:44).
-8. [RESOLVED] No vig removal — `implied_probability_no_vig` now lives in `value_betting_engine.py`
-   and is what `utils/clv.py` uses for probability-space CLV. Both inputs are now actually
-   captured: `utils/two_sided_odds.py` pairs an Over with the Under **at the same line** (the
+8. [RESOLVED] No vig removal — `implied_probability_no_vig` lives in tracked `utils/odds_math.py`
+   and is what `utils/clv.py` uses for probability-space CLV, so CI tests it. The private
+   `value_betting_engine.py` should import it from there (see docs/DEPLOYMENT_MANIFEST.md).
+   Both inputs are now actually captured: `utils/two_sided_odds.py` pairs an Over with the Under **at the same line** (the
    scraper previously matched on player name alone, which crosses alternate lines — a
    `DraftKings_Alt` book is already in the DB), and `utils/odds_snapshot.build_snapshot_row`
    carries `under_price` into storage. It had been NULL on every row because the writer in

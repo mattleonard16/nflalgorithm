@@ -33,11 +33,8 @@ at that line and sigma. Both numbers are then means on the same curve and the
 average means something. After the fix the same slate came out 27 overs to 49
 unders.
 
-Callers pass the de-vigged probability in. The de-vig itself
-(``implied_probability_no_vig``) still lives in gitignored
-``value_betting_engine``, and importing it here would make this module, and every
-test touching it, fail to import in CI — which is the opposite of why the math
-lives in a tracked file. See ``utils/clv.py`` for the same split.
+Callers pass the de-vigged probability in, from
+``utils.odds_math.implied_probability_no_vig``.
 """
 
 from __future__ import annotations
