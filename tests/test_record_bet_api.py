@@ -45,7 +45,8 @@ def temp_db_with_user(monkeypatch):
 
 @pytest.fixture
 def client(temp_db_with_user):
-    from api.server import app, get_current_user
+    from api.application import app
+    from api.server import get_current_user
 
     async def _override_user():
         return UserResponse(
@@ -131,7 +132,7 @@ def test_record_bet_accepts_under_side(client, temp_db_with_user):
 
 def test_record_bet_rejects_unauthenticated():
     """Without auth dep override, endpoint must return 401."""
-    from api.server import app
+    from api.application import app
     with TestClient(app) as c:
         resp = c.post("/api/user/bets", json={
             "season": 2024, "week": 5, "player_id": "p1",

@@ -30,7 +30,7 @@ def db(tmp_path, monkeypatch):
 @pytest.fixture()
 def client(db):
     from fastapi.testclient import TestClient
-    from api.server import app
+    from api.application import app
     from conftest import clear_nba_cache
 
     clear_nba_cache()

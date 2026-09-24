@@ -26,7 +26,7 @@ def db(tmp_path, monkeypatch):
 def client(db):
     from fastapi.testclient import TestClient
 
-    from api.server import app
+    from api.application import app
 
     return TestClient(app)
 
