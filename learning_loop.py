@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
 from config import config
-from utils.db import executemany, read_dataframe
+from utils.db import executemany, get_backend, read_dataframe
 from utils.nfl_markets import MARKET_TO_STAT
 
 logger = logging.getLogger(__name__)
@@ -208,13 +208,39 @@ def update_agent_performance(
     if not records:
         return 0
 
-    insert_sql = """
-    INSERT OR REPLACE INTO agent_performance (
+    # `INSERT OR REPLACE` is SQLite-only and fails outright on MySQL. Same
+    # upsert on the same primary key, spelled per backend.
+    columns = """
         season, week, agent_name, player_id, market,
         recommendation, confidence, final_decision, outcome,
         profit_units, correct, recorded_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
+    if get_backend() == "mysql":
+        insert_sql = f"""
+        INSERT INTO agent_performance ({columns})
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            recommendation=VALUES(recommendation),
+            confidence=VALUES(confidence),
+            final_decision=VALUES(final_decision),
+            outcome=VALUES(outcome),
+            profit_units=VALUES(profit_units),
+            correct=VALUES(correct),
+            recorded_at=VALUES(recorded_at)
+        """
+    else:
+        insert_sql = f"""
+        INSERT INTO agent_performance ({columns})
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(season, week, agent_name, player_id, market) DO UPDATE SET
+            recommendation=excluded.recommendation,
+            confidence=excluded.confidence,
+            final_decision=excluded.final_decision,
+            outcome=excluded.outcome,
+            profit_units=excluded.profit_units,
+            correct=excluded.correct,
+            recorded_at=excluded.recorded_at
+        """
     executemany(insert_sql, records)
     logger.info("Inserted %d agent performance records for s=%d w=%d", len(records), season, week)
     return len(records)
