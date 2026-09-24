@@ -19,7 +19,7 @@ from agents.market_bias_agent import MarketBiasAgent
 from agents.model_diagnostics_agent import ModelDiagnosticsAgent
 from agents.odds_agent import OddsAgent
 from agents.risk_agent import RiskAgent
-from utils.db import execute, get_connection
+from utils.db import execute, get_backend, get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -147,20 +147,43 @@ def _persist_decisions(
             now,
         ))
 
+    # `INSERT OR REPLACE` is SQLite-only; MySQL rejected every write here.
+    # Same upsert on the same primary key, spelled per backend.
+    columns = """
+        season, week, player_id, market, decision, merged_confidence, votes,
+        rationale, coordinator_override, agent_reports, decided_at
+    """
+    if get_backend() == "mysql":
+        sql = f"""
+            INSERT INTO agent_decisions ({columns})
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                decision=VALUES(decision),
+                merged_confidence=VALUES(merged_confidence),
+                votes=VALUES(votes),
+                rationale=VALUES(rationale),
+                coordinator_override=VALUES(coordinator_override),
+                agent_reports=VALUES(agent_reports),
+                decided_at=VALUES(decided_at)
+        """
+    else:
+        sql = f"""
+            INSERT INTO agent_decisions ({columns})
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(season, week, player_id, market) DO UPDATE SET
+                decision=excluded.decision,
+                merged_confidence=excluded.merged_confidence,
+                votes=excluded.votes,
+                rationale=excluded.rationale,
+                coordinator_override=excluded.coordinator_override,
+                agent_reports=excluded.agent_reports,
+                decided_at=excluded.decided_at
+        """
+
     try:
         with get_connection() as conn:
             for row in rows:
-                execute(
-                    """
-                    INSERT OR REPLACE INTO agent_decisions
-                    (season, week, player_id, market, decision,
-                     merged_confidence, votes, rationale, coordinator_override,
-                     agent_reports, decided_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    row,
-                    conn=conn,
-                )
+                execute(sql, row, conn=conn)
             conn.commit()
         return len(rows)
     except Exception as exc:

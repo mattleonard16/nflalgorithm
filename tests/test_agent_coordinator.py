@@ -19,6 +19,7 @@ from agents import AgentReport, VALID_RECOMMENDATIONS, validate_report
 from agents.coordinator import (
     CONSENSUS_THRESHOLD,
     _group_reports,
+    _persist_decisions,
     _resolve_consensus,
     run_all_agents,
 )
@@ -31,6 +32,7 @@ from agents.model_diagnostics_agent import (
     _flag_suspicious,
 )
 from agents.risk_agent import RiskAgent
+from utils.db import execute, read_dataframe
 
 
 # ======================================================================
@@ -604,6 +606,37 @@ class TestCoordinatorOutput:
         decisions = run_all_agents(2025, 13)
         # Should still produce decisions from the 3 working agents
         assert len(decisions) >= 1
+
+
+class TestPersistDecisions:
+    """Rerunning a week's agents replaces each verdict, on SQLite and MySQL."""
+
+    @pytest.fixture()
+    def decisions_database(self, matrix_database):
+        execute("DELETE FROM agent_decisions")
+        return matrix_database
+
+    @staticmethod
+    def _decision(verdict: str) -> dict:
+        return {
+            "player_id": "P001",
+            "market": "rushing_yards",
+            "decision": verdict,
+            "merged_confidence": 0.7,
+            "votes": {"APPROVE": 3, "REJECT": 1, "NEUTRAL": 0},
+            "rationale": "test",
+            "override": False,
+            "agent_reports": [],
+        }
+
+    def test_rerunning_a_week_replaces_the_verdict(self, decisions_database):
+        _persist_decisions([self._decision("APPROVED")], 2026, 1)
+
+        written = _persist_decisions([self._decision("REJECTED")], 2026, 1)
+
+        assert written == 1
+        rows = read_dataframe("SELECT decision FROM agent_decisions")
+        assert rows["decision"].tolist() == ["REJECTED"]
 
 
 # ======================================================================
