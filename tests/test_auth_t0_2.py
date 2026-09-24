@@ -78,7 +78,7 @@ def test_userresponse_user_id_alias(temp_db):
 
 
 def test_register_endpoint_uses_pydantic_signature(temp_db):
-    from api.server import app
+    from api.application import app
 
     with TestClient(app) as c:
         resp = c.post(
@@ -99,7 +99,7 @@ def test_register_endpoint_uses_pydantic_signature(temp_db):
 
 
 def test_login_endpoint_uses_pydantic_signature(temp_db):
-    from api.server import app
+    from api.application import app
 
     with TestClient(app) as c:
         c.post(
@@ -115,7 +115,7 @@ def test_login_endpoint_uses_pydantic_signature(temp_db):
 
 
 def test_login_rejects_bad_password(temp_db):
-    from api.server import app
+    from api.application import app
 
     with TestClient(app) as c:
         c.post(
@@ -134,7 +134,7 @@ def test_legacy_sha256_user_can_login_and_gets_rehashed(temp_db):
     import hashlib
     import secrets
 
-    from api.server import app
+    from api.application import app
 
     pw = "legacy_password"
     salt = secrets.token_hex(16)

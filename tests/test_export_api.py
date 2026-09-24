@@ -29,7 +29,7 @@ def client(db):
     from fastapi.testclient import TestClient
 
     from api.pipeline_router import require_pipeline_operator, require_pipeline_reader
-    from api.server import app
+    from api.application import app
 
     app.dependency_overrides[require_pipeline_reader] = lambda: "test-reader"
     app.dependency_overrides[require_pipeline_operator] = lambda: "test-operator"
