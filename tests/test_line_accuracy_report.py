@@ -101,14 +101,6 @@ def test_each_closing_line_is_matched_to_the_actual_for_its_own_market(db):
     assert dataset.loc["receiving_yards", ["line", "actual"]].tolist() == [20.5, 12.0]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "load_actual_stats selects only rushing_yards and receiving_yards, so passing_yards, "
-        "receptions, targets and anytime_touchdown lines never reach the report; "
-        "utils/nfl_markets.DATABASE_STAT_COLUMNS lists the columns loaders must select"
-    ),
-)
 def test_a_passing_yards_line_reaches_the_accuracy_dataset(db):
     _odds("BUF_qb_a", "passing_yards", 240.5, "2025-10-05T12:00:00+00:00")
     _stat("BUF_qb_a", passing_yards=281.0)

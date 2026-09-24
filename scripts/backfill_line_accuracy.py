@@ -19,7 +19,7 @@ import pandas as pd
 
 from config import config
 from utils.db import read_dataframe, write_dataframe
-from utils.nfl_markets import melt_actuals
+from utils.nfl_markets import DATABASE_STAT_COLUMNS, melt_actuals
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -114,8 +114,9 @@ def load_opening_lines(seasons: List[int]) -> pd.DataFrame:
 def load_actual_stats(seasons: List[int]) -> pd.DataFrame:
     """Load actual player stats for comparison with lines."""
     placeholders = ",".join("?" for _ in seasons)
+    stat_columns = ", ".join(DATABASE_STAT_COLUMNS)
     query = f"""
-    SELECT player_id, season, week, rushing_yards, receiving_yards
+    SELECT player_id, season, week, {stat_columns}
     FROM player_stats_enhanced
     WHERE season IN ({placeholders})
     ORDER BY season, week, player_id
