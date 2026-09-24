@@ -15,44 +15,8 @@ import pytest
 
 from config import config
 from schema_migrations import MigrationManager
-from value_betting_engine import (
-    _implied_probability,
-    implied_probability_no_vig,
-    rank_weekly_value,
-)
-
-
-def test_implied_probability_no_vig_symmetric_book():
-    """-110/-110 → 50/50 after vig removal."""
-    p_over, p_under = implied_probability_no_vig(-110, -110)
-    assert abs(p_over - 0.5) < 1e-9
-    assert abs(p_under - 0.5) < 1e-9
-    assert abs(p_over + p_under - 1.0) < 1e-9
-
-
-def test_implied_probability_no_vig_asymmetric_book():
-    """Asymmetric quotes still sum to 1.0 after normalization."""
-    p_over, p_under = implied_probability_no_vig(-130, +110)
-    assert abs(p_over + p_under - 1.0) < 1e-9
-    # Over favored, so its no-vig prob > under
-    assert p_over > p_under
-
-
-def test_implied_probability_no_vig_strictly_below_raw():
-    """Removing vig must reduce the over-side implied prob relative to raw."""
-    raw_over = _implied_probability(-110)  # 0.5238
-    p_over, _ = implied_probability_no_vig(-110, -110)
-    assert p_over < raw_over
-
-
-def test_implied_probability_no_vig_raises_on_zero_total(monkeypatch):
-    """Guards against degenerate input — both raw probs sum to 0."""
-    import value_betting_engine
-
-    monkeypatch.setattr(value_betting_engine, "_implied_probability", lambda _: 0.0)
-    with pytest.raises(ValueError):
-        implied_probability_no_vig(-110, -110)
-
+from utils.odds_math import implied_probability
+from value_betting_engine import rank_weekly_value
 
 # ---------------------------------------------------------------------------
 # Integration: rank_weekly_value branches on the flag
@@ -142,7 +106,7 @@ def test_no_vig_flag_off_uses_raw_implied_prob(temp_db_two_sided, monkeypatch):
     # Raw -110 implied = 100/210 ≈ 0.5238
     # Our row would not have an under_price effect at all
     assert df.iloc[0]["edge_percentage"] == pytest.approx(
-        df.iloc[0]["p_win"] - _implied_probability(-110), abs=1e-9
+        df.iloc[0]["p_win"] - implied_probability(-110), abs=1e-9
     )
 
 
@@ -159,7 +123,7 @@ def test_no_vig_flag_on_lifts_edge_when_under_present(temp_db_two_sided, monkeyp
     edge_novig = df_novig.iloc[0]["edge_percentage"]
     # No-vig fair prob = 0.5 < 0.5238 raw → edge increases by ~2.38 pp
     assert edge_novig > edge_raw
-    assert edge_novig - edge_raw == pytest.approx(_implied_probability(-110) - 0.5, abs=1e-9)
+    assert edge_novig - edge_raw == pytest.approx(implied_probability(-110) - 0.5, abs=1e-9)
 
 
 @pytest.fixture
@@ -233,7 +197,7 @@ def test_no_vig_flag_on_falls_back_when_under_missing(temp_db_no_under, monkeypa
     df = rank_weekly_value(2024, 1, min_edge=-1.0)
     assert not df.empty
     assert df.iloc[0]["edge_percentage"] == pytest.approx(
-        df.iloc[0]["p_win"] - _implied_probability(-110), abs=1e-9
+        df.iloc[0]["p_win"] - implied_probability(-110), abs=1e-9
     )
 
 

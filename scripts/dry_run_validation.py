@@ -23,6 +23,7 @@ from config import config
 from risk_manager import assess_risk
 from utils.db import read_dataframe
 from utils.nfl_markets import MARKET_TO_STAT, prob_over
+from utils.odds_math import implied_probability
 from value_betting_engine import rank_weekly_value
 
 logger = logging.getLogger(__name__)
@@ -146,9 +147,7 @@ def measure_edge_decay(
         line = float(pick["line"])
         price = int(pick["price"])
 
-        from value_betting_engine import _implied_probability
-
-        implied = _implied_probability(price)
+        implied = implied_probability(price)
 
         for offset in moves:
             shifted_line = line + offset
