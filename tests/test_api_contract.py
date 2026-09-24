@@ -221,6 +221,48 @@ class TestValueBetsContract:
         assert "why" in bet
 
 
+def _seed_other_book(player_id, week, sportsbook, edge):
+    """Price an already seeded bet again at another book."""
+    execute(
+        """
+        INSERT INTO materialized_value_view
+            (season, week, player_id, event_id, team, market, sportsbook,
+             line, price, mu, sigma, p_win, edge_percentage, expected_roi,
+             kelly_fraction, stake, generated_at)
+        VALUES (2025, ?, ?, 'evt1', 'KC', 'receiving_yards', ?,
+                74.5, -105, 85.0, 8.0, 0.66, ?, 0.13, 0.02, 20.0, datetime('now'))
+        """,
+        (week, player_id, sportsbook, edge),
+    )
+
+
+class TestAnalyticsContract:
+    """Chart panels describe bets, and a bet priced at two books is one bet."""
+
+    @pytest.fixture()
+    def two_bets_three_rows(self, db):
+        _seed_value_bet(db, player_id="P001", week=18, edge=0.10)
+        _seed_value_bet(db, player_id="P002", week=18, edge=0.20)
+        _seed_other_book("P001", 18, "fanduel", 0.15)
+
+    def test_by_market_counts_each_bet_once(self, client, two_bets_three_rows):
+        data = client.get("/api/analytics/by-market?season=2025&week=18").json()
+
+        assert [(m["market"], m["bet_count"]) for m in data["by_market"]] == [
+            ("receiving_yards", 2)
+        ]
+
+    def test_by_position_counts_each_bet_once(self, client, two_bets_three_rows):
+        data = client.get("/api/analytics/by-position?season=2025&week=18").json()
+
+        assert [(p["position"], p["bet_count"]) for p in data["by_position"]] == [("WR", 2)]
+
+    def test_edge_distribution_counts_each_bet_once(self, client, two_bets_three_rows):
+        data = client.get("/api/analytics/edge-distribution?season=2025&week=18").json()
+
+        assert sum(data["counts"]) == 2
+
+
 class TestPipelineRunContract:
     def test_post_returns_run_fields(self, client):
         resp = client.post("/api/run?season=2025&week=22&skip_ingest=true&skip_odds=true")

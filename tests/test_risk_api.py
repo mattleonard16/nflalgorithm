@@ -85,6 +85,21 @@ def _seed_bets(db, season=2025, week=22):
     )
 
 
+def _seed_second_book_for_mahomes(season=2025, week=22):
+    """The same passing-yards bet priced again at another book, at a lower edge."""
+    execute(
+        """
+        INSERT INTO materialized_value_view
+            (season, week, player_id, event_id, team, market, sportsbook,
+             line, price, mu, sigma, p_win, edge_percentage, expected_roi,
+             kelly_fraction, stake, generated_at)
+        VALUES (?, ?, 'P001', 'evt_kc_buf', 'KC', 'passing_yards', 'fanduel',
+                281.5, -110, 310.0, 30.0, 0.64, 0.11, 0.09, 0.02, 20.0, datetime('now'))
+        """,
+        params=(season, week),
+    )
+
+
 class TestCorrelationAPI:
     def test_empty_returns_empty(self, client, db):
         resp = client.get("/api/analytics/correlation?season=9999&week=99")
@@ -103,6 +118,15 @@ class TestCorrelationAPI:
         assert len(data["team_stacks"]) >= 1
         kc_stack = next((s for s in data["team_stacks"] if s["team"] == "KC"), None)
         assert kc_stack is not None
+        assert kc_stack["count"] == 2
+
+    def test_a_bet_at_two_books_counts_once_in_a_team_stack(self, client, db):
+        _seed_bets(db)
+        _seed_second_book_for_mahomes()
+
+        data = client.get("/api/analytics/correlation?season=2025&week=22").json()
+
+        kc_stack = next(s for s in data["team_stacks"] if s["team"] == "KC")
         assert kc_stack["count"] == 2
 
     def test_correlation_groups_have_players(self, client, db):
@@ -141,6 +165,17 @@ class TestRiskSummaryAPI:
         kc_exp = next((e for e in data["team_exposure"] if e["team"] == "KC"), None)
         assert kc_exp is not None
         assert kc_exp["stake"] == 35.0  # 20 + 15
+
+    def test_a_bet_at_two_books_is_staked_once(self, client, db):
+        # The card lists each book's price as its own row. Exposure is what the
+        # bettor places, one stake per bet, not one per book.
+        _seed_bets(db)
+        _seed_second_book_for_mahomes()
+
+        data = client.get("/api/analytics/risk-summary?season=2025&week=22").json()
+
+        kc_exp = next(e for e in data["team_exposure"] if e["team"] == "KC")
+        assert (data["total_stake"], kc_exp["stake"]) == (60.0, 35.0)
 
     def test_guardrails_present(self, client, db):
         _seed_bets(db)
