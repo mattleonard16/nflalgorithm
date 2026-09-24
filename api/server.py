@@ -562,6 +562,17 @@ async def get_health(
         }
 
 
+def _summarize_bets(bets: pd.DataFrame, by: str) -> pd.DataFrame:
+    """Count bets per group with their mean edge, expected ROI, and win probability."""
+    summary = bets.groupby(by, as_index=False).agg(
+        bet_count=("player_id", "size"),
+        avg_edge=("edge_percentage", "mean"),
+        avg_roi=("expected_roi", "mean"),
+        avg_p_win=("p_win", "mean"),
+    )
+    return summary.sort_values("bet_count", ascending=False, kind="mergesort")
+
+
 @app.get("/api/analytics/edge-distribution")
 async def get_edge_distribution(
     season: int = Query(..., description="NFL season year"),
@@ -572,12 +583,12 @@ async def get_edge_distribution(
     try:
         visibility_sql, visibility_params = value_visibility_scope()
         query = f"""
-            SELECT v.edge_percentage
+            SELECT v.player_id, v.market, v.side, v.sportsbook, v.edge_percentage
             FROM materialized_value_view v
             WHERE {visibility_sql}
               AND v.season = ? AND v.week = ?
         """
-        df = read_dataframe(query, params=[*visibility_params, season, week])
+        df = best_line_per_bet(read_dataframe(query, params=[*visibility_params, season, week]))
 
         if df.empty:
             return {
@@ -615,11 +626,9 @@ async def get_by_position(
         visibility_sql, visibility_params = value_visibility_scope()
         query = f"""
             SELECT
-                COALESCE(pd.position, ps.position) as position,
-                COUNT(*) as bet_count,
-                AVG(v.edge_percentage) as avg_edge,
-                AVG(v.expected_roi) as avg_roi,
-                AVG(v.p_win) as avg_p_win
+                v.player_id, v.market, v.side, v.sportsbook,
+                v.edge_percentage, v.expected_roi, v.p_win,
+                COALESCE(pd.position, ps.position) as position
             FROM materialized_value_view v
             LEFT JOIN player_dim pd ON v.player_id = pd.player_id
             LEFT JOIN (
@@ -630,13 +639,11 @@ async def get_by_position(
             WHERE {visibility_sql}
               AND v.season = ? AND v.week = ?
               AND COALESCE(pd.position, ps.position) IS NOT NULL
-            GROUP BY COALESCE(pd.position, ps.position)
-            ORDER BY bet_count DESC
         """
-        df = read_dataframe(query, params=[*visibility_params, season, week])
+        df = best_line_per_bet(read_dataframe(query, params=[*visibility_params, season, week]))
 
         return {
-            "by_position": json_records(df),
+            "by_position": json_records(_summarize_bets(df, "position")),
         }
     except Exception as e:
         logger.error(f"Error fetching by-position stats: {e}")
@@ -655,21 +662,16 @@ async def get_by_market(
         visibility_sql, visibility_params = value_visibility_scope()
         query = f"""
             SELECT
-                v.market,
-                COUNT(*) as bet_count,
-                AVG(v.edge_percentage) as avg_edge,
-                AVG(v.expected_roi) as avg_roi,
-                AVG(v.p_win) as avg_p_win
+                v.player_id, v.market, v.side, v.sportsbook,
+                v.edge_percentage, v.expected_roi, v.p_win
             FROM materialized_value_view v
             WHERE {visibility_sql}
               AND v.season = ? AND v.week = ?
-            GROUP BY v.market
-            ORDER BY bet_count DESC
         """
-        df = read_dataframe(query, params=[*visibility_params, season, week])
+        df = best_line_per_bet(read_dataframe(query, params=[*visibility_params, season, week]))
 
         return {
-            "by_market": json_records(df),
+            "by_market": json_records(_summarize_bets(df, "market")),
         }
     except Exception as e:
         logger.error(f"Error fetching by-market stats: {e}")
@@ -813,14 +815,15 @@ async def get_correlation_analysis(
 
         visibility_sql, visibility_params = value_visibility_scope()
         query = f"""
-            SELECT v.player_id, pd.player_name, pd.position, v.team, v.market, v.sportsbook,
-                   v.event_id, v.stake, v.edge_percentage, v.kelly_fraction, v.price, v.p_win
+            SELECT v.player_id, pd.player_name, pd.position, v.team, v.market, v.side,
+                   v.sportsbook, v.event_id, v.stake, v.edge_percentage, v.kelly_fraction,
+                   v.price, v.p_win
             FROM materialized_value_view v
             LEFT JOIN player_dim pd ON v.player_id = pd.player_id
             WHERE {visibility_sql}
               AND v.season = ? AND v.week = ?
         """
-        df = read_dataframe(query, params=[*visibility_params, season, week])
+        df = best_line_per_bet(read_dataframe(query, params=[*visibility_params, season, week]))
 
         if df.empty:
             return {"correlation_groups": [], "team_stacks": []}
@@ -880,14 +883,15 @@ async def get_risk_summary(
 
         visibility_sql, visibility_params = value_visibility_scope()
         query = f"""
-            SELECT v.player_id, pd.player_name, v.team, v.market, v.sportsbook,
+            SELECT v.player_id, pd.player_name, v.team, v.market, v.side, v.sportsbook,
                    v.event_id, v.stake, v.kelly_fraction, v.edge_percentage, v.price, v.p_win
             FROM materialized_value_view v
             LEFT JOIN player_dim pd ON v.player_id = pd.player_id
             WHERE {visibility_sql}
               AND v.season = ? AND v.week = ?
         """
-        df = read_dataframe(query, params=[*visibility_params, season, week])
+        # The card lists every book's price for a bet; exposure is one stake per bet.
+        df = best_line_per_bet(read_dataframe(query, params=[*visibility_params, season, week]))
 
         if df.empty:
             return {
@@ -1077,10 +1081,10 @@ async def export_bundle(
 
         # Try to include correlation and risk data
         try:
-            from risk_manager import compute_exposure, detect_correlations, detect_team_stacks
+            from risk_manager import detect_team_stacks
 
             risk_query = f"""
-                SELECT v.player_id, pd.player_name, pd.position, v.team, v.market,
+                SELECT v.player_id, pd.player_name, pd.position, v.team, v.market, v.side,
                        v.sportsbook, v.event_id, v.stake, v.edge_percentage,
                        v.kelly_fraction, v.price, v.p_win
                 FROM materialized_value_view v
@@ -1088,16 +1092,17 @@ async def export_bundle(
                 WHERE {visibility_sql}
                   AND v.season = ? AND v.week = ?
             """
-            risk_df = read_dataframe(
-                risk_query,
-                params=[*visibility_params, season, week],
+            # Stacks and stake count each bet once, as the risk summary does.
+            risk_df = best_line_per_bet(
+                read_dataframe(risk_query, params=[*visibility_params, season, week])
             )
             if not risk_df.empty:
                 stacks = detect_team_stacks(risk_df)
                 bundle["team_stacks"] = {team: len(idxs) for team, idxs in stacks.items()}
                 bundle["total_stake"] = float(risk_df["stake"].sum())
         except Exception:
-            pass
+            # The bundle is still useful without these fields, so export it anyway.
+            logger.exception("Export bundle for %s week %s left out risk data", season, week)
 
         content = json.dumps(bundle, indent=2, default=str)
         filename = f"run_bundle_s{season}_w{week}.json"
