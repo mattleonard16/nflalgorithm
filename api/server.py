@@ -1408,7 +1408,7 @@ async def update_preferences(
 
 @app.put("/api/user/bankroll")
 async def update_user_bankroll(
-    bankroll: float = Query(..., description="New bankroll amount"),
+    bankroll: float = Query(..., ge=0, allow_inf_nan=False, description="New bankroll amount"),
     current_user: UserResponse = Depends(get_current_user),
 ):
     """Update user bankroll."""
