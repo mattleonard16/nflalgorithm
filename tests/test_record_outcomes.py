@@ -9,7 +9,6 @@ decide which games have finished, so kickoffs are set relative to now.
 
 from __future__ import annotations
 
-import importlib.util
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -345,16 +344,6 @@ def test_an_over_taken_below_the_closing_line_beat_the_close(final_game):
     assert compute_and_save_clv(SEASON, WEEK, outcomes) > 0
 
 
-@pytest.mark.xfail(
-    importlib.util.find_spec("value_betting_engine") is None,
-    raises=ModuleNotFoundError,
-    strict=True,
-    reason=(
-        "utils/clv.py _market_fair_prob imports the gitignored value_betting_engine "
-        "whenever the close carries both prices, even though a one-sided entry sends "
-        "compute_clv down the model path, so CLV crashes in a public clone"
-    ),
-)
 def test_a_two_sided_close_records_clv_for_a_one_sided_entry(final_game):
     outcomes = _graded_receiver(line=64.5)
     _odds("BUF_receiver_a", 64.5, PAST_KICKOFF - timedelta(days=1), under_price=-110)
