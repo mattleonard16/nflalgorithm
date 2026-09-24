@@ -403,6 +403,12 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 16. [RESOLVED] SQLite/MySQL parity — upserts in `schema_migrations.py` and
     `scripts/record_outcomes.py` carry both dialects; `tests/test_grading_upsert_parity.py` and the
     CI MySQL matrix (`tests/test_pipeline_database_matrix.py`) hold the line.
+    Agent verdicts (`agents/coordinator.py:_persist_decisions`) and agent performance
+    (`learning_loop.py`) carry both dialects too, and the same CI job runs their upsert tests.
+    The NBA side does not. 13 NBA writers still use SQLite-only `INSERT OR REPLACE` or
+    `INSERT OR IGNORE` (list them with `git grep -lE "INSERT OR (REPLACE|IGNORE)" -- '*nba*.py'
+    ':!tests/*'`), so NBA does not run on MySQL. Port one with a test on the `matrix_database`
+    fixture in `tests/conftest.py`, then add that test to the CI MySQL step.
 17. [RESOLVED] SQLite WAL — `utils/db.py` sets `journal_mode=WAL` and `synchronous=NORMAL`;
     `make doctor` fails on a non-WAL database (`tests/test_db_pragmas.py`). No pool by design: the
     worker is the single writer.
