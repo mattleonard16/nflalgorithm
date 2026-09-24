@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from config import config
+from utils.best_line import best_line_per_bet
 from utils.db import read_dataframe
 from utils.risk_utils import (
     append_warning as _append_warning,
@@ -288,7 +289,8 @@ def run_risk_check(season: int, week: int) -> pd.DataFrame:
         print(f"No value bets for season={season} week={week}")
         return df
 
-    assessed = assess_risk(df)
+    # One row per bet, not per book: see agents/risk_agent.py.
+    assessed = assess_risk(best_line_per_bet(df))
     _print_risk_report(assessed)
     return assessed
 

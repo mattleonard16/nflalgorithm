@@ -31,6 +31,7 @@ def _make_value_df(rows: list[dict]) -> pd.DataFrame:
         "event_id": "EVT1",
         "team": "KC",
         "market": "rushing_yards",
+        "side": "over",
         "sportsbook": "DraftKings",
         "line": 60.5,
         "price": -110,
@@ -570,6 +571,14 @@ class TestRunRiskCheck:
         assert "risk_adjusted_kelly" in result.columns
         assert "correlation_group" in result.columns
         assert len(result) == 2
+
+    def test_a_bet_priced_at_several_books_is_assessed_once(self, monkeypatch):
+        import risk_manager as rm
+
+        df = _make_value_df([{"sportsbook": b} for b in ("DraftKings", "FanDuel", "Bovada")])
+        monkeypatch.setattr(rm, "read_dataframe", lambda q, params=None: df)
+
+        assert len(rm.run_risk_check(2025, 8)) == 1
 
     def test_empty_view_returns_empty(self, monkeypatch):
         import risk_manager as rm
