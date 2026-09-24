@@ -32,6 +32,7 @@ from api.auth import (
     validate_session,
 )
 from api.pipeline_router import require_pipeline_operator, require_pipeline_reader
+from api.records import json_records
 from api.value_visibility import value_visibility_scope
 from config import config
 from utils.db import execute, fetchall, fetchone, get_connection, read_dataframe
@@ -325,8 +326,7 @@ async def get_value_bets(
             df = df.sort_values("edge_percentage", ascending=False)
             df = df.groupby(["player_id", "market", "side"]).first().reset_index()
 
-        # Convert to records
-        bets = df.to_dict(orient="records")
+        bets = json_records(df)
 
         # Attach explainability payloads if requested
         if include_why:
@@ -411,7 +411,7 @@ async def get_performance(season: Optional[int] = Query(None, description="Filte
                 "win_rate": 0.0,
             }
 
-        weeks = df.to_dict(orient="records")
+        weeks = json_records(df)
 
         # Calculate summary
         total_bets = int(df["total_bets"].sum())
@@ -478,7 +478,7 @@ async def get_outcomes(
         df = read_dataframe(query, params=[season, week])
 
         return {
-            "outcomes": df.to_dict(orient="records") if not df.empty else [],
+            "outcomes": json_records(df),
             "total": len(df),
         }
     except Exception as e:
@@ -527,7 +527,7 @@ async def get_health(
                 "overall_status": "unknown",
             }
 
-        feeds = df.to_dict(orient="records")
+        feeds = json_records(df)
 
         # Determine overall status based on freshness
         now = datetime.now(timezone.utc)
@@ -637,7 +637,7 @@ async def get_by_position(
         df = read_dataframe(query, params=[*visibility_params, season, week])
 
         return {
-            "by_position": df.to_dict(orient="records") if not df.empty else [],
+            "by_position": json_records(df),
         }
     except Exception as e:
         logger.error(f"Error fetching by-position stats: {e}")
@@ -670,7 +670,7 @@ async def get_by_market(
         df = read_dataframe(query, params=[*visibility_params, season, week])
 
         return {
-            "by_market": df.to_dict(orient="records") if not df.empty else [],
+            "by_market": json_records(df),
         }
     except Exception as e:
         logger.error(f"Error fetching by-market stats: {e}")
@@ -703,7 +703,7 @@ async def get_weekly_summary(
         df = read_dataframe(query, params=[weeks])
 
         return {
-            "weeks": df.to_dict(orient="records") if not df.empty else [],
+            "weeks": json_records(df),
         }
     except Exception as e:
         logger.error(f"Error fetching weekly summary: {e}")
@@ -1039,7 +1039,7 @@ async def export_bundle(
             bets_query,
             params=[*visibility_params, season, week],
         )
-        bets_list = bets_df.to_dict(orient="records") if not bets_df.empty else []
+        bets_list = json_records(bets_df)
 
         if config.api.demo_mode:
             run_row = fetchone(
@@ -1503,7 +1503,7 @@ async def get_user_bets(
         df = read_dataframe(query, params=params)
 
         return {
-            "bets": df.to_dict(orient="records") if not df.empty else [],
+            "bets": json_records(df),
             "total": len(df),
         }
     except Exception as e:
@@ -1671,7 +1671,7 @@ async def backtest_summary(
             model_beats_line_pct = None
             total_bets = 0
 
-        recent_picks = picks_df.to_dict(orient="records") if not picks_df.empty else []
+        recent_picks = json_records(picks_df)
 
         return {
             "summary": {
