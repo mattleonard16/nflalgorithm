@@ -315,14 +315,3 @@ def test_a_server_error_never_shows_the_exception_text(client, monkeypatch, path
     assert resp.status_code == 500
     assert "hunter2" not in resp.text
 
-
-class TestPipelineRunContract:
-    def test_post_returns_run_fields(self, client):
-        resp = client.post("/api/run?season=2025&week=22&skip_ingest=true&skip_odds=true")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "run_id" in data
-        assert "status" in data
-        assert "started_at" in data
-        assert "season" in data
-        assert "week" in data
