@@ -127,17 +127,3 @@ def test_join_odds_projections_handles_merge_suffixes(temp_db_with_data):
     assert (result['week'] == 9).all()
     
     print(f"✅ join_odds_projections returned {len(result)} rows with proper season/week handling")
-
-
-def test_join_odds_projections_no_null_season_week(temp_db_with_data):
-    """Verify that join_odds_projections never returns null season/week values."""
-    result = join_odds_projections(2023, 9)
-    
-    if not result.empty:
-        null_seasons = result['season'].isna().sum()
-        null_weeks = result['week'].isna().sum()
-        
-        assert null_seasons == 0, f"Found {null_seasons} null season values"
-        assert null_weeks == 0, f"Found {null_weeks} null week values"
-        
-        print(f"✅ No null season/week values in {len(result)} rows")

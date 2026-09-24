@@ -55,9 +55,6 @@ def client(temp_db_with_user):
         )
 
     app.dependency_overrides[get_current_user] = _override_user
-    # The endpoint reads .user_id off UserResponse (legacy alias). Until T0 #2
-    # renames the field, monkeypatch the attribute for this test session.
-    UserResponse.user_id = property(lambda self: self.id)
 
     with TestClient(app) as c:
         yield c

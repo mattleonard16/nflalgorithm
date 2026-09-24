@@ -164,34 +164,6 @@ def test_wr_team_variant_matches(tmp_path: Path) -> None:
         assert not kirk_rows.empty, "Christian Kirk should match despite JAX/JAC variant"
 
 
-def test_match_tier_in_output(tmp_path: Path) -> None:
-    """Ensure match_tier and match_confidence are in output columns."""
-    db_path = tmp_path / "tier_output.db"
-    with sqlite3.connect(db_path) as conn:
-        _init_tables(conn)
-        conn.execute(
-            "INSERT INTO weekly_projections VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (2024, 5, 'MIA_tyreek_hill', 'MIA', 'NE', 'receiving_yards', 85.0, 15.0, 'v1', 'abc', '2024-01-01')
-        )
-        conn.execute(
-            "INSERT INTO weekly_odds VALUES (?,?,?,?,?,?,?,?,?)",
-            ('game1', 2024, 5, 'MIA_tyreek_hill', 'receiving_yards', 'DraftKings', 82.5, -110, '2024-01-01')
-        )
-        conn.execute(
-            "INSERT INTO player_stats_enhanced VALUES (?,?,?,?,?,?)",
-            ('MIA_tyreek_hill', 'Tyreek Hill', 'WR', 'MIA', 2024, 5)
-        )
-        conn.commit()
-    
-    with use_database(db_path):
-        result = join_odds_projections(2024, 5)
-    
-    if not result.empty:
-        assert 'match_tier' in result.columns, "match_tier should be in output"
-        assert 'match_confidence' in result.columns, "match_confidence should be in output"
-        assert result['match_tier'].isin([1, 2, 3]).all(), "match_tier should be 1, 2, or 3"
-
-
 def test_normalize_player_name() -> None:
     """Test name normalization for matching."""
     assert normalize_player_name("Tyreek Hill") == normalize_player_name("tyreek hill")

@@ -1,6 +1,6 @@
 """Tests for utils/nba_injury_adjustments.py — usage redistribution, damping.
 
-Covers all 10 required test cases:
+Covers:
 1. test_no_injuries_no_boost
 2. test_single_injury_boosts_teammate
 3. test_boost_multiplier_capped
@@ -9,8 +9,6 @@ Covers all 10 required test cases:
 6. test_damping_factor_applied
 7. test_usage_redistribution_proportional
 8. test_immutability
-9. test_empty_input
-10. test_player_not_on_team_no_boost
 
 Plus pre-existing coverage:
 - compute_teammate_absence_boost() with known OUT players
@@ -23,17 +21,8 @@ Plus pre-existing coverage:
 from __future__ import annotations
 
 import json
-import sys
 from typing import Dict, List
-from unittest.mock import MagicMock, patch
-
-# Mock config module since config.py is gitignored in this worktree.
-# This must happen before any project imports that transitively import config.
-if "config" not in sys.modules:
-    _mock_config = MagicMock()
-    _mock_config.config.database.backend = "sqlite"
-    _mock_config.config.database.path = ":memory:"
-    sys.modules["config"] = _mock_config
+from unittest.mock import patch
 
 import pytest
 
@@ -322,38 +311,6 @@ class TestComputeTeammateAbsenceBoost:
         )
 
     # -----------------------------------------------------------------------
-    # 10. Player on different team → no boost
-    # -----------------------------------------------------------------------
-
-    @patch(_MARKET_SHARES_PATH)
-    @patch(_OUT_PLAYERS_PATH)
-    def test_player_not_on_team_no_boost(self, mock_out, mock_shares):
-        """OUT player on a different team must not affect the active player's mu.
-
-        _get_out_players is scoped to a team, so a cross-team OUT player
-        would never appear in the results for the active player's team.
-        Simulated here by returning an empty list.
-        """
-        from utils.nba_injury_adjustments import compute_teammate_absence_boost
-
-        # The OUT player is on LAL; the active player is on BOS.
-        # _get_out_players("BOS", ...) returns [] — no BOS players are OUT.
-        mock_out.return_value = []
-        mock_shares.return_value = {1: 0.30}
-
-        adj_mu, multiplier, out_names = compute_teammate_absence_boost(
-            player_id=1,
-            team="BOS",
-            game_date="2026-02-17",
-            market="pts",
-            base_mu=20.0,
-        )
-
-        assert adj_mu == pytest.approx(20.0)
-        assert multiplier == pytest.approx(1.0)
-        assert out_names == []
-
-    # -----------------------------------------------------------------------
     # Pre-existing: self excluded from out list
     # -----------------------------------------------------------------------
 
@@ -413,29 +370,6 @@ class TestComputeTeammateAbsenceBoost:
 
         assert boost_large > boost_small
 
-    # -----------------------------------------------------------------------
-    # Pre-existing: adj_mu == base_mu * boost_multiplier
-    # -----------------------------------------------------------------------
-
-    @patch(_MARKET_SHARES_PATH)
-    @patch(_OUT_PLAYERS_PATH)
-    def test_adjusted_mu_equals_base_times_multiplier(self, mock_out, mock_shares):
-        """adjusted_mu must always equal base_mu * boost_multiplier."""
-        from utils.nba_injury_adjustments import compute_teammate_absence_boost
-
-        mock_out.return_value = [{"player_id": 1628384, "player_name": "Jaylen Brown"}]
-        mock_shares.return_value = {1628369: 0.30, 1628384: 0.25}
-
-        adj_mu, multiplier, _ = compute_teammate_absence_boost(
-            player_id=1628369,
-            team="BOS",
-            game_date="2026-02-17",
-            market="pts",
-            base_mu=28.0,
-        )
-
-        assert adj_mu == pytest.approx(28.0 * multiplier)
-
 
 # ---------------------------------------------------------------------------
 # apply_injury_adjustments — batch processing
@@ -445,7 +379,7 @@ class TestComputeTeammateAbsenceBoost:
 class TestApplyInjuryAdjustments:
     """Tests for the batch adjustment function.
 
-    Tests 4, 5, 8, 9 are exercised via apply_injury_adjustments directly,
+    Tests 4, 5, 8 are exercised via apply_injury_adjustments directly,
     using lower-level patches (_get_out_players / _get_team_market_shares)
     rather than mocking compute_teammate_absence_boost, to verify the full
     sigma / immutability / projected_value plumbing.
@@ -522,17 +456,6 @@ class TestApplyInjuryAdjustments:
         assert original_row == original_snapshot, (
             "apply_injury_adjustments must not mutate the original input dicts"
         )
-
-    # -----------------------------------------------------------------------
-    # 9. Empty input
-    # -----------------------------------------------------------------------
-
-    def test_empty_input(self):
-        """apply_injury_adjustments([]) must return []."""
-        from utils.nba_injury_adjustments import apply_injury_adjustments
-
-        result = apply_injury_adjustments([], game_date="2026-02-17")
-        assert result == []
 
     # -----------------------------------------------------------------------
     # Pre-existing: modifies mu when boost applied

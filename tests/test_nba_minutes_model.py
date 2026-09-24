@@ -114,27 +114,6 @@ class TestEngineerFeatures:
         for col in partial_expected:
             assert col in result.columns, f"Missing column: {col}"
 
-    def test_rolling_avgs_use_shift_no_leakage(self, db):
-        """Rolling averages must not include the same row value (shift=1)."""
-        from models.nba.minutes_model import _engineer_features
-
-        _seed_game_logs(15)
-        df = read_dataframe(
-            "SELECT player_id, player_name, team_abbreviation, season, "
-            "game_id, game_date, matchup, min "
-            "FROM nba_player_game_logs"
-        )
-        result = _engineer_features(df)
-        # First row per player should have min_last5_avg == NaN or same as min
-        # because shift(1) means first row has no prior, ewm returns NaN or initial value
-        first_rows = result.groupby("player_id").first().reset_index()
-        for _, row in first_rows.iterrows():
-            # EWM with min_periods=1 on a single shifted value: first row
-            # after shift gets NaN shifted in, ewm will produce NaN initially
-            # The key property: the avg must not equal the current min exactly
-            # when computed from shifted data
-            assert not np.isnan(row["min_last5_avg"]) or True  # NaN is acceptable
-
     def test_home_game_flag_correct(self, db):
         """home_game must be 1 for 'vs.' matchups and 0 for '@' matchups."""
         from models.nba.minutes_model import _engineer_features

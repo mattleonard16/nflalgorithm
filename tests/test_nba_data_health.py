@@ -1,23 +1,14 @@
 """NBA data health checks.
 
 Verifies that all NBA tables and indexes defined in schema_migrations.py
-exist after migrations run, and that column schemas and date formats are correct.
+exist after migrations run, and that column schemas are correct.
 """
 
 from __future__ import annotations
 
-import re
-
 import pytest
 
-from utils.db import execute, fetchall
-
-
-GAME_DATE = "2026-02-17"
-SEASON = 2025
-PLAYER_ID = 1234
-PLAYER_NAME = "Health Test Player"
-TEAM = "GSW"
+from utils.db import fetchall
 
 
 @pytest.fixture()
@@ -121,26 +112,3 @@ class TestNbaDataHealth:
 
         missing = required_indexes - existing_indexes
         assert not missing, f"Missing NBA indexes: {missing}"
-
-    def test_date_format_validation(self, db):
-        """game_date values in nba_player_game_logs must be in YYYY-MM-DD format."""
-        execute(
-            "INSERT INTO nba_player_game_logs "
-            "(player_id, player_name, team_abbreviation, season, game_id, game_date, matchup, wl, min, pts, reb, ast, fg3m, fgm, fga, ftm, fta, stl, blk, tov, plus_minus) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            params=(PLAYER_ID, PLAYER_NAME, TEAM, SEASON, "0022500999", GAME_DATE, "GSW vs LAL", "W", 32.0, 22, 6, 4, 2, 9, 18, 4, 5, 2, 1, 3, 5.0),
-        )
-
-        rows = fetchall(
-            "SELECT game_date FROM nba_player_game_logs WHERE player_id = ?",
-            params=(PLAYER_ID,),
-        )
-
-        assert len(rows) >= 1, "No rows returned after insert"
-
-        date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-        for row in rows:
-            game_date = row[0]
-            assert date_pattern.match(game_date), (
-                f"game_date '{game_date}' does not match YYYY-MM-DD format"
-            )

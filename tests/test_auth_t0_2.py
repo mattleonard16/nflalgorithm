@@ -12,12 +12,6 @@ from fastapi.testclient import TestClient
 from config import config
 from schema_migrations import MigrationManager
 
-API_SERVER_AVAILABLE = (Path(__file__).parent.parent / "api" / "server.py").is_file()
-requires_api_server = pytest.mark.skipif(
-    not API_SERVER_AVAILABLE,
-    reason="private API server implementation is unavailable",
-)
-
 
 @pytest.fixture
 def temp_db(monkeypatch):
@@ -83,7 +77,6 @@ def test_userresponse_user_id_alias(temp_db):
     assert u.user_id == "u-123"
 
 
-@requires_api_server
 def test_register_endpoint_uses_pydantic_signature(temp_db):
     from api.server import app
 
@@ -105,7 +98,6 @@ def test_register_endpoint_uses_pydantic_signature(temp_db):
     assert hash_value.startswith(("$2a$", "$2b$", "$2y$"))
 
 
-@requires_api_server
 def test_login_endpoint_uses_pydantic_signature(temp_db):
     from api.server import app
 
@@ -122,7 +114,6 @@ def test_login_endpoint_uses_pydantic_signature(temp_db):
     assert "session_id" in resp.json()
 
 
-@requires_api_server
 def test_login_rejects_bad_password(temp_db):
     from api.server import app
 
@@ -138,7 +129,6 @@ def test_login_rejects_bad_password(temp_db):
     assert resp.status_code == 401
 
 
-@requires_api_server
 def test_legacy_sha256_user_can_login_and_gets_rehashed(temp_db):
     """Existing pre-T0 #2 users still authenticate; their hash rehashes to bcrypt."""
     import hashlib

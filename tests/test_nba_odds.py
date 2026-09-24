@@ -740,27 +740,6 @@ FAKE_EVENTS_ALL_MARKETS = [
 class TestModeledMarketsFilter:
     """Verify that blk, stl, tov markets are excluded from parsed results."""
 
-    def test_parse_events_excludes_blk(self, db):
-        """blk market must not appear in _parse_events output."""
-        from scripts.scrape_nba_odds import _parse_events
-        rows = _parse_events(FAKE_EVENTS_ALL_MARKETS, season=2025)
-        markets = {r["market"] for r in rows}
-        assert "blk" not in markets
-
-    def test_parse_events_excludes_stl(self, db):
-        """stl market must not appear in _parse_events output."""
-        from scripts.scrape_nba_odds import _parse_events
-        rows = _parse_events(FAKE_EVENTS_ALL_MARKETS, season=2025)
-        markets = {r["market"] for r in rows}
-        assert "stl" not in markets
-
-    def test_parse_events_excludes_tov(self, db):
-        """tov market must not appear in _parse_events output."""
-        from scripts.scrape_nba_odds import _parse_events
-        rows = _parse_events(FAKE_EVENTS_ALL_MARKETS, season=2025)
-        markets = {r["market"] for r in rows}
-        assert "tov" not in markets
-
     def test_parse_events_includes_only_modeled_markets(self, db):
         """Only pts, reb, ast, fg3m should appear in _parse_events output."""
         from scripts.scrape_nba_odds import MODELED_MARKETS, _parse_events

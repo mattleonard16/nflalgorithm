@@ -90,4 +90,5 @@ def test_fullstack_stops_when_preflight_fails(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
-    assert "Starting Next.js frontend" not in result.stdout
+    assert "Applying SQLite schema migrations" in result.stdout
+    assert "Starting worker, API, and frontend" not in result.stdout

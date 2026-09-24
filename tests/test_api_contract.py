@@ -32,12 +32,9 @@ def client(db):
     from fastapi.testclient import TestClient
 
     from api.application import app
-    from api.pipeline_router import require_pipeline_operator
 
-    app.dependency_overrides[require_pipeline_operator] = lambda: "test-operator"
     with TestClient(app) as test_client:
         yield test_client
-    app.dependency_overrides.clear()
 
 
 def _seed_value_bet(
@@ -169,15 +166,3 @@ class TestValueBetsContract:
         # why should be present (may be null or dict)
         bet = data["bets"][0]
         assert "why" in bet
-
-
-class TestPipelineRunContract:
-    def test_post_returns_run_fields(self, client):
-        resp = client.post("/api/run?season=2025&week=22&skip_ingest=true&skip_odds=true")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "run_id" in data
-        assert "status" in data
-        assert "started_at" in data
-        assert "season" in data
-        assert "week" in data

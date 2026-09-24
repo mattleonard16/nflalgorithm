@@ -8,17 +8,6 @@ Covers:
 
 from __future__ import annotations
 
-import sys
-from unittest.mock import MagicMock
-
-# Mock config module since config.py is gitignored in this worktree.
-# This must happen before any project imports that transitively import config.
-if "config" not in sys.modules:
-    _mock_config = MagicMock()
-    _mock_config.config.database.backend = "sqlite"
-    _mock_config.config.database.path = ":memory:"
-    sys.modules["config"] = _mock_config
-
 from unittest.mock import patch
 
 import pandas as pd

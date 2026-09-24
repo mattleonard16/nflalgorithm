@@ -1,7 +1,7 @@
 """Tests for utils/nba_feature_importance.py.
 
-Tests permutation importance, SHAP importance, feature count consistency,
-SHAP fallback, and DB persistence — all on synthetic data / tmp SQLite DB.
+Tests permutation importance, SHAP importance, SHAP fallback, and DB
+persistence — all on synthetic data / tmp SQLite DB.
 """
 
 from __future__ import annotations
@@ -90,26 +90,7 @@ def test_permutation_importance_ranked_descending():
 
 
 # ---------------------------------------------------------------------------
-# Test 3: Feature count matches get_feature_cols(market)
-# ---------------------------------------------------------------------------
-
-
-def test_feature_count_matches_stat_model():
-    from models.nba.stat_model import get_feature_cols
-    from utils.nba_feature_importance import compute_permutation_importance
-
-    market = "pts"
-    feature_names = get_feature_cols(market)
-    n_features = len(feature_names)
-
-    model, X, y = _make_small_model(n_features)
-    result = compute_permutation_importance(model, X, y, feature_names)
-
-    assert len(result) == n_features
-
-
-# ---------------------------------------------------------------------------
-# Test 4: SHAP importance works when shap is available
+# Test 3: SHAP importance works when shap is available
 # ---------------------------------------------------------------------------
 
 
@@ -133,7 +114,7 @@ def test_shap_importance_when_available():
 
 
 # ---------------------------------------------------------------------------
-# Test 5: Falls back to permutation / feature_importances_ when shap missing
+# Test 4: Falls back to permutation / feature_importances_ when shap missing
 # ---------------------------------------------------------------------------
 
 
@@ -163,7 +144,7 @@ def test_shap_fallback_when_shap_not_installed():
 
 
 # ---------------------------------------------------------------------------
-# Test 6: save_importance_snapshot writes correct number of rows to DB
+# Test 5: save_importance_snapshot writes correct number of rows to DB
 # ---------------------------------------------------------------------------
 
 

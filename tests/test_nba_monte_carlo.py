@@ -303,15 +303,6 @@ class TestReproducibility:
         p2 = monte_carlo_prob(**kwargs, rng=np.random.default_rng(42))
         assert p1 == p2, f"Results differ with same seed: {p1} != {p2}"
 
-    def test_different_seeds_may_differ(self):
-        from utils.nba_monte_carlo import monte_carlo_prob
-
-        kwargs = dict(mu=25.0, sigma=5.0, line=22.0, market="pts", n_sims=500)
-        p1 = monte_carlo_prob(**kwargs, rng=np.random.default_rng(1))
-        p2 = monte_carlo_prob(**kwargs, rng=np.random.default_rng(9999))
-        # Very unlikely to be exactly equal with different seeds
-        assert p1 != p2 or True  # non-fatal; just ensure no crash
-
 
 # ---------------------------------------------------------------------------
 # Test 8: Correlation matrix is positive semidefinite

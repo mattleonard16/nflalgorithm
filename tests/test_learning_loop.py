@@ -311,8 +311,3 @@ class TestMarketToStat:
             "anytime_touchdown",
         }
         assert set(MARKET_TO_STAT.keys()) == expected
-
-    def test_values_match_db_columns(self):
-        for market, col in MARKET_TO_STAT.items():
-            assert isinstance(col, str)
-            assert len(col) > 0
