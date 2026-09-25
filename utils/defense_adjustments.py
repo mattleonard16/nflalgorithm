@@ -102,6 +102,12 @@ SUPPORTED_MATCHUPS: FrozenSet[Tuple[str, str]] = COMPUTED_MATCHUPS | NEUTRAL_MAT
 
 _STAT_COLUMNS = tuple(sorted({stat for _, stat in COMPUTED_MATCHUPS}))
 
+# The pipeline asks for the same season and week once per player and market, about 650 times
+# a week, and a late-season computation takes about a second. Each entry is checked against a
+# hash of the stats and schedule it came from, so a re-ingest inside the long-lived pipeline
+# worker recomputes instead of serving old numbers.
+_MULTIPLIER_CACHE: Dict[Tuple[int, int, int], Tuple[int, Dict[Tuple[str, str, str], float]]] = {}
+
 
 @lru_cache(maxsize=1)
 def _load_schedule(season: int) -> pd.DataFrame:
@@ -114,6 +120,10 @@ def _load_schedule(season: int) -> pd.DataFrame:
     except Exception as e:
         logger.warning(f"Could not load schedule: {e}")
         return pd.DataFrame()
+
+
+def _frame_hash(frame: pd.DataFrame) -> int:
+    return int(pd.util.hash_pandas_object(frame, index=False).sum())
 
 
 def _trimmed_mean(values: List[float], trim_fraction: float) -> float:
@@ -259,6 +269,12 @@ def compute_defense_vs_position_multipliers(
     if stats.empty:
         return {}
 
+    cache_key = (season, through_week, min_games)
+    fingerprint = hash((_frame_hash(stats), _frame_hash(schedule)))
+    cached = _MULTIPLIER_CACHE.get(cache_key)
+    if cached is not None and cached[0] == fingerprint:
+        return dict(cached[1])
+
     # Add opponent
     def _get_opp(row):
         game = schedule[
@@ -272,10 +288,11 @@ def compute_defense_vs_position_multipliers(
 
     stats['opponent'] = stats.apply(_get_opp, axis=1)
     stats = stats.dropna(subset=['opponent'])
-    if stats.empty:
-        return {}
-
-    return compute_multipliers_from_game_stats(stats, min_games=min_games)
+    multipliers = (
+        compute_multipliers_from_game_stats(stats, min_games=min_games) if not stats.empty else {}
+    )
+    _MULTIPLIER_CACHE[cache_key] = (fingerprint, multipliers)
+    return dict(multipliers)
 
 
 def get_defense_multiplier(
