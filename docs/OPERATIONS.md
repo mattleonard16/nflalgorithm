@@ -134,7 +134,9 @@ needs the private modules and real data.
    A late run is safe. When some of the week's games have started, `week-predict` skips the teams
    playing in them, keeps their stored pregame projections, and predicts the rest. The JSON it
    prints names the skipped teams under `kicked_off_teams`. It refuses only once every game of
-   the week has started.
+   the week has started. The context refresh follows the same rule, so the teams still to play
+   get the newest injury report and depth chart, and the log line `Keeping the stored week N
+   context for M players whose game has started` counts the players it left alone.
 
 ## Migrations: re-run forward, no rollback
 
