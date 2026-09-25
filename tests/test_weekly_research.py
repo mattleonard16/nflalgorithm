@@ -533,7 +533,7 @@ class TestProjectionAccuracy:
         assert all(row["below_min_sample"] for row in payload["by_position"])
         assert "OVER CEILING" in markdown
         # Positive bias means the model projected too high, which it did.
-        assert payload["overall_bias"] > 0
+        assert payload["yardage_bias"] > 0
 
     def test_counts_projections_that_never_matched_an_actual(self, tmp_path: Path) -> None:
         conn = _new_db(tmp_path)
@@ -615,7 +615,47 @@ class TestProjectionAccuracy:
         _markdown, payload = projection_accuracy(2025, 10, conn=conn)
         assert payload["scored_rows"] == 1, "the gsis bridge should reconcile the two id forms"
         assert payload["by_position"][0]["position"] == "WR"
-        assert payload["overall_mae"] == pytest.approx(10.0)
+        assert payload["yardage_mae"] == pytest.approx(10.0)
+
+    def test_position_mae_counts_yardage_markets_only(self, tmp_path: Path) -> None:
+        """The ceilings are in yards. A one-catch miss must not pull a position's MAE down."""
+        conn = _new_db(tmp_path)
+        _insert(
+            conn,
+            "player_stats_enhanced",
+            player_id="SEA_wr0",
+            season=2025,
+            week=10,
+            name="Receiver 0",
+            team="SEA",
+            position="WR",
+            receiving_yards=50.0,
+            receptions=4.0,
+            targets=7.0,
+            created_at="2025-11-14T00:00:00+00:00",
+            updated_at="2025-11-14T00:00:00+00:00",
+        )
+        for market, mu in (("receiving_yards", 60.0), ("receptions", 5.0)):
+            _insert(
+                conn,
+                "weekly_projections",
+                season=2025,
+                week=10,
+                player_id="SEA_wr0",
+                team="SEA",
+                market=market,
+                mu=mu,
+                sigma=10.0,
+                model_version="v1",
+                generated_at="2025-11-12T12:00:00+00:00",
+            )
+        conn.commit()
+
+        _markdown, payload = projection_accuracy(2025, 10, conn=conn)
+        assert payload["scored_rows"] == 2
+        (wr,) = payload["by_position"]
+        assert (wr["n"], wr["mae"]) == (1, pytest.approx(10.0))
+        assert payload["yardage_mae"] == pytest.approx(10.0)
 
 
 # ---------------------------------------------------------------------------
