@@ -14,7 +14,7 @@ import pandas as pd
 from scripts.research_format import _fmt, _markdown_table, _no_data, _read_optional, _text
 from utils.context_factors import _bridge_history_ids
 from utils.db import DBConnection, get_table_columns, read_dataframe
-from utils.nfl_markets import MARKET_TO_STAT, melt_actuals
+from utils.nfl_markets import DATABASE_STAT_COLUMNS, melt_actuals
 
 # The per-position MAE ceilings the CI gate enforces. Imported rather than
 # restated so the memo and `make mae-gate` can never quote different numbers.
@@ -431,4 +431,4 @@ def _position_note(row: Mapping[str, Any]) -> str:
 def _available_stat_columns(*, conn: Optional[DBConnection] = None) -> List[str]:
     """Market stat columns that actually exist on ``player_stats_enhanced``."""
     present = set(get_table_columns("player_stats_enhanced", conn=conn))
-    return sorted(set(MARKET_TO_STAT.values()) & present)
+    return sorted(set(DATABASE_STAT_COLUMNS) & present)
