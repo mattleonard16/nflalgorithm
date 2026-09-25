@@ -36,6 +36,7 @@ the private half is missing, so start there.
 | Market-mean blend | `utils/market_blend.py`, `config/runtime.py` (`betting.market_blend_weight`) | `value_betting_engine.rank_weekly_value` | Prices off the raw model `mu`, so a projection far from the line reads as a large edge. Measured on the 2026 W1 slate: 118 flagged bets at 19.3% average edge instead of 68 at 14.1%. |
 | Kickoff-aware production CLV | `utils/clv.py`, `utils/live_odds.py` | `scripts/record_outcomes.py` `compute_and_save_clv` | Closing line is `MAX(as_of)`, including post-kickoff scrapes. |
 | Early-season 70/30 role prior | `utils/season_priors.py` | `weekly.py` `_engineer_rolling_features` and `get_nfl_feature_cols` | Week 1 expected_* stays last-6 EWM; last_season_*_pg features are missing so a restored private weekly.py ignores the new helper. |
+| Late-week refresh | `scripts/prepare_nfl_week.py` passes `exclude_teams` | `weekly.predict_week` and `_write_predictions` | Loud, not silent. Every `prepare_week` call fails with `TypeError: predict_week() got an unexpected keyword argument 'exclude_teams'`, so no week gets projections. |
 
 ## Required state of each private module
 
@@ -65,6 +66,15 @@ must print `True` with no env var set.
   If this write is missing, the column is all-NULL, `apply_volatility_widening` reports every row
   unscored, and sigma widening silently does nothing. That is safer than the old behavior it
   replaced, but the feature is inert.
+
+- **Skips teams whose game has started.** Added 2026-09-24, applied to this checkout.
+  `predict_week(season, week, *, roster_backed=False, exclude_teams=frozenset())` drops rows
+  whose `team` is in `exclude_teams` right after the frame is built, and passes the same set to
+  `_write_predictions(..., keep_teams=exclude_teams)`. That function's DELETE appends
+  `AND team NOT IN (...)` when the set is non-empty, so the stored pregame rows for those teams
+  survive the rerun. `prepare_week` computes the set from `games.kickoff_utc`. Covered by
+  `TestPartialWeekRefresh` in `tests/test_nfl_weekly_model.py`, which runs only where this file
+  exists.
 
 Verify: `command grep -n "position=position" models/position_specific/weekly.py` returns the sigma
 call site, and after a predict run:
