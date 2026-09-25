@@ -603,6 +603,7 @@ def test_player_context_snapshot_combines_role_availability_and_priors() -> None
         {
             "season": [2026],
             "week": [1],
+            "team": ["BUF"],
             "gsis_id": ["veteran"],
             "report_status": ["Questionable"],
             "practice_status": ["Limited Participation in Practice"],
@@ -689,6 +690,60 @@ def test_player_context_excludes_depth_rows_after_target_week_cutoff() -> None:
     )
 
     assert snapshot.iloc[0]["depth_rank"] == 1
+
+
+def _week_three_status(injuries: pd.DataFrame) -> str | None:
+    rosters = pd.DataFrame(
+        {
+            "season": [2026],
+            "week": [3],
+            "gsis_id": ["receiver"],
+            "full_name": ["Recovered Receiver"],
+            "team": ["MIN"],
+            "position": ["WR"],
+            "status": ["ACT"],
+        }
+    )
+    snapshot = ingest_real_nfl_data.build_player_context_snapshots(
+        rosters,
+        pd.DataFrame(),
+        injuries,
+        pd.DataFrame(),
+        target_week=3,
+        captured_at="2026-09-24T00:00:00Z",
+    )
+    return snapshot.iloc[0]["injury_status"]
+
+
+def test_player_context_clears_last_weeks_status_once_the_team_files_this_weeks_report() -> None:
+    """A player left off his team's report for the week has been cleared to play."""
+    injuries = pd.DataFrame(
+        {
+            "season": [2026, 2026],
+            "week": [2, 3],
+            "team": ["MIN", "MIN"],
+            "gsis_id": ["receiver", "teammate"],
+            "report_status": ["Out", None],
+            "practice_status": ["Did Not Participate In Practice", "Limited Participation"],
+        }
+    )
+
+    assert _week_three_status(injuries) is None
+
+
+def test_player_context_keeps_last_weeks_status_until_the_team_files() -> None:
+    injuries = pd.DataFrame(
+        {
+            "season": [2026, 2026],
+            "week": [2, 3],
+            "team": ["MIN", "BUF"],
+            "gsis_id": ["receiver", "other_club_player"],
+            "report_status": ["Out", None],
+            "practice_status": ["Did Not Participate In Practice", "Limited Participation"],
+        }
+    )
+
+    assert _week_three_status(injuries) == "Out"
 
 
 def test_player_context_snapshots_preserve_week_history(tmp_path, monkeypatch) -> None:
