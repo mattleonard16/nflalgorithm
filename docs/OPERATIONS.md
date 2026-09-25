@@ -126,6 +126,15 @@ needs the private modules and real data.
    The 2026 week 2 and week 3 runs both failed this way. The checkout was on a `main` from before
    `context_factor_lookup` returned `{}` for markets it does not model, so `receptions` raised
    `ValueError: Unsupported market` inside `week-predict`.
+   The fix reached `origin/main` on 2026-09-15, but this checkout stayed on the 2026-09-07 `main`
+   until the evening of 09-23, after the job had run. Pushing a fix does not update the code the
+   job runs. Week 3 was recovered on 2026-09-24 with a late run, after the Thursday game had
+   started.
+
+   A late run is safe. When some of the week's games have started, `week-predict` skips the teams
+   playing in them, keeps their stored pregame projections, and predicts the rest. The JSON it
+   prints names the skipped teams under `kicked_off_teams`. It refuses only once every game of
+   the week has started.
 
 ## Migrations: re-run forward, no rollback
 
