@@ -62,7 +62,8 @@ _SCHEMA = (
         player_id TEXT, gsis_id TEXT, season INTEGER, week INTEGER, name TEXT,
         team TEXT, position TEXT, rushing_yards REAL, rushing_attempts REAL,
         receiving_yards REAL, receptions REAL, targets REAL, passing_yards REAL,
-        passing_attempts REAL, created_at TEXT, updated_at TEXT
+        passing_attempts REAL, rushing_tds REAL, receiving_tds REAL, created_at TEXT,
+        updated_at TEXT
     )
     """,
     """
@@ -616,6 +617,46 @@ class TestProjectionAccuracy:
         assert payload["scored_rows"] == 1, "the gsis bridge should reconcile the two id forms"
         assert payload["by_position"][0]["position"] == "WR"
         assert payload["yardage_mae"] == pytest.approx(10.0)
+
+    def test_scores_anytime_touchdown_from_the_stored_touchdown_columns(
+        self, tmp_path: Path
+    ) -> None:
+        """`anytime_td` is not a stored column. It is rushing plus receiving touchdowns."""
+        conn = _new_db(tmp_path)
+        _insert(
+            conn,
+            "player_stats_enhanced",
+            player_id="SEA_rb0",
+            season=2025,
+            week=10,
+            name="Running Back",
+            team="SEA",
+            position="RB",
+            rushing_yards=80.0,
+            rushing_tds=1.0,
+            receiving_tds=1.0,
+            created_at="2025-11-14T00:00:00+00:00",
+            updated_at="2025-11-14T00:00:00+00:00",
+        )
+        _insert(
+            conn,
+            "weekly_projections",
+            season=2025,
+            week=10,
+            player_id="SEA_rb0",
+            team="SEA",
+            market="anytime_touchdown",
+            mu=0.5,
+            sigma=0.7,
+            model_version="v1",
+            generated_at="2025-11-12T12:00:00+00:00",
+        )
+        conn.commit()
+
+        _markdown, payload = projection_accuracy(2025, 10, conn=conn)
+        assert payload["unmatched_rows"] == 0
+        by_market = {row["market"]: row for row in payload["by_market"]}
+        assert by_market["anytime_touchdown"]["mae"] == pytest.approx(1.5)
 
     def test_position_mae_counts_yardage_markets_only(self, tmp_path: Path) -> None:
         """The ceilings are in yards. A one-catch miss must not pull a position's MAE down."""
