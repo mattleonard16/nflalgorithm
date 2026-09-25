@@ -117,14 +117,21 @@ def _count_games(season: int, week: int) -> int:
     )
 
 
-def _earliest_kickoff(season: int, week: int) -> Optional[datetime]:
-    row = fetchone(
-        "SELECT MIN(kickoff_utc) FROM games WHERE season = ? AND week = ?",
-        params=(season, week),
-    )
-    if not row or not row[0]:
-        return None
-    return datetime.fromisoformat(str(row[0]).replace("Z", "+00:00")).astimezone(timezone.utc)
+def _week_games(season: int, week: int) -> list[tuple[str, str, Optional[str]]]:
+    return [
+        (str(home), str(away), kickoff)
+        for home, away, kickoff in fetchall(
+            "SELECT home_team, away_team, kickoff_utc FROM games WHERE season = ? AND week = ?",
+            params=(season, week),
+        )
+    ]
+
+
+def _has_kicked_off(kickoff: Optional[str], now: datetime) -> bool:
+    if not kickoff:
+        return False
+    started_at = datetime.fromisoformat(str(kickoff).replace("Z", "+00:00"))
+    return now >= started_at.astimezone(timezone.utc)
 
 
 def _count_scheduled_teams(season: int, week: int) -> int:
@@ -244,15 +251,20 @@ def prepare_week(
             f"Roster history coverage is only {history_coverage:.1%} for season {season}; "
             "refresh historical seasons before generating predictions"
         )
-    earliest_kickoff = _earliest_kickoff(season, week)
-    if earliest_kickoff is not None and datetime.now(timezone.utc) >= earliest_kickoff:
+    week_games = _week_games(season, week)
+    now = datetime.now(timezone.utc)
+    started = [game for game in week_games if _has_kicked_off(game[2], now)]
+    if week_games and len(started) == len(week_games):
         raise RuntimeError(
-            f"Season {season} week {week} has already kicked off; "
+            f"Every game of season {season} week {week} has already kicked off; "
             "refusing to overwrite pregame projections"
         )
+    # A run after Thursday night still owes projections for the games to come. Teams already
+    # playing are left out, and their stored pregame rows stay as they are.
+    kicked_off_teams = frozenset(team for home, away, _ in started for team in (home, away))
 
     player_dim_updates = populate_player_dim()
-    predictions = predict_week(season, week, roster_backed=True)
+    predictions = predict_week(season, week, roster_backed=True, exclude_teams=kicked_off_teams)
     if predictions.empty:
         raise RuntimeError(
             f"No predictions were generated for season {season} week {week}; "
@@ -277,6 +289,7 @@ def prepare_week(
         "player_dim_updates": player_dim_updates,
         "predictions": len(predictions),
         "predicted_players": predicted_players,
+        "kicked_off_teams": sorted(kicked_off_teams),
     }
 
 
