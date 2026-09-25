@@ -1288,8 +1288,17 @@ def build_player_context_snapshots(
     injury_by_player: dict[tuple[int, str], dict[str, Any]] = {}
     if injuries is not None and not injuries.empty and "gsis_id" in injuries:
         injury = injuries.copy()
+        if "team" not in injury.columns:
+            raise ValueError("Injury context must include team")
         injury["week"] = pd.to_numeric(injury["week"], errors="coerce").fillna(0).astype(int)
         injury = injury[injury["week"] <= target_week]
+        # Clubs must list every player who is limited or out, so once a club files its report for
+        # the target week, a player missing from it has been cleared. Until it files, last week's
+        # status is the best guess. Players moved to injured reserve drop off the report too, but
+        # the roster marks them reserve and they get no projection.
+        club_week = pd.MultiIndex.from_frame(injury[["season", "team"]])
+        filed = club_week[(injury["week"] == target_week).to_numpy()]
+        injury = injury[(injury["week"] == target_week) | ~club_week.isin(filed)]
         injury = injury.dropna(subset=["season", "gsis_id"]).sort_values("week")
         injury = injury.drop_duplicates(["season", "gsis_id"], keep="last")
         injury_by_player = {
