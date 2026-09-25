@@ -18,7 +18,11 @@ from utils.nfl_markets import MARKET_TO_STAT, melt_actuals
 
 # The per-position MAE ceilings the CI gate enforces. Imported rather than
 # restated so the memo and `make mae-gate` can never quote different numbers.
-from scripts.evaluate_nfl_projections import MIN_POSITION_SAMPLE, POSITION_MAE_THRESHOLDS
+from scripts.evaluate_nfl_projections import (
+    MIN_POSITION_SAMPLE,
+    POSITION_MAE_THRESHOLDS,
+    YARDAGE_MARKETS,
+)
 
 
 def grading_recap(
@@ -247,7 +251,8 @@ def projection_accuracy(
     projection that fails a freshness check, so on a research memo it would
     report "no data" for provenance reasons that have nothing to do with
     accuracy. What is shared with it -- and imported from it -- are the ceilings
-    (``POSITION_MAE_THRESHOLDS``) and the minimum sample size, so the memo and
+    (``POSITION_MAE_THRESHOLDS``), the minimum sample size, and the yardage
+    markets the ceilings apply to (``YARDAGE_MARKETS``), so the memo and
     ``make mae-gate`` cannot drift apart on what counts as too high or too few.
     """
     title = "## 2. PROJECTION ACCURACY"
@@ -319,9 +324,13 @@ def projection_accuracy(
     scored["signed_error"] = scored["mu"] - scored["actual"]
     scored["abs_error"] = scored["signed_error"].abs()
     scored["position"] = scored["position"].fillna("UNKNOWN").astype(str)
+    # The ceilings are in yards. Receptions and touchdowns miss by about one, and averaged in they
+    # would pull a position's MAE far under a ceiling it had crossed. They keep their own rows in
+    # the market table.
+    yardage = scored[scored["market"].isin(YARDAGE_MARKETS)]
 
     by_position: List[Dict[str, Any]] = []
-    for position, group in scored.groupby("position", sort=True):
+    for position, group in yardage.groupby("position", sort=True):
         threshold = POSITION_MAE_THRESHOLDS.get(position)
         mae = float(group["abs_error"].mean())
         by_position.append(
@@ -352,21 +361,25 @@ def projection_accuracy(
         "projection_rows": int(len(projections)),
         "scored_rows": int(len(scored)),
         "unmatched_rows": int(len(projections) - len(scored)),
-        "overall_mae": float(scored["abs_error"].mean()),
-        "overall_bias": float(scored["signed_error"].mean()),
+        "yardage_mae": None if yardage.empty else float(yardage["abs_error"].mean()),
+        "yardage_bias": None if yardage.empty else float(yardage["signed_error"].mean()),
         "min_position_sample": int(MIN_POSITION_SAMPLE),
         "by_position": by_position,
         "by_market": by_market,
         "model_versions": sorted({_text(v) for v in projections["model_version"]}),
     }
 
+    headline = (
+        "No yardage projection had an actual, so there is no yardage MAE."
+        if yardage.empty
+        else f"Yardage MAE {payload['yardage_mae']:.2f}, mean bias "
+        f"{payload['yardage_bias']:+.2f} (positive = the model projected too high)."
+    )
     body = [
         title,
         "",
         f"Scored {len(scored)} of {len(projections)} projections "
-        f"({payload['unmatched_rows']} had no actual). "
-        f"Overall MAE {payload['overall_mae']:.2f}, mean bias "
-        f"{payload['overall_bias']:+.2f} (positive = the model projected too high).",
+        f"({payload['unmatched_rows']} had no actual). {headline}",
         "",
         _markdown_table(
             ["position", "n", "MAE", "ceiling", "bias", "note"],
@@ -396,7 +409,8 @@ def projection_accuracy(
             ],
         ),
         "",
-        "_Ceilings are the `make mae-gate` thresholds. A position with no ceiling is "
+        "_Ceilings are the `make mae-gate` thresholds, and like the gate the position table "
+        "counts yardage markets only. A position with no ceiling is "
         f"reported but not judged, and fewer than {MIN_POSITION_SAMPLE} projections is too "
         "few to read as a trend either way._",
     ]
