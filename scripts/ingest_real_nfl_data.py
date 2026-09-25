@@ -1485,7 +1485,9 @@ def refresh_player_context_snapshots(
     """Persist causal roster context for the requested week only.
 
     Prior weeks are never reconstructed with today's capture timestamp; they
-    remain immutable evidence for historical replay.
+    remain immutable evidence for historical replay. The same holds inside the
+    week: a team whose game has kicked off keeps the snapshot its pregame
+    projections were built from, and every other team is refreshed.
     """
     if rosters is None or rosters.empty:
         return 0
@@ -1505,16 +1507,24 @@ def refresh_player_context_snapshots(
         """,
         params=(through_week,),
     )
+    captured_at = datetime.now(timezone.utc).isoformat()
+    captured_timestamp = pd.Timestamp(captured_at)
+    # A run after Thursday night still owes Sunday's teams Friday's injury report and depth chart.
+    # Depth charts are cut off at the next kickoff still to come, not the first of the week.
+    started_teams: set[tuple[int, str]] = set()
     target_cutoffs: dict[int, str] = {}
     if not games.empty:
-        games_with_kickoff = games.dropna(subset=["kickoff_utc"]).copy()
-        if not games_with_kickoff.empty:
-            games_with_kickoff["kickoff_utc"] = pd.to_datetime(
-                games_with_kickoff["kickoff_utc"], errors="coerce", utc=True
-            )
-            earliest = games_with_kickoff.dropna(subset=["kickoff_utc"]).groupby("season")["kickoff_utc"].min()
-            target_cutoffs = {int(season): cutoff.isoformat() for season, cutoff in earliest.items()}
-    captured_at = datetime.now(timezone.utc).isoformat()
+        kickoffs = games.assign(
+            kickoff_utc=pd.to_datetime(games["kickoff_utc"], errors="coerce", utc=True)
+        ).dropna(subset=["kickoff_utc"])
+        for game in kickoffs[kickoffs["kickoff_utc"] <= captured_timestamp].itertuples():
+            for team in (game.home_team, game.away_team):
+                started_teams.add((int(game.season), canonicalize_team(str(team))))
+        upcoming = kickoffs[kickoffs["kickoff_utc"] > captured_timestamp]
+        target_cutoffs = {
+            int(season): cutoff.isoformat()
+            for season, cutoff in upcoming.groupby("season")["kickoff_utc"].min().items()
+        }
     snapshots = build_player_context_snapshots(
         rosters,
         depth_charts,
@@ -1525,19 +1535,19 @@ def refresh_player_context_snapshots(
         captured_at=captured_at,
         schedule=games,
     )
-    captured_timestamp = pd.Timestamp(captured_at)
-    blocked_seasons = {
-        season
-        for season, cutoff in target_cutoffs.items()
-        if captured_timestamp >= pd.Timestamp(cutoff)
-    }
-    if blocked_seasons:
-        snapshots = snapshots[~snapshots["season"].isin(blocked_seasons)].copy()
-    if snapshots.empty:
-        logger.warning(
-            "Skipping context refresh after kickoff for seasons %s",
-            sorted(blocked_seasons),
+    if started_teams:
+        keep = [
+            (int(season), team) not in started_teams
+            for season, team in zip(snapshots["season"], snapshots["team"])
+        ]
+        logger.info(
+            "Keeping the stored week %s context for %s players whose game has started",
+            through_week,
+            len(keep) - sum(keep),
         )
+        snapshots = snapshots.loc[keep]
+    if snapshots.empty:
+        logger.warning("No week %s context snapshots to write", through_week)
         return 0
     return upsert_player_context_snapshots(snapshots)
 
