@@ -140,7 +140,7 @@ class NFLPropScraper:
         schedule: pd.DataFrame,
         now: pd.Timestamp | None = None,
     ) -> List[Dict]:
-        """Return every API event whose kickoff belongs to the requested NFL week.
+        """Return every API event of the requested NFL week that has not kicked off.
 
         Coverage is only required for games that have not kicked off yet. The
         Odds API's events endpoint lists upcoming games, so a Thursday game is
@@ -153,17 +153,18 @@ class NFLPropScraper:
         ``now`` is injectable so tests can pin the clock.
         """
         kickoffs = NFLPropScraper._week_kickoffs(schedule)
+        as_of = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now).tz_convert("UTC")
         # Compare timezone-aware timestamps directly. Pandas 3 may store a
         # Series at microsecond resolution while scalar ``Timestamp.value`` is
         # nanoseconds, which made equivalent kickoffs compare unequal.
-        scheduled_kickoffs = set(kickoffs.tolist())
+        # A game under way can still be listed, but its quotes are in-game lines.
+        upcoming_kickoffs = set(kickoffs[kickoffs > as_of].tolist())
         selected = []
         for event in events:
             kickoff = pd.to_datetime(event.get("commence_time"), errors="coerce", utc=True)
-            if pd.notna(kickoff) and kickoff in scheduled_kickoffs:
+            if pd.notna(kickoff) and kickoff in upcoming_kickoffs:
                 selected.append(event)
 
-        as_of = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now).tz_convert("UTC")
         upcoming = int((kickoffs > as_of).sum())
         started = len(schedule) - upcoming
         if len(selected) < upcoming:

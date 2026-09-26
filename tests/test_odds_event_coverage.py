@@ -57,6 +57,16 @@ def test_a_game_already_kicked_off_is_not_required() -> None:
     assert [event["id"] for event in selected] == ["event-0", "event-1", "event-2"]
 
 
+def test_a_game_under_way_is_not_scraped() -> None:
+    # Sunday afternoon of week 1. The early game is still listed while it is
+    # played, but its quotes are in-game lines the card drops, so fetching
+    # them only spends credits.
+    selected = NFLPropScraper._select_scheduled_events(
+        _events(KICKOFFS[1:]), _schedule(), now=pd.Timestamp("2026-09-13T18:00:00Z")
+    )
+    assert [event["id"] for event in selected] == ["event-1", "event-2"]
+
+
 def test_a_missing_upcoming_game_still_fails_loud() -> None:
     # The case the guard exists for: a game that has not started is absent from
     # the feed, so the card would be priced off a partial slate.
