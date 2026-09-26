@@ -11,6 +11,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from pipelines.odds_validation import validate_odds_snapshot
+from scripts import prop_line_scraper
 from scripts.prop_line_scraper import NFLPropScraper
 
 # A Thursday opener, two Sunday windows, and a Monday night game.
@@ -91,3 +93,70 @@ def test_an_empty_schedule_is_an_error() -> None:
         NFLPropScraper._select_scheduled_events(
             _events(KICKOFFS), pd.DataFrame(), now=pd.Timestamp("2026-09-09T12:00:00Z")
         )
+
+
+class _Response:
+    headers = {"X-Cache": "MISS", "X-Cache-Age-Seconds": "1"}
+
+    def __init__(self, payload: object) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def json(self) -> object:
+        return self._payload
+
+
+class _FakeOddsApi:
+    """Lists ``events`` and quotes one player at two books in every market."""
+
+    def __init__(self, events: list[dict]) -> None:
+        self.events = events
+
+    def get(self, url: str, params: dict, api_type: str) -> _Response:
+        if url.endswith("/events"):
+            return _Response(self.events)
+        outcomes = [
+            {"name": side, "description": "Sam Passer", "point": 50.5, "price": -110}
+            for side in ("Over", "Under")
+        ]
+        market = {"key": params["markets"], "outcomes": outcomes}
+        return _Response(
+            {"bookmakers": [{"title": book, "markets": [market]} for book in ("BookA", "BookB")]}
+        )
+
+
+def test_a_scrape_after_the_first_kickoff_that_covers_every_remaining_game_is_valid(
+    monkeypatch,
+) -> None:
+    # Sunday of week 3: the Thursday game is over and gone from the API, and the
+    # scrape prices the one game still to come in full. That is a complete card.
+    now = pd.Timestamp.now(tz="UTC")
+    thursday = (now - pd.Timedelta(days=3)).isoformat()
+    sunday = (now + pd.Timedelta(hours=3)).isoformat()
+    schedule = pd.DataFrame({"game_id": ["thursday", "sunday"], "kickoff_utc": [thursday, sunday]})
+    monkeypatch.setattr(
+        prop_line_scraper,
+        "read_dataframe",
+        lambda query, **kwargs: (
+            schedule if "FROM games" in query else pd.DataFrame(columns=["player_id"])
+        ),
+    )
+    monkeypatch.setattr(prop_line_scraper.time, "sleep", lambda seconds: None)
+    scraper = NFLPropScraper(odds_api_key="test-key")
+    scraper.client = _FakeOddsApi(
+        [
+            {
+                "id": "sunday-event",
+                "commence_time": sunday,
+                "home_team": "Seattle Seahawks",
+                "away_team": "Arizona Cardinals",
+            }
+        ]
+    )
+
+    scraper.get_upcoming_week_props(3, 2026, allow_synthetic=False)
+    result = validate_odds_snapshot(scraper.last_weekly_audit)
+
+    assert result["valid"], result["reason"]
