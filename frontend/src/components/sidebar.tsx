@@ -103,7 +103,12 @@ export function Sidebar() {
       )}
     >
       {/* Header */}
-      <div className="flex items-center justify-between h-16 px-4 border-b border-slate-800/50">
+      <div
+        className={cn(
+          "flex items-center h-16 px-4 border-b border-slate-800/50",
+          collapsed ? "justify-center" : "justify-between"
+        )}
+      >
         {!collapsed && (
           <div className="flex items-center gap-2">
             <div
@@ -132,21 +137,25 @@ export function Sidebar() {
           </div>
         )}
         {collapsed && (
-          <div
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            aria-label="Expand sidebar"
             className={cn(
-              "w-8 h-8 rounded-md flex items-center justify-center mx-auto",
+              "w-8 h-8 rounded-md flex items-center justify-center mx-auto cursor-pointer",
               accentStyles.logo
             )}
           >
             <span className="text-xs font-bold text-black font-[family-name:var(--font-jetbrains)]">
               {activeSport === "nba" ? "B" : "N"}
             </span>
-          </div>
+          </button>
         )}
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={() => setCollapsed(true)}
+          aria-label="Collapse sidebar"
           className={cn(
             "h-7 w-7 text-slate-500 hover:text-slate-300 hover:bg-slate-800/50",
             collapsed && "hidden"
