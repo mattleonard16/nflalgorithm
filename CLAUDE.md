@@ -492,14 +492,12 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 32. **The private wiring for context factors is not in `docs/DEPLOYMENT_MANIFEST.md`'s verified
     set.** What the tracked code expects of `weekly.py` is recorded there now; verify it on the
     production checkout before week 1.
-33. **The risk and agent stages read last run's card.** `POST_PREPARE_STAGES` in
-    `scripts/production_runner.py` runs `risk_assessment` and `agents` before `materialize`, and
-    both read the published `materialized_value_view` (`risk_manager.run_risk_check`,
-    `agents/base_agent.py`). The new card only lands in `pipeline_card_staging` at the last stage
-    and is published after that. So on the first run of a week they see no card, and on a rerun
-    they vote on the previous one. On 2026 week 1 the agents wrote their verdicts at 17:12:46 about
-    the 16:43 card, a moment before the 17:12:46 card existed. `agent_decisions` is never cleared
-    per week, so stale verdicts for bets that left the card stay in the table. Separately, nothing
-    writes the NFL `risk_assessments` table, so the risk section of `api/explainability.py` is
-    always empty. Fixing this needs a choice: move both stages after staging and point them at
-    the staged card, or run them after publish from the worker.
+33. [RESOLVED 2026-10-03] The risk and agent stages read last run's card. `POST_PREPARE_STAGES`
+    in `scripts/production_runner.py` ran `risk_assessment` and `agents` before `materialize`, so
+    both judged the published card from the previous run (on 2026 week 1 the agents voted on the
+    16:43 card at 17:12:46). They now run after `materialize` and read that attempt's rows in
+    `pipeline_card_staging` through `pipeline_jobs.cards.load_card`. The worker still publishes
+    only after every stage passes, so a risk or agent failure keeps the card off the dashboard.
+    A full agent run now replaces the week's `agent_decisions`, so a bet that left the card loses
+    its verdict; a `--player-id` run touches only that player. Still open: nothing writes the NFL
+    `risk_assessments` table, so the risk section of `api/explainability.py` is always empty.
