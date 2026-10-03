@@ -382,6 +382,34 @@ flowchart TB
 
 ---
 
+## Outcomes (2026-10-02)
+
+Measured in this session. Walk-forward numbers are 2025, 18 weeks, context factors off unless
+stated. Replay numbers come from `make nfl-replay` on a scratch copy. Reports are local, since
+`reports/` is gitignored.
+
+- U1 to U4, U8, U11, U14: shipped (2fea7be, f8ab89f, 28b50ed, 9be2a63, 1a05aef, f23726d). Week 4
+  was recovered. c22117f fixed the stake-cap contract test that 1a05aef broke.
+- U5: context factors raised yardage MAE (passing 66.28 to 67.83, receiving 21.02 to 21.25,
+  rushing 21.67 to 21.94), so `week-auto` no longer sets them (0e6bb60). The mae-gate ceilings
+  were re-derived from the off run: QB 64, RB 26, WR 29, TE 26 (4707781).
+- U6: shipped (68619fe). Rosters and stats key players differently, so the replay re-keys
+  predictions through gsis_id.
+- U7: shipped on tests, per KTD1's exception (75ead4d, b7d6cf7, 8f26e27). It dropped 348
+  ruled-out player-weeks across the 2025 replay.
+- U9: dropped (d1b7807). The replay showed no effect, within 0.02% on every market.
+- U10: dropped (c02bd68). QB yardage MAE rose 5.5% and WR rose 0.8%.
+- U12: deferred. It needs the user's choice between the two stage orders in CLAUDE.md item 33.
+- U13: removed earlier, because the coordinator votes once per prop by design.
+- U15: stale docs corrected (f1a5ca8 and the commits above).
+- Found during U6, not planned: backup QBs were projected like starters. They carried the whole
+  passing bias. Dropping them (9fa53b2) took replay passing_yards from MAE 65.75 / bias +12.98 to
+  56.07 / +1.70, and yardage overall from 26.44 to 24.67. Every kept row's mu was unchanged.
+  Projected players with no stat line fell from 1,180 to 796.
+- Still open: 796 projected player-weeks with no 2025 stat line. Some are game-day inactives,
+  which the replay counts as active on purpose. Some played without recording a stat, and
+  nflverse has no row for those, so the evaluation never scores them.
+
 ## Verification Contract
 
 | Gate | Command | Applies to |
