@@ -31,7 +31,6 @@ _private_module_tests = {
         "test_backtest_replay.py",
         "test_basic.py",
         "test_constraint_handling.py",
-        "test_dry_run_validation.py",
         "test_kelly_cap.py",
         "test_no_vig_probability.py",
         "test_value_engine_side.py",

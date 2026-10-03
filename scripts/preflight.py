@@ -353,8 +353,10 @@ def check_private_modules(root: Path = PROJECT_ROOT, *, required: bool) -> Diagn
     return _result(
         "private_modules",
         "fail" if required else "warn",
-        "Private NFL execution modules are unavailable: " + ", ".join(missing),
-        "Install the deployment-supplied private modules; API read-only features can run without them.",
+        "Private NFL execution modules are unavailable: " + ", ".join(missing)
+        + ". Projections and cards use the public baseline instead.",
+        "Nothing to do for local or contributor work. A production deployment must install "
+        "the private modules.",
     )
 
 

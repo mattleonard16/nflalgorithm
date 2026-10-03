@@ -14,7 +14,7 @@ from config import config
 from confidence_engine import score_plays
 from risk_manager import normalize_portfolio_stakes
 from utils.db import _get_backend, execute, executemany, get_connection
-from value_betting_engine import rank_weekly_value
+from utils.value_ranking import rank_weekly_value
 
 logger = logging.getLogger(__name__)
 
