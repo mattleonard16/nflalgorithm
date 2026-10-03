@@ -695,6 +695,10 @@ def test_player_context_excludes_depth_rows_after_target_week_cutoff() -> None:
 
 
 def _week_three_status(injuries: pd.DataFrame) -> str | None:
+    return _week_three_snapshot(injuries)["injury_status"]
+
+
+def _week_three_snapshot(injuries: pd.DataFrame) -> pd.Series:
     rosters = pd.DataFrame(
         {
             "season": [2026],
@@ -714,7 +718,7 @@ def _week_three_status(injuries: pd.DataFrame) -> str | None:
         target_week=3,
         captured_at="2026-09-24T00:00:00Z",
     )
-    return snapshot.iloc[0]["injury_status"]
+    return snapshot.iloc[0]
 
 
 def test_player_context_clears_last_weeks_status_once_the_team_files_this_weeks_report() -> None:
@@ -746,6 +750,72 @@ def test_player_context_keeps_last_weeks_status_until_the_team_files() -> None:
     )
 
     assert _week_three_status(injuries) == "Out"
+
+
+def test_player_context_records_the_week_of_the_report_its_status_came_from() -> None:
+    filed = pd.DataFrame(
+        {
+            "season": [2026],
+            "week": [3],
+            "team": ["MIN"],
+            "gsis_id": ["receiver"],
+            "report_status": ["Out"],
+            "practice_status": ["Did Not Participate In Practice"],
+        }
+    )
+    carried = filed.assign(week=[2])
+
+    assert _week_three_snapshot(filed)["injury_report_week"] == 3
+    assert _week_three_snapshot(carried)["injury_report_week"] == 2
+
+
+def test_player_context_has_no_report_week_for_a_player_off_every_report() -> None:
+    injuries = pd.DataFrame(
+        {
+            "season": [2026],
+            "week": [3],
+            "team": ["MIN"],
+            "gsis_id": ["teammate"],
+            "report_status": ["Out"],
+            "practice_status": [None],
+        }
+    )
+
+    assert pd.isna(_week_three_snapshot(injuries)["injury_report_week"])
+
+
+def test_migration_adds_the_injury_report_week_without_losing_snapshots(
+    tmp_path, monkeypatch
+) -> None:
+    import sqlite3
+
+    import config as cfg
+    from schema_migrations import MigrationManager
+
+    db_path = str(tmp_path / "report-week.db")
+    monkeypatch.setenv("DB_BACKEND", "sqlite")
+    monkeypatch.setenv("SQLITE_DB_PATH", db_path)
+    monkeypatch.setattr(cfg.config.database, "path", db_path)
+    monkeypatch.setattr(cfg.config.database, "backend", "sqlite")
+    MigrationManager(db_path).run()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("ALTER TABLE nfl_player_context_snapshots DROP COLUMN injury_report_week")
+        conn.execute(
+            "INSERT INTO nfl_player_context_snapshots (season, week, gsis_id, player_id, team, "
+            "position, prior_source, captured_at) VALUES "
+            "(2026, 3, 'g1', 'MIN_receiver', 'MIN', 'WR', 'history', '2026-09-24')"
+        )
+
+    MigrationManager(db_path).run()
+    MigrationManager(db_path).run()
+
+    with sqlite3.connect(db_path) as conn:
+        columns = [
+            row[1] for row in conn.execute("PRAGMA table_info(nfl_player_context_snapshots)")
+        ]
+        rows = conn.execute("SELECT COUNT(*) FROM nfl_player_context_snapshots").fetchone()[0]
+    assert "injury_report_week" in columns
+    assert rows == 1
 
 
 def test_player_context_snapshots_preserve_week_history(tmp_path, monkeypatch) -> None:

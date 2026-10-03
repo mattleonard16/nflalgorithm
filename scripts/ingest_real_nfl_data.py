@@ -1232,6 +1232,7 @@ CONTEXT_SNAPSHOT_COLUMNS = (
     "injury_status",
     "practice_status",
     "primary_injury",
+    "injury_report_week",
     "expected_snap_count",
     "expected_snap_percentage",
     "expected_rushing_attempts",
@@ -1282,6 +1283,11 @@ def _availability_adjustment(
     if "LIMITED" in practice:
         return 0.90, 1.15
     return 1.0, 1.0
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    number = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    return None if pd.isna(number) else int(number)
 
 
 def build_player_context_snapshots(
@@ -1491,6 +1497,7 @@ def build_player_context_snapshots(
                 "injury_status": None if pd.isna(injury_status) else str(injury_status),
                 "practice_status": None if pd.isna(practice_status) else str(practice_status),
                 "primary_injury": None if pd.isna(primary_injury) else str(primary_injury),
+                "injury_report_week": _optional_int(injury_row.get("week")),
                 "expected_snap_count": expected_snap_percentage * 0.65,
                 "expected_snap_percentage": expected_snap_percentage,
                 "expected_rushing_attempts": expected("rushing_attempts"),
