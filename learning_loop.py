@@ -304,7 +304,10 @@ def get_agent_accuracy_summary(
     """
     try:
         return read_dataframe(query, params=tuple(params) if params else None)
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "get_agent_accuracy_summary: query failed, continuing without its rows: %s", exc
+        )
         return pd.DataFrame(
             columns=["agent_name", "total", "correct", "accuracy", "avg_confidence"]
         )
@@ -345,7 +348,10 @@ def recommend_threshold_updates(
     """
     try:
         df = read_dataframe(query, params=tuple(params) if params else None)
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "recommend_threshold_updates: query failed, continuing without its rows: %s", exc
+        )
         df = pd.DataFrame()
 
     if df.empty:
@@ -475,7 +481,8 @@ def _tier_performance(
     """
     try:
         df = read_dataframe(query, params=(season, week_start, week_end))
-    except Exception:
+    except Exception as exc:
+        logger.warning("_tier_performance: query failed, continuing without its rows: %s", exc)
         return []
 
     if df.empty:
@@ -506,43 +513,27 @@ def _model_accuracy_trends(
     week_start: int,
     week_end: int,
 ) -> List[Dict[str, Any]]:
-    """Weekly model accuracy (MAE) trends."""
-    query = """
-    SELECT p.week, p.market,
-           AVG(ABS(p.mu - {stat_expr})) as mae,
-           COUNT(*) as n
-    FROM weekly_projections p
-    INNER JOIN player_stats_enhanced s
-        ON p.player_id = s.player_id
-        AND p.season = s.season
-        AND p.week = s.week
-    WHERE p.season = ? AND p.week BETWEEN ? AND ?
-    GROUP BY p.week, p.market
-    ORDER BY p.week, p.market
-    """
-    results = []
-    for market, stat_col in MARKET_TO_STAT.items():
-        # anytime_td is virtual: synthesize the count from the two physical
-        # TD columns instead of selecting a column that does not exist.
-        if market == "anytime_touchdown":
-            stat_expr = "(COALESCE(s.rushing_tds, 0) + COALESCE(s.receiving_tds, 0))"
-        else:
-            stat_expr = f"s.{stat_col}"
-        formatted_query = query.format(stat_expr=stat_expr)
-        try:
-            df = read_dataframe(formatted_query, params=(season, week_start, week_end))
-            for _, row in df.iterrows():
-                results.append(
-                    {
-                        "week": int(row["week"]),
-                        "market": market,
-                        "mae": round(float(row["mae"]), 2),
-                        "sample_size": int(row["n"]),
-                    }
-                )
-        except Exception:
-            continue
+    """Weekly model accuracy (MAE) trends.
 
+    Delegates to the research memo's ``projection_accuracy`` so both reports
+    match projections to stats the same way. Projection ids are minted from the
+    roster (``ARI_james_conner``) and stats ids are not (``ARI_j_conner``); the
+    raw-id join this replaced matched no 2026 rows at all.
+    """
+    from scripts.research_review import projection_accuracy
+
+    results = []
+    for week in range(week_start, week_end + 1):
+        _, payload = projection_accuracy(season, week)
+        for row in payload.get("by_market", []):
+            results.append(
+                {
+                    "week": week,
+                    "market": row["market"],
+                    "mae": round(float(row["mae"]), 2),
+                    "sample_size": int(row["n"]),
+                }
+            )
     return results
 
 
@@ -597,7 +588,8 @@ def _load_projection(
     try:
         df = read_dataframe(query, params=(season, week, player_id, market))
         return df.iloc[0] if not df.empty else None
-    except Exception:
+    except Exception as exc:
+        logger.warning("_load_projection: query failed, continuing without its rows: %s", exc)
         return None
 
 
@@ -620,18 +612,36 @@ def _load_actual_stat(
         select_expr = stat_col
         result_col = stat_col
 
+    # Bets carry roster-minted ids; stats rows may spell the same player another
+    # way, so fall back to the roster's gsis_id.
     query = f"""
     SELECT {select_expr} FROM player_stats_enhanced
-    WHERE season = ? AND week = ? AND player_id = ?
+    WHERE season = ? AND week = ? AND (
+        player_id = ?
+        OR gsis_id = (
+            SELECT r.gsis_id FROM nfl_roster_players r
+            WHERE r.season = ? AND r.player_id = ?
+              AND r.gsis_id IS NOT NULL AND r.gsis_id != ''
+            LIMIT 1
+        )
+    )
     """
     try:
-        df = read_dataframe(query, params=(season, week, player_id))
-        if df.empty:
-            return None
-        val = df.iloc[0][result_col]
-        return float(val) if pd.notna(val) else None
-    except Exception:
+        df = read_dataframe(query, params=(season, week, player_id, season, player_id))
+    except Exception as exc:
+        logger.warning(
+            "Could not load the %s actual for %s in %s W%s: %s",
+            market,
+            player_id,
+            season,
+            week,
+            exc,
+        )
         return None
+    if df.empty:
+        return None
+    val = df.iloc[0][result_col]
+    return float(val) if pd.notna(val) else None
 
 
 def _load_best_line(
@@ -649,7 +659,8 @@ def _load_best_line(
     try:
         df = read_dataframe(query, params=(season, week, player_id, market))
         return float(df.iloc[0]["line"]) if not df.empty else None
-    except Exception:
+    except Exception as exc:
+        logger.warning("_load_best_line: query failed, continuing without its rows: %s", exc)
         return None
 
 
@@ -661,7 +672,8 @@ def _load_all_projections(season: int, week: int) -> pd.DataFrame:
     """
     try:
         return read_dataframe(query, params=(season, week))
-    except Exception:
+    except Exception as exc:
+        logger.warning("_load_all_projections: query failed, continuing without its rows: %s", exc)
         return pd.DataFrame()
 
 
@@ -674,7 +686,8 @@ def _load_agent_decisions(season: int, week: int) -> pd.DataFrame:
     """
     try:
         return read_dataframe(query, params=(season, week))
-    except Exception:
+    except Exception as exc:
+        logger.warning("_load_agent_decisions: query failed, continuing without its rows: %s", exc)
         return pd.DataFrame()
 
 
@@ -687,7 +700,8 @@ def _load_bet_outcomes(season: int, week: int) -> pd.DataFrame:
     """
     try:
         return read_dataframe(query, params=(season, week))
-    except Exception:
+    except Exception as exc:
+        logger.warning("_load_bet_outcomes: query failed, continuing without its rows: %s", exc)
         return pd.DataFrame()
 
 

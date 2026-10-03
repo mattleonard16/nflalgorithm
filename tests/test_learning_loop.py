@@ -346,3 +346,103 @@ class TestMarketToStat:
         for market, col in MARKET_TO_STAT.items():
             assert isinstance(col, str)
             assert len(col) > 0
+
+
+# ======================================================================
+# Projection ids vs stats ids
+# ======================================================================
+
+
+def _insert(table: str, **values) -> None:
+    columns = ", ".join(values)
+    placeholders = ", ".join("?" for _ in values)
+    execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", tuple(values.values()))
+
+
+@pytest.fixture
+def bridged_db(monkeypatch, tmp_path):
+    """A migrated database where projections and stats spell one player two ways.
+
+    weekly_projections mints ``ARI_james_conner`` from the roster while
+    player_stats_enhanced keeps ``ARI_j_conner``; gsis_id is the shared key.
+    """
+    from config import config
+    from schema_migrations import MigrationManager
+
+    db_path = tmp_path / "learning.db"
+    monkeypatch.setenv("DB_BACKEND", "sqlite")
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+    monkeypatch.setattr(config.database, "backend", "sqlite")
+    monkeypatch.setattr(config.database, "path", str(db_path))
+    MigrationManager(db_path).run()
+    _insert(
+        "nfl_roster_players",
+        season=2026,
+        gsis_id="00-0033553",
+        player_id="ARI_james_conner",
+        player_name="James Conner",
+        team="ARI",
+        position="RB",
+        roster_week=1,
+        updated_at="2026-09-01",
+    )
+    stat_columns = (
+        "age games_played snap_count snap_percentage rushing_attempts passing_yards "
+        "passing_attempts receiving_yards receptions targets passing_tds receiving_tds "
+        "red_zone_touches target_share air_yards yac_yards game_script"
+    ).split()
+    _insert(
+        "player_stats_enhanced",
+        player_id="ARI_j_conner",
+        gsis_id="00-0033553",
+        season=2026,
+        week=1,
+        name="J.Conner",
+        team="ARI",
+        position="RB",
+        rushing_yards=80,
+        rushing_tds=1,
+        created_at="2026-09-08",
+        updated_at="2026-09-08",
+        **{column: 0 for column in stat_columns},
+    )
+    _insert(
+        "weekly_projections",
+        season=2026,
+        week=1,
+        player_id="ARI_james_conner",
+        team="ARI",
+        opponent="SEA",
+        market="rushing_yards",
+        mu=70,
+        sigma=20,
+        model_version="v",
+        featureset_hash="h",
+        generated_at="2026-09-06",
+    )
+    return db_path
+
+
+def test_accuracy_trends_match_projections_to_stats_through_gsis_id(bridged_db) -> None:
+    from learning_loop import _model_accuracy_trends
+
+    trends = _model_accuracy_trends(2026, 1, 1)
+
+    assert {"week": 1, "market": "rushing_yards", "mae": 10.0, "sample_size": 1} in trends
+
+
+def test_actual_stat_loads_for_a_projection_style_id(bridged_db) -> None:
+    from learning_loop import _load_actual_stat
+
+    assert _load_actual_stat(2026, 1, "ARI_james_conner", "rushing_yards") == 80.0
+
+
+def test_actual_stat_lookup_failure_is_logged_not_swallowed(bridged_db, caplog) -> None:
+    from learning_loop import _load_actual_stat
+
+    execute("DROP TABLE player_stats_enhanced")
+
+    with caplog.at_level("WARNING", logger="learning_loop"):
+        assert _load_actual_stat(2026, 1, "ARI_james_conner", "rushing_yards") is None
+
+    assert "ARI_james_conner" in caplog.text
