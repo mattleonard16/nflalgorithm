@@ -10,6 +10,11 @@ Two production-safety guarantees, enforced here:
 - ``weekly_projections`` is never written — the persistence hook is replaced
   with a no-op, so stored pregame evidence for past weeks stays untouched.
 
+The ``replay`` command predicts through the roster path instead, the one
+production uses. For each week it rewrites that season's roster and the week's
+context snapshot as they stood at the week's first kickoff, so it refuses to
+run against anything but a scratch copy of the database.
+
 The weekly model is proprietary and gitignored; this script fails with a clear
 message where that module is absent (e.g. CI), and the harness it drives is
 covered by tests/test_nfl_backtest.py with a stub model instead.
@@ -18,6 +23,7 @@ Usage:
     uv run python -m scripts.run_nfl_backtest run --season 2025 --weeks 5 6 7
     uv run python -m scripts.run_nfl_backtest run --season 2025 --context-factors on \
         --label ctx --output ctx.json
+    uv run python -m scripts.run_nfl_backtest replay --season 2025 --database scratch.db
     uv run python -m scripts.run_nfl_backtest compare baseline.json candidate.json
 
 Feature flags the private model reads from ``config.features`` can be pinned
@@ -29,14 +35,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 import pandas as pd
 
 from config import config
-from utils.db import read_dataframe
+from utils.db import execute, get_backend, read_dataframe
 from utils.nfl_backtest import (
     WalkForwardConfig,
     compare_walk_forward,
@@ -44,6 +52,13 @@ from utils.nfl_backtest import (
     run_walk_forward,
 )
 from utils.nfl_markets import DATABASE_STAT_COLUMNS
+from utils.nfl_replay import (
+    first_kickoff_cutoffs,
+    players_without_stats,
+    rekey_to_stat_ids,
+    require_scratch_database,
+    roster_for_week,
+)
 
 DEFAULT_WEEKS = tuple(range(1, 19))
 
@@ -97,24 +112,124 @@ def _load_actuals(season: int, weeks: tuple[int, ...]) -> pd.DataFrame:
     )
 
 
+def _train_before(weekly, season: int, week: int, history_seasons: int) -> bool:
+    tuples = _training_tuples(season, week, history_seasons)
+    if not tuples:
+        print(f"week {week}: no training history before cutoff; skipping", flush=True)
+        return False
+    print(
+        f"week {week}: training on {len(tuples)} season-week pairs "
+        f"({tuples[0]} .. {tuples[-1]})",
+        flush=True,
+    )
+    weekly.train_weekly_models(tuples)
+    return True
+
+
 def _make_predict_fn(weekly, history_seasons: int):
     def predict_fn(season: int, week: int) -> pd.DataFrame:
-        tuples = _training_tuples(season, week, history_seasons)
-        if not tuples:
-            print(f"week {week}: no training history before cutoff; skipping")
+        if not _train_before(weekly, season, week, history_seasons):
             return pd.DataFrame()
-        print(
-            f"week {week}: training on {len(tuples)} season-week pairs "
-            f"({tuples[0]} .. {tuples[-1]})"
-        )
-        weekly.train_weekly_models(tuples)
         return weekly.predict_week(season, week, roster_backed=False)
 
     return predict_fn
 
 
+class ReplayInputs(NamedTuple):
+    rosters: pd.DataFrame
+    depth_charts: pd.DataFrame
+    injuries: pd.DataFrame
+
+
+def _fetch_replay_inputs(season: int) -> ReplayInputs:
+    from scripts.ingest_real_nfl_data import (
+        fetch_depth_charts,
+        fetch_injuries,
+        fetch_weekly_rosters,
+    )
+
+    return ReplayInputs(
+        fetch_weekly_rosters([season]), fetch_depth_charts([season]), fetch_injuries([season])
+    )
+
+
+def _stage_replay_week(season: int, week: int, inputs: ReplayInputs) -> None:
+    """Write the week's roster and first-kickoff snapshot into the scratch database."""
+    from scripts.ingest_real_nfl_data import (
+        build_player_context_snapshots,
+        load_snapshot_history,
+        upsert_player_context_snapshots,
+        upsert_roster_players,
+    )
+
+    games = read_dataframe(
+        "SELECT season, week, home_team, away_team, spread_line, kickoff_utc "
+        "FROM games WHERE season = ? AND week = ?",
+        (season, week),
+    )
+    cutoffs = first_kickoff_cutoffs(games, season=season, week=week)
+    roster = roster_for_week(inputs.rosters, season=season, week=week)
+    execute("DELETE FROM nfl_roster_players WHERE season = ?", (season,))
+    upsert_roster_players(roster)
+    snapshots = build_player_context_snapshots(
+        roster,
+        inputs.depth_charts,
+        inputs.injuries,
+        load_snapshot_history(),
+        target_week=week,
+        target_cutoffs=cutoffs,
+        captured_at=cutoffs[season],
+        schedule=games,
+    )
+    execute(
+        "DELETE FROM nfl_player_context_snapshots WHERE season = ? AND week = ?", (season, week)
+    )
+    upsert_player_context_snapshots(snapshots)
+
+
+def _make_replay_predict_fn(
+    weekly,
+    history_seasons: int,
+    inputs: ReplayInputs,
+    actuals: pd.DataFrame,
+    without_stats: dict[int, int],
+):
+    def predict_fn(season: int, week: int) -> pd.DataFrame:
+        _stage_replay_week(season, week, inputs)
+        if not _train_before(weekly, season, week, history_seasons):
+            return pd.DataFrame()
+        id_map = read_dataframe(
+            "SELECT r.player_id AS roster_id, s.player_id AS stat_id "
+            "FROM nfl_roster_players r JOIN player_stats_enhanced s "
+            "ON s.gsis_id = r.gsis_id AND s.season = r.season AND s.week = ? "
+            "WHERE r.season = ?",
+            (week, season),
+        )
+        predictions = rekey_to_stat_ids(
+            weekly.predict_week(season, week, roster_backed=True), id_map
+        )
+        without_stats[week] = players_without_stats(predictions, actuals, season=season, week=week)
+        return predictions
+
+    return predict_fn
+
+
+def _use_scratch_database(path: Path) -> Path:
+    if get_backend() != "sqlite":
+        raise SystemExit("The replay runs on a SQLite scratch copy only")
+    try:
+        scratch = require_scratch_database(path, Path(config.database.path))
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    os.environ["SQLITE_DB_PATH"] = str(scratch)
+    config.database.path = str(scratch)
+    return scratch
+
+
 def _print_summary(report: dict) -> None:
-    print(f"\n=== walk-forward {report['label']} season {report['season']} ===")
+    print(
+        f"\n=== {report.get('mode', 'walk-forward')} {report['label']} season {report['season']} ==="
+    )
     print(f"weeks evaluated: {report['weeks_evaluated']}")
     overall = report["overall"]
     line = (
@@ -135,6 +250,8 @@ def _print_summary(report: dict) -> None:
         print(line)
     for problem in report["problems"]:
         print(f"  problem: {problem}")
+    if "players_without_stats" in report:
+        print(f"players projected with no stat line: {report['players_without_stats']['total']}")
 
 
 # Feature flags a run may pin. Each maps a CLI name to the config.features
@@ -159,6 +276,9 @@ def _run(args: argparse.Namespace) -> dict:
     weeks = tuple(sorted(set(args.weeks)))
     if any(week < 1 for week in weeks):
         raise SystemExit("weeks must be positive")
+    replay = args.command == "replay"
+    if replay:
+        print(f"replaying against {_use_scratch_database(args.database)}", flush=True)
 
     actuals = _load_actuals(args.season, weeks)
     if actuals.empty:
@@ -173,9 +293,21 @@ def _run(args: argparse.Namespace) -> dict:
         feature_overrides(config.features, **overrides) as features,
     ):
         _patch_for_backtest(weekly, Path(tmp))
-        print(f"features in effect: {features}")
+        print(f"features in effect: {features}", flush=True)
+        without_stats: dict[int, int] = {}
+        predict_fn = (
+            _make_replay_predict_fn(
+                weekly,
+                args.history_seasons,
+                _fetch_replay_inputs(args.season),
+                actuals,
+                without_stats,
+            )
+            if replay
+            else _make_predict_fn(weekly, args.history_seasons)
+        )
         result = run_walk_forward(
-            _make_predict_fn(weekly, args.history_seasons),
+            predict_fn,
             actuals,
             WalkForwardConfig(
                 season=args.season,
@@ -192,6 +324,12 @@ def _run(args: argparse.Namespace) -> dict:
     report = dict(result.report)
     report["generated_at"] = datetime.now(timezone.utc).isoformat()
     report["history_seasons"] = args.history_seasons
+    if replay:
+        report["mode"] = "replay"
+        report["players_without_stats"] = {
+            "total": sum(without_stats.values()),
+            "by_week": without_stats,
+        }
     return report
 
 
@@ -205,18 +343,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    run = subparsers.add_parser("run", help="retrain-per-week walk-forward backtest")
-    run.add_argument("--season", type=int, required=True)
-    run.add_argument("--weeks", type=int, nargs="+", default=list(DEFAULT_WEEKS))
-    run.add_argument("--label", default="baseline")
-    run.add_argument(
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--season", type=int, required=True)
+    common.add_argument("--weeks", type=int, nargs="+", default=list(DEFAULT_WEEKS))
+    common.add_argument("--label", default="baseline")
+    common.add_argument(
         "--history-seasons",
         type=int,
         default=2,
         help="how many seasons before --season may contribute training data",
     )
-    run.add_argument("--min-week-rows", type=int, default=20)
-    run.add_argument(
+    common.add_argument("--min-week-rows", type=int, default=20)
+    common.add_argument(
         "--context-factors",
         choices=("on", "off", "inherit"),
         default="inherit",
@@ -226,7 +364,7 @@ def main() -> None:
             "way with the same --season/--weeks, then `compare` the two reports."
         ),
     )
-    run.add_argument(
+    common.add_argument(
         "--shortened-games",
         choices=("on", "off", "inherit"),
         default="inherit",
@@ -235,12 +373,22 @@ def main() -> None:
             "whatever NFL_FEATURE_SHORTENED_GAMES resolved to (default off)"
         ),
     )
-    run.add_argument("--output", type=Path, default=None)
-    run.add_argument(
+    common.add_argument("--output", type=Path, default=None)
+    common.add_argument(
         "--rows-output",
         type=Path,
         default=None,
         help="also write the per-row scored frame as CSV (for calibration analysis)",
+    )
+    subparsers.add_parser("run", parents=[common], help="retrain-per-week walk-forward backtest")
+    replay = subparsers.add_parser(
+        "replay", parents=[common], help="retrain per week and predict through the roster path"
+    )
+    replay.add_argument(
+        "--database",
+        type=Path,
+        required=True,
+        help="scratch copy of nfl_data.db; the replay rewrites its rosters and snapshots",
     )
 
     compare = subparsers.add_parser("compare", help="compare two backtest reports")
@@ -250,12 +398,11 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.command == "run":
+    if args.command in ("run", "replay"):
         report = _run(args)
         _print_summary(report)
-        output = args.output or (
-            config.reports_dir / f"nfl_backtest_{args.season}_{args.label}.json"
-        )
+        kind = "replay" if args.command == "replay" else "backtest"
+        output = args.output or (config.reports_dir / f"nfl_{kind}_{args.season}_{args.label}.json")
         _write_report(report, output)
         return
 

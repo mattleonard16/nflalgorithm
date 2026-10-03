@@ -1554,6 +1554,18 @@ def upsert_player_context_snapshots(snapshots: pd.DataFrame) -> int:
     return len(rows)
 
 
+def load_snapshot_history() -> pd.DataFrame:
+    """Every GSIS-linked stat row the snapshot builder reads role history from."""
+    return read_dataframe("""
+        SELECT gsis_id, season, week, team, snap_count, snap_percentage,
+               rushing_attempts, targets, passing_attempts, target_share,
+               air_yards, yac_yards, red_zone_touches
+        FROM player_stats_enhanced
+        WHERE gsis_id IS NOT NULL
+        ORDER BY gsis_id, season, week
+        """)
+
+
 def refresh_player_context_snapshots(
     rosters: pd.DataFrame,
     depth_charts: pd.DataFrame,
@@ -1570,14 +1582,7 @@ def refresh_player_context_snapshots(
     """
     if rosters is None or rosters.empty:
         return 0
-    history = read_dataframe("""
-        SELECT gsis_id, season, week, team, snap_count, snap_percentage,
-               rushing_attempts, targets, passing_attempts, target_share,
-               air_yards, yac_yards, red_zone_touches
-        FROM player_stats_enhanced
-        WHERE gsis_id IS NOT NULL
-        ORDER BY gsis_id, season, week
-        """)
+    history = load_snapshot_history()
     games = read_dataframe(
         """
         SELECT season, home_team, away_team, spread_line, kickoff_utc
