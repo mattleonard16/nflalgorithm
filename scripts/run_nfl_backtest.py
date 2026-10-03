@@ -142,6 +142,7 @@ def _print_summary(report: dict) -> None:
 # weekly cron's NFL_FEATURE_* environment would have set.
 FEATURE_FLAGS = {
     "context_factors": "context_factors_enabled",
+    "shortened_games": "shortened_games_enabled",
 }
 
 
@@ -223,6 +224,15 @@ def main() -> None:
             "pin config.features.context_factors_enabled for this run; 'inherit' keeps "
             "whatever NFL_FEATURE_CONTEXT_FACTORS resolved to (default off). Run once each "
             "way with the same --season/--weeks, then `compare` the two reports."
+        ),
+    )
+    run.add_argument(
+        "--shortened-games",
+        choices=("on", "off", "inherit"),
+        default="inherit",
+        help=(
+            "pin config.features.shortened_games_enabled for this run; 'inherit' keeps "
+            "whatever NFL_FEATURE_SHORTENED_GAMES resolved to (default off)"
         ),
     )
     run.add_argument("--output", type=Path, default=None)
