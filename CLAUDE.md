@@ -311,11 +311,12 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 6. [RESOLVED] Hardcoded fields — real `age` and `game_date` are ingested rather than defaulted.
 
 ### Tier 1 — HIGH IMPACT (MAE + ROI)
-7. Premium features dropped in `_CONTEXTUAL_COLS` (weekly.py:44).
-8. [RESOLVED] No vig removal — `implied_probability_no_vig` lives in tracked `utils/odds_math.py`
-   and is what `utils/clv.py` uses for probability-space CLV, so CI tests it. The private
-   `value_betting_engine.py` should import it from there (see docs/DEPLOYMENT_MANIFEST.md).
-   Both inputs are now actually captured: `utils/two_sided_odds.py` pairs an Over with the Under **at the same line** (the
+7. Premium features dropped from the model. The old pointer, `_CONTEXTUAL_COLS` at weekly.py:44, no
+   longer exists. The feature lists are now `_OUTCOME_CONTEXT_COLS`, `_ROLE_ACTIVITY_COLS`, and
+   `_GAME_CONTEXT_COLS`. Re-audit which features are missing before working this item.
+8. [RESOLVED] No vig removal — `implied_probability_no_vig` now lives in `value_betting_engine.py`
+   and is what `utils/clv.py` uses for probability-space CLV. Both inputs are now actually
+   captured: `utils/two_sided_odds.py` pairs an Over with the Under **at the same line** (the
    scraper previously matched on player name alone, which crosses alternate lines — a
    `DraftKings_Alt` book is already in the DB), and `utils/odds_snapshot.build_snapshot_row`
    carries `under_price` into storage. It had been NULL on every row because the writer in
@@ -367,7 +368,7 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     `weekly.py`, priced (Poisson for anytime TD) in `value_betting_engine.py`, and graded in
     `utils/nfl_markets.py` / `scripts/record_outcomes.py`. Separately, `utils/context_factors.py`
     consumes `spread_line`/`total_line` as a game-script multiplier behind
-    `NFL_FEATURE_CONTEXT_FACTORS` (`config/runtime.py:144`, set by `week-auto`) — see item 31 for
+    `NFL_FEATURE_CONTEXT_FACTORS` (`config/runtime.py:151`, set by `week-auto`) — see item 31 for
     its validation status. Still unused: FTN charting; pbp EPA.
 13. [RESOLVED] Kelly cap in ranking path — enforced at both levels. Per-bet: gitignored
     `value_betting_engine.py:273` caps at `config.betting.max_kelly` (0.10) behind
@@ -375,12 +376,12 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     `config/runtime.py`). Portfolio: tracked `materialized_value_view.py:140` scales the whole
     card to the bankroll via `risk_manager.normalize_portfolio_stakes`, so persisted stakes
     never sum past `config.betting.bankroll` even when per-bet caps individually pass.
-31. [RESOLVED] QB passing volume over-projection (diagnosed 2026-09 from the 2025 walk-forward rows CSV).
+34. [RESOLVED] QB passing volume over-projection (diagnosed 2026-09 from the 2025 walk-forward rows CSV).
     The headline +13.2 passing_yards bias has been eliminated via: (a) QB baseline attempts calibrated
     from 34.0 to 31.0 in `data_pipeline.py` based on clear-starter actuals; (b) script factor updated to
     the canonical convention where leading suppresses attempts (`1.0 - game_script * 0.04`); and (c) dual-factor
     starter gating in `models/position_specific/weekly.py`, where backup QBs (`depth_rank > 1`) have expected
-    attempts scaled by starter probability `p_start` (0.02 for healthy backups, 0.70 for questionable, etc.),
+    attempts scaled by starter probability `p_start` (0.02 for healthy backups, 0.75 for questionable, etc.),
     preventing non-starters from inheriting starter attempt baselines.
 
 ### Tier 2 — MEDIUM (correctness/ops)
