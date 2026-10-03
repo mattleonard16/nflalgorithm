@@ -383,20 +383,7 @@ week-research:
 # and research degrade to a warning so a results hiccup never blocks the
 # new week's lines.
 week-auto:
-	@set -e; \
-	SW=$$($(DB_ENV) $(PYTHON) -c 'from utils.current_week import resolve_current_week; s, w = resolve_current_week(); print(s, w)'); \
-	SEASON=$${SW% *}; WEEK=$${SW#* }; \
-	echo "Resolved upcoming week: $$SEASON W$$WEEK"; \
-	$(MAKE) db-analyze; \
-	NFL_FEATURE_CONTEXT_FACTORS=1 $(MAKE) week-predict SEASON=$$SEASON WEEK=$$WEEK; \
-	$(MAKE) week-lines SEASON=$$SEASON WEEK=$$WEEK; \
-	if [ "$$WEEK" -gt 1 ]; then \
-		PREV=$$((WEEK - 1)); \
-		$(MAKE) week-grade SEASON=$$SEASON WEEK=$$PREV || echo "WARN: grading $$SEASON W$$PREV failed; lines were still published"; \
-		$(MAKE) week-research SEASON=$$SEASON WEEK=$$PREV || echo "WARN: research memo for $$SEASON W$$PREV failed; lines were still published"; \
-	else \
-		echo "Week 1: no completed week to grade or research yet"; \
-	fi
+	$(DB_ENV) $(PYTHON) -m scripts.week_auto
 
 backfill-accuracy:
 	@echo "Running historical line accuracy backfill..."

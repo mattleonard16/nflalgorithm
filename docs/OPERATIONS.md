@@ -118,10 +118,12 @@ needs the private modules and real data.
 
    The schedule is `~/Library/LaunchAgents/com.nflalgorithm.week-auto.plist`: Wednesdays at 09:00,
    in this checkout, on whatever branch is checked out at that moment, logging to
-   `logs/week_auto.log`. Nothing alerts on failure. A failed ingest or prediction stops the run
-   before `week-lines`, so that week gets no internal lines and the previous week is not graded.
-   After each Wednesday run, check `launchctl list | grep nflalgorithm` (the middle column is the
-   last exit status, `0` for success) and the end of the log.
+   `logs/week_auto.log`. `make week-auto` runs `scripts/week_auto.py`, which writes
+   `logs/week_auto_status.json` on every run (week, `ok`, `failed_step`, `exit_code`, warnings)
+   and posts a macOS notification titled "NFL week-auto" when a step fails. A failed prediction
+   or lines step stops the run, so that week gets no internal lines and the previous week is not
+   graded; a failed grade or memo is recorded as a warning. Check the status file after each
+   Wednesday, since a notification can be missed or silenced in System Settings.
 
    `week-auto` does not scrape sportsbook odds or build the value card. Only
    `make production-run` does, and nothing schedules it. A week nobody runs it for has no
