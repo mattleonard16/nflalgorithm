@@ -111,6 +111,11 @@ needs the private modules and real data.
 7. `make week-auto` is the Wednesday entrypoint from week 2 on; it grades the previous week and
    writes its research memo, degrading to a warning so a results hiccup never blocks new lines.
 
+   It ingests only the target season, through `week-predict`. Finished history seasons are
+   re-downloaded only when the stored history fails the usability check, so run
+   `make ingest-nfl` by hand when history needs a refresh. Before 2026-10-02 the job ran a full
+   `make ingest-nfl` first, and a dropped download of a 2024 file was enough to skip the week.
+
    The schedule is `~/Library/LaunchAgents/com.nflalgorithm.week-auto.plist`: Wednesdays at 09:00,
    in this checkout, on whatever branch is checked out at that moment, logging to
    `logs/week_auto.log`. Nothing alerts on failure. A failed ingest or prediction stops the run

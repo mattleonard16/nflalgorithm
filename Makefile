@@ -387,7 +387,6 @@ week-auto:
 	SW=$$($(DB_ENV) $(PYTHON) -c 'from utils.current_week import resolve_current_week; s, w = resolve_current_week(); print(s, w)'); \
 	SEASON=$${SW% *}; WEEK=$${SW#* }; \
 	echo "Resolved upcoming week: $$SEASON W$$WEEK"; \
-	$(MAKE) ingest-nfl; \
 	$(MAKE) db-analyze; \
 	NFL_FEATURE_CONTEXT_FACTORS=1 $(MAKE) week-predict SEASON=$$SEASON WEEK=$$WEEK; \
 	$(MAKE) week-lines SEASON=$$SEASON WEEK=$$WEEK; \

@@ -93,7 +93,7 @@ The measurement tools cannot judge these changes yet. The only 2025 baseline (`r
 - KTD4. **Odds pulls stay manual.** (session-settled: user-approved — chosen over scheduling `production-run`: every pull spends paid credits.)
 - KTD5. **Reliability and catch-up land before any model work.** (session-settled: user-approved — chosen over starting with accuracy: a model change is worthless in a week the job does not run.)
 - KTD6. **Retry inside `_load_nflverse_by_season`, for transient network errors only.** nflreadpy 0.1.5 makes one `session.get` with no retry and re-raises the builtin `ConnectionError` (`.venv/lib/python3.13/site-packages/nflreadpy/downloader.py:96-97`), so the retry must catch the builtin and `requests` connection and timeout errors and HTTP 5xx, and must not catch what `_is_missing_feed_error` classifies as a missing feed. After the last attempt the original error is raised. The NBA helper `_fetch_with_retry` (`scripts/ingest_nba_data.py:53-91`) is not reused: it returns an empty frame on exhaustion, which breaks the fail-loud rule for history.
-- KTD7. **Drop the standalone `ingest-nfl` step from `week-auto`.** `week-predict` already ingests the target season and re-ingests history only when `_history_is_usable` fails (`scripts/prepare_nfl_week.py:216-227`). This removes the weekly history download and the stray 2026 week 18 snapshot that `THROUGH_WEEK ?= 18` writes. Set `NFLREADPY_CACHE=filesystem` with a repo-local cache dir for the job so the separate processes share downloads.
+- KTD7. **Drop the standalone `ingest-nfl` step from `week-auto`.** `week-predict` already ingests the target season and re-ingests history only when `_history_is_usable` fails (`scripts/prepare_nfl_week.py:216-227`). This removes the weekly history download and the stray 2026 week 18 snapshot that `THROUGH_WEEK ?= 18` writes. No nflreadpy disk cache: with one downloading process left it saves little, and its one-day default would serve a stale injury report to a same-day rerun.
 - KTD8. **Alert through a macOS notification plus a status file.** A small tracked runner wraps the `week-auto` steps, writes `logs/week_auto_status.json` on every run (week, step, exit code, timestamps), and on failure calls `osascript` to post a notification. Email or Slack needs credentials and is out of scope. The log gains a timestamped header per run.
 - KTD9. **A second scheduled run on Saturday refreshes context and projections.** It runs `week-predict` only, which is late-run safe: kicked-off teams keep their pregame rows (`scripts/prepare_nfl_week.py:262-267`). The plist lives in the repo as a template, installed by a make target.
 - KTD10. **Record the injury report's week on each context snapshot.** A new nullable `injury_report_week` column, added through `_ensure_columns` and the DDL, lets R9 drop only players whose Out status comes from the target week's report. The injury row already carries `week` (`scripts/ingest_real_nfl_data.py:1366`).
@@ -182,11 +182,10 @@ flowchart TB
 - **Goal:** `week-auto` stops downloading finished history seasons and stops writing a future week 18 snapshot.
 - **Requirements:** R2. Governed by KTD7.
 - **Dependencies:** U1.
-- **Files:** `Makefile`, `.gitignore` (cache dir), `tests/test_nfl_ingest_entrypoint.py` if the snapshot write changes.
+- **Files:** `Makefile`, `docs/OPERATIONS.md`.
 - **Approach:**
   1. Remove `$(MAKE) ingest-nfl` from `week-auto`. Keep `db-analyze`.
-  2. Export `NFLREADPY_CACHE=filesystem` and a gitignored repo-local `NFLREADPY_CACHE_DIR` for the job.
-  3. Leave `make ingest-nfl` itself unchanged for manual history refreshes.
+  2. Leave `make ingest-nfl` itself unchanged for manual history refreshes.
 - **Test expectation:** none, because this is Makefile wiring. Verify with `make -n week-auto` and one real run in U3.
 - **Verification:** `make -n week-auto` shows no `ingest-nfl` step, and a run downloads only 2026 feeds.
 
