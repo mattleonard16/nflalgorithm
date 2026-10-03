@@ -103,3 +103,32 @@ def test_anytime_touchdown_keeps_anyone_who_rushes_or_catches() -> None:
     assert likely_to_play(te1, "anytime_touchdown") is True
     assert likely_to_play(starting_qb, "anytime_touchdown") is True
     assert likely_to_play(backup_qb, "anytime_touchdown") is False
+
+
+def test_a_player_ruled_out_on_this_weeks_report_is_ruled_out() -> None:
+    from utils.slate_eligibility import ruled_out
+
+    for status in ("Out", "OUT", "IR", "Injured Reserve"):
+        assert ruled_out({"injury_status": status, "injury_report_week": 4}, 4) is True
+
+
+def test_doubtful_and_questionable_players_are_not_ruled_out() -> None:
+    # Props void when a player sits, so an if-he-plays projection stays valid.
+    from utils.slate_eligibility import ruled_out
+
+    for status in ("Doubtful", "Questionable", None, ""):
+        assert ruled_out({"injury_status": status, "injury_report_week": 4}, 4) is False
+
+
+def test_last_weeks_out_status_does_not_rule_a_player_out() -> None:
+    # Wednesday's run comes before clubs file, so last week's status carries
+    # forward. A player back at practice would vanish until Saturday.
+    from utils.slate_eligibility import ruled_out
+
+    assert ruled_out({"injury_status": "Out", "injury_report_week": 3}, 4) is False
+
+
+def test_an_out_status_with_no_report_week_is_not_ruled_out() -> None:
+    from utils.slate_eligibility import ruled_out
+
+    assert ruled_out({"injury_status": "Out", "injury_report_week": None}, 4) is False
