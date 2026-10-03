@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from scripts import prepare_nfl_week
+from utils.db import execute
 
 
 def test_gsis_history_requires_high_coverage_in_every_requested_season(monkeypatch) -> None:
@@ -265,3 +266,18 @@ def test_prepare_week_after_first_kickoff_predicts_only_games_still_to_come(monk
 
     assert excluded == [frozenset({"ATL", "GB"})]
     assert result["kicked_off_teams"] == ["ATL", "GB"]
+
+
+def test_a_history_season_cut_short_by_an_earlier_run_is_not_usable(matrix_database) -> None:
+    # Predicting a week of 2025 ingests 2025 only up to that week. Treating it
+    # as history later would drop the rest of the season without a word.
+    execute("DELETE FROM player_stats_enhanced")
+    for season, week in ((2024, 1), (2024, 18), (2025, 1), (2025, 4)):
+        execute(
+            "INSERT INTO player_stats_enhanced (player_id, season, week, name, team, position) "
+            "VALUES ('BUF_p', ?, ?, 'P', 'BUF', 'WR')",
+            (season, week),
+        )
+
+    assert prepare_nfl_week._history_seasons_are_complete([2024]) is True
+    assert prepare_nfl_week._history_seasons_are_complete([2024, 2025]) is False

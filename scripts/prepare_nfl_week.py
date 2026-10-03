@@ -19,6 +19,10 @@ from utils.db import fetchall, fetchone
 MIN_GSIS_HISTORY_COVERAGE = 0.95
 MIN_ROSTER_HISTORY_COVERAGE = 0.50
 WEEK_ONE_GAME_COUNT = NFL_TEAM_COUNT // 2
+# Every regular season since 1990 runs at least 17 weeks. A history season that
+# stops earlier was cut short by a run for one of its own weeks, and projecting
+# from it silently drops the rest of that season.
+MIN_HISTORY_LAST_WEEK = 17
 
 
 def run_migrations() -> None:
@@ -95,11 +99,29 @@ def _history_covers_all_franchises(history_seasons: list[int]) -> bool:
     return all(teams_by_season.get(season, 0) >= NFL_TEAM_COUNT for season in history_seasons)
 
 
+def _history_seasons_are_complete(history_seasons: list[int]) -> bool:
+    if not history_seasons:
+        return False
+    placeholders = ", ".join(["?"] * len(history_seasons))
+    rows = fetchall(
+        f"""
+        SELECT season, MAX(week) AS last_week
+        FROM player_stats_enhanced
+        WHERE season IN ({placeholders})
+        GROUP BY season
+        """,
+        params=tuple(history_seasons),
+    )
+    last_week = {int(season): int(week) for season, week in rows}
+    return all(last_week.get(season, 0) >= MIN_HISTORY_LAST_WEEK for season in history_seasons)
+
+
 def _history_is_usable(history_seasons: list[int]) -> bool:
     return (
         _has_gsis_history(history_seasons)
         and not _has_unscoped_team_history(history_seasons)
         and _history_covers_all_franchises(history_seasons)
+        and _history_seasons_are_complete(history_seasons)
     )
 
 
