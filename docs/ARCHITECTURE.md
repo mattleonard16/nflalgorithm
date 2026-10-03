@@ -61,7 +61,10 @@ flowchart LR
   additionally hard-stops the worker process so a non-cooperative handler cannot keep executing.
 - Live-odds failure stops the pipeline before value, risk, agents, or materialization can use a
   stale card.
-- CLI and scheduler call the same `JobService` used by the API.
+- CLI and scheduler call the same `JobService` used by the API. The local launchd jobs
+  (`make week-auto` on Wednesday, `make week-auto-refresh` on Saturday) do not. They run the
+  `week-*` Make targets directly, record their run in `logs/week_auto_status.json` or
+  `logs/week_refresh_status.json`, and never pull paid odds.
 - Run reports are registered in `pipeline_artifacts`; dashboard queries read persisted run,
   stage, decision, and materialized-card state.
 
@@ -86,4 +89,5 @@ The container entrypoint applies migrations, then supervises FastAPI and the wor
 OS processes. Set
 `ENABLE_PIPELINE_SCHEDULER=true` to also run the scheduler process. SQLite/WAL remains the local
 backend; the existing production database abstraction can also use MySQL. The private NFL model
-adapter and private FastAPI server remain deployment-supplied modules per repository policy.
+adapter remains a deployment-supplied module per repository policy. The FastAPI server
+(`api/server.py`) has been tracked since 2026-09-05.
