@@ -14,6 +14,7 @@ import pytest
 from config import config
 from materialized_value_view import materialize_week
 from schema_migrations import MigrationManager
+from utils.best_line import best_line_per_bet
 from value_betting_engine import rank_weekly_value
 
 
@@ -150,49 +151,76 @@ def test_materialize_week_returns_exactly_what_it_persists(temp_db, monkeypatch)
 
     materialize_week must return the SAME frame the view stores — post
     filters, confidence scoring, and portfolio normalization — and the
-    persisted card must never total more than the bankroll even when the
-    per-bet-capped stakes sum past it."""
-    n_books = 25
+    bets on the persisted card must never total more than the bankroll. A
+    bet is staked once, at its best line, so the cap counts one row per bet
+    however many books price it."""
+    n_players = 25
     with sqlite3.connect(temp_db) as conn:
-        for i in range(n_books):
+        for i in range(2, n_players + 1):
+            player_id = f"test_player_{i}_team1"
+            conn.execute(
+                "INSERT INTO player_stats_enhanced "
+                "(player_id, season, week, name, position, team) VALUES (?, ?, ?, ?, ?, ?)",
+                (player_id, 2023, 1, f"Test Player {i}", "RB", "TEAM1"),
+            )
+            conn.execute(
+                """
+                INSERT INTO weekly_projections
+                (season, week, player_id, team, opponent, market, mu, sigma, model_version,
+                 featureset_hash, generated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (2023, 1, player_id, "TEAM1", "TEAM2", "rushing_yards", 75.0, 10.0, "v1",
+                 "hash1", "2023-09-01T00:00:00"),
+            )
+        for i in range(1, n_players + 1):
             conn.execute(
                 """
                 INSERT INTO weekly_odds
                 (event_id, season, week, player_id, market, sportsbook, line, price, as_of)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("event1", 2023, 1, "test_player_1_team1", "rushing_yards",
-                 f"Book{i:02d}", 70.5, -110, "2023-09-01T00:00:00"),
+                ("event1", 2023, 1, f"test_player_{i}_team1", "rushing_yards",
+                 "SecondBook", 71.5, -115, "2023-09-01T00:00:00"),
             )
+            if i > 1:
+                conn.execute(
+                    """
+                    INSERT INTO weekly_odds
+                    (event_id, season, week, player_id, market, sportsbook, line, price, as_of)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    ("event1", 2023, 1, f"test_player_{i}_team1", "rushing_yards",
+                     "TestBook", 70.5, -110, "2023-09-01T00:00:00"),
+                )
         conn.commit()
 
     bankroll = 100.0
     monkeypatch.setattr(config.betting, "bankroll", bankroll)
 
-    # Self-check: the raw ranked card must exceed the bankroll, otherwise
+    # Self-check: the raw best-line card must exceed the bankroll, otherwise
     # this test would pass vacuously without exercising normalization.
     raw = rank_weekly_value(2023, 1, min_edge=0.0)
-    assert raw["stake"].sum() > bankroll, (
-        "fixture no longer oversubscribes the bankroll; add more odds rows"
+    assert best_line_per_bet(raw)["stake"].sum() > bankroll, (
+        "fixture no longer oversubscribes the bankroll; add more players"
     )
 
     returned = materialize_week(2023, 1, min_edge=0.0)
 
     with sqlite3.connect(temp_db) as conn:
         db = pd.read_sql_query(
-            "SELECT sportsbook, stake, kelly_fraction FROM materialized_value_view "
-            "WHERE season=? AND week=?",
+            "SELECT player_id, market, side, sportsbook, edge_percentage, stake, kelly_fraction "
+            "FROM materialized_value_view WHERE season=? AND week=?",
             conn,
             params=(2023, 1),
         )
 
     assert not db.empty
     # Global cap holds in what the VIEW stores, not just in the return value.
-    assert db["stake"].sum() <= bankroll + 1e-6
-    assert db["stake"].sum() == pytest.approx(bankroll)
+    assert best_line_per_bet(db)["stake"].sum() == pytest.approx(bankroll)
 
     # Row-for-row parity between the returned frame and the persisted card.
-    merged = returned.merge(db, on="sportsbook", suffixes=("_ret", "_db"))
+    merged = returned.merge(db, on=["player_id", "sportsbook"], suffixes=("_ret", "_db"))
     assert len(merged) == len(db) == len(returned)
     assert np.allclose(merged["stake_ret"], merged["stake_db"])
     assert np.allclose(merged["kelly_fraction_ret"], merged["kelly_fraction_db"])
