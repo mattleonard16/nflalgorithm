@@ -263,6 +263,7 @@ class MigrationManager:
                 injury_status VARCHAR(64),
                 practice_status VARCHAR(128),
                 primary_injury VARCHAR(128),
+                injury_report_week INTEGER,
                 expected_snap_count REAL NOT NULL DEFAULT 0,
                 expected_snap_percentage REAL NOT NULL DEFAULT 0,
                 expected_rushing_attempts REAL NOT NULL DEFAULT 0,
@@ -1193,6 +1194,16 @@ class MigrationManager:
             if not column_exists("nfl_roster_players", "roster_week", conn=cursor.connection):
                 cursor.execute(
                     "ALTER TABLE nfl_roster_players ADD COLUMN roster_week INTEGER NOT NULL DEFAULT 0"
+                )
+
+        # Which week's injury report the status came from; NULL when the player
+        # is on no report. Lets the model drop only players ruled out this week.
+        if table_exists("nfl_player_context_snapshots", conn=cursor.connection):
+            if not column_exists(
+                "nfl_player_context_snapshots", "injury_report_week", conn=cursor.connection
+            ):
+                cursor.execute(
+                    "ALTER TABLE nfl_player_context_snapshots ADD COLUMN injury_report_week INTEGER"
                 )
 
     @staticmethod
