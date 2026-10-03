@@ -149,6 +149,10 @@ features = SimpleNamespace(
     # multiplied into predicted mu. Default OFF until a walk-forward backtest
     # validates it; the cron path opts in explicitly.
     context_factors_enabled=env_flag("NFL_FEATURE_CONTEXT_FACTORS"),
+    # A clone without the private weekly model or value engine runs the public
+    # baselines. A deployment sets this so a lost private file fails the run
+    # instead of publishing a baseline card.
+    require_private_models=env_flag("NFL_REQUIRE_PRIVATE_MODELS"),
 )
 
 config = SimpleNamespace(

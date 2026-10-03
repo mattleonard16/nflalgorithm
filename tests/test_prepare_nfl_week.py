@@ -71,7 +71,13 @@ def test_prepare_week_refreshes_history_roster_schedule_and_predictions(monkeypa
         lambda season, week, roster_backed, exclude_teams: prediction_calls.append(
             (season, week, roster_backed, exclude_teams)
         )
-        or pd.DataFrame({"player_id": ["BUF_season_ready"], "market": ["receiving_yards"]}),
+        or pd.DataFrame(
+            {
+                "player_id": ["BUF_season_ready"],
+                "market": ["receiving_yards"],
+                "model_version": ["causal_asof_v1"],
+            }
+        ),
     )
 
     monkeypatch.setattr(prepare_nfl_week, "_count_roster_players", lambda season: 53)
@@ -109,6 +115,7 @@ def test_prepare_week_refreshes_history_roster_schedule_and_predictions(monkeypa
         "player_dim_updates": 40,
         "predictions": 1,
         "predicted_players": 1,
+        "model_versions": ["causal_asof_v1"],
         "kicked_off_teams": [],
     }
 
@@ -154,7 +161,7 @@ def test_prepare_week_reuses_existing_gsis_history_by_default(monkeypatch) -> No
         prepare_nfl_week,
         "predict_week",
         lambda season, week, roster_backed, exclude_teams: pd.DataFrame(
-            {"player_id": ["BUF_season_ready"]}
+            {"player_id": ["BUF_season_ready"], "model_version": ["causal_asof_v1"]}
         ),
     )
 
@@ -259,7 +266,7 @@ def test_prepare_week_after_first_kickoff_predicts_only_games_still_to_come(monk
         prepare_nfl_week,
         "predict_week",
         lambda season, week, roster_backed, exclude_teams: excluded.append(exclude_teams)
-        or pd.DataFrame({"player_id": ["BUF_j_allen"]}),
+        or pd.DataFrame({"player_id": ["BUF_j_allen"], "model_version": ["causal_asof_v1"]}),
     )
 
     result = prepare_nfl_week.prepare_week(2026, 3, history_seasons=[], refresh_history=False)

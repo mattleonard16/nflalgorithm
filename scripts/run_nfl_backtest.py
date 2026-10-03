@@ -64,15 +64,10 @@ DEFAULT_WEEKS = tuple(range(1, 19))
 
 
 def _import_weekly_model():
-    try:
-        from models.position_specific import weekly
-    except ImportError as exc:
-        raise SystemExit(
-            "The proprietary weekly model (models/position_specific/weekly.py) is "
-            f"not available here: {exc}. The backtest runner needs it; the harness "
-            "itself is tested in CI via tests/test_nfl_backtest.py."
-        ) from exc
-    return weekly
+    # The private weekly.py when installed, the public baseline otherwise.
+    from models.position_specific import weekly_implementation
+
+    return weekly_implementation()
 
 
 def _patch_for_backtest(weekly, model_dir: Path) -> None:
