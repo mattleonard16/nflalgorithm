@@ -582,6 +582,35 @@ def test_card_promotion_count_only_includes_target_week(job_db) -> None:
     assert fetchone("SELECT COUNT(*) FROM materialized_value_view") == (0,)
 
 
+def test_risk_and_agents_judge_the_staged_card_not_the_published_one(job_db) -> None:
+    from agents.risk_agent import RiskAgent
+    from risk_manager import run_risk_check
+
+    service = JobService()
+    service.create_pipeline_job(season=2026, week=1, source="scheduler")
+    claimed = service.claim_next("worker")
+    assert claimed is not None
+    _insert_staged_card(claimed)
+    # Last run's card, still published while this attempt is in flight.
+    execute(
+        """
+        INSERT INTO materialized_value_view (
+            season, week, player_id, event_id, team, market, sportsbook, line, price,
+            side, mu, sigma, p_win, edge_percentage, expected_roi, kelly_fraction,
+            stake, generated_at
+        ) VALUES (2026, 1, 'stale-player', 'event-1', 'BUF', 'rushing_yards', 'book',
+                  50.5, -110, 'over', 60.0, 15.0, 0.6, 0.08, 0.1, 0.02, 20.0, '2026-09-01')
+        """
+    )
+    run = {"run_id": claimed.run_id, "attempt": claimed.attempts}
+
+    assessed = run_risk_check(2026, 1, **run)
+    reports = RiskAgent(**run).analyze(2026, 1)
+
+    assert assessed["player_id"].tolist() == ["player-1"]
+    assert {r.player_id for r in reports} == {"player-1"}
+
+
 def test_cancellation_during_card_materialization_never_publishes(job_db) -> None:
     service = JobService()
     queued = service.create_pipeline_job(season=2026, week=1, source="scheduler")

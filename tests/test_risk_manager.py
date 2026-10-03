@@ -607,7 +607,7 @@ class TestRunRiskCheck:
              "event_id": "G1", "stake": 30.0, "kelly_fraction": 0.03,
              "p_win": 0.55, "price": -110},
         ])
-        monkeypatch.setattr(rm, "read_dataframe", lambda q, params=None: df)
+        monkeypatch.setattr("pipeline_jobs.cards.read_dataframe", lambda q, params=None: df)
         result = rm.run_risk_check(2025, 8)
         assert "risk_adjusted_kelly" in result.columns
         assert "correlation_group" in result.columns
@@ -617,7 +617,7 @@ class TestRunRiskCheck:
         import risk_manager as rm
 
         df = _make_value_df([{"sportsbook": b} for b in ("DraftKings", "FanDuel", "Bovada")])
-        monkeypatch.setattr(rm, "read_dataframe", lambda q, params=None: df)
+        monkeypatch.setattr("pipeline_jobs.cards.read_dataframe", lambda q, params=None: df)
 
         assert len(rm.run_risk_check(2025, 8)) == 1
 
@@ -625,7 +625,7 @@ class TestRunRiskCheck:
         import risk_manager as rm
 
         monkeypatch.setattr(
-            rm, "read_dataframe", lambda q, params=None: pd.DataFrame()
+            "pipeline_jobs.cards.read_dataframe", lambda q, params=None: pd.DataFrame()
         )
         assert rm.run_risk_check(2025, 8).empty
 
@@ -635,7 +635,7 @@ class TestRunRiskCheck:
         def boom(q, params=None):
             raise RuntimeError("db unavailable")
 
-        monkeypatch.setattr(rm, "read_dataframe", boom)
+        monkeypatch.setattr("pipeline_jobs.cards.read_dataframe", boom)
         assert rm.run_risk_check(2025, 8).empty
 
     def test_main_parses_args_and_dispatches(self, monkeypatch):

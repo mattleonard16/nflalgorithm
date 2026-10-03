@@ -70,6 +70,46 @@ def test_retry_safety_is_explicit_per_canonical_stage(monkeypatch) -> None:
     }
 
 
+def test_risk_and_agents_run_after_staging_and_read_that_attempts_card(monkeypatch) -> None:
+    monkeypatch.setenv("APP_COMMIT_SHA", "a" * 40)
+    captured: dict[str, Any] = {}
+    calls: dict[str, dict[str, Any]] = {}
+
+    def capture_stages(stages, **_kwargs):
+        captured.update({stage.name: stage for stage in stages})
+        return []
+
+    def fake_risk(season, week, **kwargs):
+        calls["risk"] = kwargs
+        return pd.DataFrame()
+
+    def fake_agents(season, week, **kwargs):
+        calls["agents"] = kwargs
+        return []
+
+    monkeypatch.setattr(production_runner, "run_stages", capture_stages)
+    monkeypatch.setattr(production_runner, "_persist_run_report", lambda report: None)
+    monkeypatch.setattr("risk_manager.run_risk_check", fake_risk)
+    monkeypatch.setattr("agents.coordinator.run_all_agents", fake_agents)
+
+    production_runner.run_production_pipeline(2026, 1, run_id="run-1", attempt=2)
+    captured["risk_assessment"].handler()
+    captured["agents"].handler()
+
+    assert list(captured) == [
+        "prepare_week",
+        "odds",
+        "value_ranking",
+        "materialize",
+        "risk_assessment",
+        "agents",
+    ]
+    assert calls == {
+        "risk": {"run_id": "run-1", "attempt": 2},
+        "agents": {"run_id": "run-1", "attempt": 2},
+    }
+
+
 def test_pipeline_always_runs_canonical_prepare_even_when_reusing_history(monkeypatch) -> None:
     monkeypatch.setenv("APP_COMMIT_SHA", "a" * 40)
     calls: list[tuple[str, object]] = []

@@ -617,9 +617,9 @@ class TestPersistDecisions:
         return matrix_database
 
     @staticmethod
-    def _decision(verdict: str) -> dict:
+    def _decision(verdict: str, player_id: str = "P001") -> dict:
         return {
-            "player_id": "P001",
+            "player_id": player_id,
             "market": "rushing_yards",
             "decision": verdict,
             "merged_confidence": 0.7,
@@ -637,6 +637,54 @@ class TestPersistDecisions:
         assert written == 1
         rows = read_dataframe("SELECT decision FROM agent_decisions")
         assert rows["decision"].tolist() == ["REJECTED"]
+
+    def test_a_full_rerun_drops_verdicts_for_bets_that_left_the_card(
+        self, decisions_database
+    ):
+        _persist_decisions(
+            [self._decision("APPROVED", "P001"), self._decision("APPROVED", "P002")], 2026, 1
+        )
+        _persist_decisions([self._decision("APPROVED", "P009")], 2026, 2)
+
+        _persist_decisions([self._decision("REJECTED", "P001")], 2026, 1, replace_week=True)
+
+        rows = read_dataframe(
+            "SELECT week, player_id, decision FROM agent_decisions ORDER BY week, player_id"
+        )
+        assert rows.values.tolist() == [[1, "P001", "REJECTED"], [2, "P009", "APPROVED"]]
+
+    def test_a_full_rerun_with_an_empty_card_clears_the_week(self, decisions_database):
+        _persist_decisions([self._decision("APPROVED")], 2026, 1)
+
+        _persist_decisions([], 2026, 1, replace_week=True)
+
+        assert read_dataframe("SELECT * FROM agent_decisions").empty
+
+    def test_a_single_player_run_keeps_the_rest_of_the_week(
+        self, decisions_database, monkeypatch
+    ):
+        _persist_decisions(
+            [self._decision("APPROVED", "P001"), self._decision("APPROVED", "P002")], 2026, 1
+        )
+        report = AgentReport(
+            agent_name="odds_agent",
+            recommendation="REJECT",
+            confidence=0.7,
+            rationale="test",
+            player_id="P001",
+            market="rushing_yards",
+        )
+        for name in ("OddsAgent", "ModelDiagnosticsAgent", "MarketBiasAgent", "RiskAgent"):
+            agent = MagicMock()
+            agent.analyze.return_value = [report] if name == "OddsAgent" else []
+            monkeypatch.setattr(f"agents.coordinator.{name}", lambda *a, _a=agent, **k: _a)
+
+        run_all_agents(2026, 1, player_id="P001")
+
+        rows = read_dataframe(
+            "SELECT player_id, decision FROM agent_decisions ORDER BY player_id"
+        )
+        assert rows.values.tolist() == [["P001", "REJECTED"], ["P002", "APPROVED"]]
 
 
 # ======================================================================

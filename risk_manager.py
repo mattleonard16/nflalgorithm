@@ -15,7 +15,6 @@ import pandas as pd
 
 from config import config
 from utils.best_line import best_line_per_bet
-from utils.db import read_dataframe
 from utils.risk_utils import (
     append_warning as _append_warning,
     monte_carlo_drawdown,
@@ -278,14 +277,22 @@ def assess_risk(df: pd.DataFrame, bankroll: Optional[float] = None) -> pd.DataFr
 
 # ── CLI entry point ───────────────────────────────────────────────────
 
-def run_risk_check(season: int, week: int) -> pd.DataFrame:
-    """Load materialized value view and print risk report."""
-    query = """
-    SELECT * FROM materialized_value_view
-    WHERE season = ? AND week = ?
+def run_risk_check(
+    season: int,
+    week: int,
+    *,
+    run_id: str | None = None,
+    attempt: int | None = None,
+) -> pd.DataFrame:
+    """Load the card and print risk report.
+
+    A durable run passes its run_id and attempt to assess the card it just
+    staged; without them this reads the published card.
     """
+    from pipeline_jobs.cards import load_card
+
     try:
-        df = read_dataframe(query, params=(season, week))
+        df = load_card(season, week, run_id=run_id, attempt=attempt)
     except Exception:
         print(f"No data for season={season} week={week}")
         return pd.DataFrame()

@@ -26,10 +26,20 @@ class BaseAgent(ABC):
     the agent has an opinion about.
     """
 
-    def __init__(self, name: str) -> None:
+    def __init__(
+        self,
+        name: str,
+        *,
+        run_id: str | None = None,
+        attempt: int | None = None,
+    ) -> None:
         self.name = name
         self.logger = logging.getLogger(f"agents.{name}")
         self.config = config
+        # Set for a durable run, so the agent judges the card that run staged
+        # rather than the one already published.
+        self.run_id = run_id
+        self.attempt = attempt
 
     @abstractmethod
     def analyze(
@@ -92,17 +102,17 @@ class BaseAgent(ABC):
         week: int,
         player_id: Optional[str] = None,
     ) -> pd.DataFrame:
-        """Load materialized value view from the database."""
-        query = (
-            "SELECT * FROM materialized_value_view "
-            "WHERE season = ? AND week = ?"
-        )
-        params: tuple = (season, week)
-        if player_id is not None:
-            query += " AND player_id = ?"
-            params = (season, week, player_id)
+        """Load this run's card: the staged one for a durable run, else the published one."""
+        from pipeline_jobs.cards import load_card
+
         try:
-            return read_dataframe(query, params=params)
+            return load_card(
+                season,
+                week,
+                run_id=self.run_id,
+                attempt=self.attempt,
+                player_id=player_id,
+            )
         except Exception as exc:
             self.logger.warning("Failed to load value view: %s", exc)
             return pd.DataFrame()

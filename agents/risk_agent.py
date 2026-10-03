@@ -22,8 +22,8 @@ from risk_manager import (
 class RiskAgent(BaseAgent):
     """Enforces exposure rules and reports correlation warnings."""
 
-    def __init__(self) -> None:
-        super().__init__("risk_agent")
+    def __init__(self, *, run_id: str | None = None, attempt: int | None = None) -> None:
+        super().__init__("risk_agent", run_id=run_id, attempt=attempt)
 
     def analyze(
         self,
