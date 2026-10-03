@@ -260,7 +260,6 @@ def _print_summary(report: dict) -> None:
 FEATURE_FLAGS = {
     "context_factors": "context_factors_enabled",
     "shortened_games": "shortened_games_enabled",
-    "out_redistribution": "out_redistribution_enabled",
 }
 
 
@@ -372,15 +371,6 @@ def main() -> None:
         help=(
             "pin config.features.shortened_games_enabled for this run; 'inherit' keeps "
             "whatever NFL_FEATURE_SHORTENED_GAMES resolved to (default off)"
-        ),
-    )
-    common.add_argument(
-        "--out-redistribution",
-        choices=("on", "off", "inherit"),
-        default="inherit",
-        help=(
-            "pin config.features.out_redistribution_enabled for this run; it acts on the "
-            "roster path only, so measure it with `replay`, not `run`"
         ),
     )
     common.add_argument("--output", type=Path, default=None)

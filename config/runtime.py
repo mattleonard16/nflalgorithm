@@ -153,10 +153,6 @@ features = SimpleNamespace(
     # (utils/nfl_availability.py). Default OFF until the walk-forward shows
     # lower yardage MAE with it on.
     shortened_games_enabled=env_flag("NFL_FEATURE_SHORTENED_GAMES"),
-    # Give a ruled-out player's targets and carries to teammates and start the
-    # backup QB (utils/nfl_availability.py). Default OFF until the 2025 replay
-    # shows lower yardage MAE with it on.
-    out_redistribution_enabled=env_flag("NFL_FEATURE_OUT_REDISTRIBUTION"),
 )
 
 config = SimpleNamespace(
