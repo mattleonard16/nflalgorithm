@@ -412,11 +412,11 @@ nfl-backtest:
 # Replay: like nfl-backtest, but predicts through the roster path with each week's injury report
 # and depth chart as of its first kickoff. It rewrites rosters and snapshots, so DATABASE must be a
 # scratch copy (sqlite3 nfl_data.db ".backup <scratch>"); it refuses nfl_data.db itself.
-# Usage: make nfl-replay SEASON=2025 DATABASE=/tmp/replay.db [WEEKS="5 6"] [LABEL=replay] [OUTPUT=...]
+# Usage: make nfl-replay SEASON=2025 DATABASE=/tmp/replay.db [WEEKS="5 6"] [LABEL=replay] [OUT_REDISTRIBUTION=on] [OUTPUT=...]
 nfl-replay:
 	@test -n "$(SEASON)" || { echo "SEASON is required, e.g. make nfl-replay SEASON=2025 DATABASE=/tmp/replay.db"; exit 1; }
 	@test -n "$(DATABASE)" || { echo "DATABASE is required: a scratch copy of nfl_data.db"; exit 1; }
-	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest replay --season $(SEASON) --database $(DATABASE) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(SHORTENED_GAMES)),--shortened-games $(SHORTENED_GAMES),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),) $(if $(strip $(ROWS_OUTPUT)),--rows-output $(ROWS_OUTPUT),)
+	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest replay --season $(SEASON) --database $(DATABASE) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(SHORTENED_GAMES)),--shortened-games $(SHORTENED_GAMES),) $(if $(strip $(OUT_REDISTRIBUTION)),--out-redistribution $(OUT_REDISTRIBUTION),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),) $(if $(strip $(ROWS_OUTPUT)),--rows-output $(ROWS_OUTPUT),)
 
 run-agents:
 	$(call require_season_week)

@@ -665,6 +665,53 @@ class TestTrainAndPredict:
 
         assert frame["player_id"].tolist() == ["BUF_out_last_week"]
 
+    def test_with_redistribution_on_a_ruled_out_receivers_targets_go_to_a_teammate(
+        self, tmp_db, monkeypatch
+    ):
+        history = _make_player_stats(n_players=2, n_weeks=2)
+        history["season"] = 2026
+        history["team"] = "BUF"
+        history["position"] = "WR"
+        history["player_id"] = history["player_id"].map({"P000": "BUF_out", "P001": "BUF_fill"})
+        history["gsis_id"] = history["player_id"].map({"BUF_out": "out", "BUF_fill": "fill"})
+        history["targets"] = history["player_id"].map({"BUF_out": 2.0, "BUF_fill": 4.0})
+        _insert_stats(tmp_db, history)
+        with sqlite3.connect(tmp_db) as conn:
+            conn.execute("""
+                INSERT INTO games
+                    (game_id, season, week, home_team, away_team, game_date)
+                VALUES ('2026_03_MIA_BUF', 2026, 3, 'BUF', 'MIA', '2026-09-24')
+                """)
+            for gsis_id, player_id, status in (
+                ("out", "BUF_out", "Out"),
+                ("fill", "BUF_fill", None),
+            ):
+                conn.execute(
+                    """
+                    INSERT INTO nfl_roster_players
+                        (season, gsis_id, player_id, player_name, team, position,
+                         roster_status, updated_at)
+                    VALUES (2026, ?, ?, ?, 'BUF', 'WR', 'ACT', 'now')
+                    """,
+                    (gsis_id, player_id, player_id),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO nfl_player_context_snapshots
+                        (season, week, gsis_id, player_id, team, position, injury_status,
+                         injury_report_week, expected_targets, prior_source, captured_at)
+                    VALUES (2026, 3, ?, ?, 'BUF', 'WR', ?, 3, 0, 'history', 'now')
+                    """,
+                    (gsis_id, player_id, status),
+                )
+        monkeypatch.setattr(config.features, "out_redistribution_enabled", True)
+
+        frame = _build_roster_week_data(2026, 3)
+
+        assert frame["player_id"].tolist() == ["BUF_fill"]
+        # 2 freed targets x 0.6 damping, all to the only other WR.
+        assert frame.iloc[0]["expected_targets"] == pytest.approx(4.0 + 1.2)
+
     def test_no_history_role_prior_generates_prediction_with_wider_uncertainty(self, monkeypatch):
         frame = pd.DataFrame(
             {
