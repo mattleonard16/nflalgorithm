@@ -135,7 +135,7 @@ def test_prepare_week_refreshes_history_when_unscoped_rows_remain(monkeypatch) -
         prepare_nfl_week,
         "predict_week",
         lambda season, week, roster_backed, exclude_teams: pd.DataFrame(
-            {"player_id": ["LAR_m_stafford"]}
+            {"player_id": ["LAR_m_stafford"], "model_version": ["causal_asof_v1"]}
         ),
     )
     monkeypatch.setattr(prepare_nfl_week, "_count_roster_players", lambda season: 53)

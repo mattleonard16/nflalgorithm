@@ -20,6 +20,8 @@ services:
         value: INFO
       - key: ENABLE_QUEUE_MONITOR
         value: "true"
+      - key: NFL_REQUIRE_PRIVATE_MODELS
+        value: "1"
       - key: ODDS_API_KEY
         sync: false
       - key: ALLOWED_ORIGINS

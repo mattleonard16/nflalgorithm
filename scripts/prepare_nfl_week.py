@@ -311,6 +311,8 @@ def prepare_week(
         "player_dim_updates": player_dim_updates,
         "predictions": len(predictions),
         "predicted_players": predicted_players,
+        # "public_baseline_ewma_v1" means the private model was not installed.
+        "model_versions": sorted(predictions["model_version"].astype(str).unique()),
         "kicked_off_teams": sorted(kicked_off_teams),
     }
 
