@@ -287,7 +287,8 @@ from tracked modules only.
 - Season ROI and win rate come from `utils/grading.settled_roi_pct` and `settled_win_rate_pct`:
   profit over settled bets, pushes left out. Do not average weekly `roi_pct` values.
 - The Wednesday `make week-auto` job runs from launchd in this checkout, on whatever branch is
-  checked out, and nothing alerts on failure. See the `week-auto` step in docs/OPERATIONS.md.
+  checked out. A failed step posts a macOS notification and every run writes
+  `logs/week_auto_status.json`. See the `week-auto` step in docs/OPERATIONS.md.
 - Use `make fullstack` for complete local development environment
 - Front-end dashboard is in `/frontend` (Next.js + TypeScript)
 - Legacy Streamlit dashboard available via `make dashboard`
