@@ -125,9 +125,15 @@ def _persist_decisions(
     decisions: List[Dict[str, Any]],
     season: int,
     week: int,
+    *,
+    replace_week: bool = False,
 ) -> int:
-    """Write decisions to the agent_decisions table. Returns row count."""
-    if not decisions:
+    """Write decisions to the agent_decisions table. Returns row count.
+
+    With ``replace_week`` the week's earlier verdicts go first, in the same
+    transaction, so a bet that left the card does not keep a stale verdict.
+    """
+    if not decisions and not replace_week:
         return 0
 
     now = datetime.now(timezone.utc).isoformat()
@@ -182,6 +188,12 @@ def _persist_decisions(
 
     try:
         with get_connection() as conn:
+            if replace_week:
+                execute(
+                    "DELETE FROM agent_decisions WHERE season = ? AND week = ?",
+                    (season, week),
+                    conn=conn,
+                )
             for row in rows:
                 execute(sql, row, conn=conn)
             conn.commit()
@@ -195,6 +207,9 @@ def run_all_agents(
     season: int,
     week: int,
     player_id: Optional[str] = None,
+    *,
+    run_id: Optional[str] = None,
+    attempt: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Run all agents, merge reports, resolve conflicts, persist results.
 
@@ -204,6 +219,9 @@ def run_all_agents(
     week : int
     player_id : str, optional
         Limit analysis to a single player.
+    run_id, attempt : optional
+        A durable run's attempt. Agents then judge the card it staged
+        instead of the published one.
 
     Returns
     -------
@@ -216,7 +234,7 @@ def run_all_agents(
         OddsAgent(),
         ModelDiagnosticsAgent(),
         MarketBiasAgent(),
-        RiskAgent(),
+        RiskAgent(run_id=run_id, attempt=attempt),
     ]
 
     all_reports: List[AgentReport] = []
@@ -237,18 +255,18 @@ def run_all_agents(
 
     if not all_reports:
         logger.warning("No agent reports produced for s=%d w=%d", season, week)
-        return []
-
-    grouped = _group_reports(all_reports)
 
     decisions: List[Dict[str, Any]] = []
-    for (pid, market), reports in grouped.items():
+    for (pid, market), reports in _group_reports(all_reports).items():
         consensus = _resolve_consensus(reports)
         consensus["player_id"] = pid
         consensus["market"] = market
         decisions.append(consensus)
 
-    persisted = _persist_decisions(decisions, season, week)
+    # A single-player run must not wipe the rest of the week's verdicts.
+    persisted = _persist_decisions(
+        decisions, season, week, replace_week=player_id is None
+    )
     logger.info(
         "Coordinator: %d decisions (%d approved, %d rejected), %d persisted",
         len(decisions),

@@ -4,9 +4,9 @@ NFL_STAGE_NAMES = (
     "prepare_week",
     "odds",
     "value_ranking",
+    "materialize",
     "risk_assessment",
     "agents",
-    "materialize",
 )
 
 NFL_STAGE_COUNT = len(NFL_STAGE_NAMES)

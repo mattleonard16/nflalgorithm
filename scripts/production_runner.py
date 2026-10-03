@@ -171,12 +171,18 @@ def stage_value_ranking(season: int, week: int) -> Dict[str, Any]:
         return {"status": "error", "stage": "value_ranking", "error": str(exc)}
 
 
-def stage_risk_assessment(season: int, week: int) -> Dict[str, Any]:
-    """Run risk checks on value opportunities."""
+def stage_risk_assessment(
+    season: int,
+    week: int,
+    *,
+    run_id: str | None = None,
+    attempt: int | None = None,
+) -> Dict[str, Any]:
+    """Run risk checks on this run's card."""
     try:
         from risk_manager import run_risk_check
 
-        assessed = run_risk_check(season, week)
+        assessed = run_risk_check(season, week, run_id=run_id, attempt=attempt)
         warnings = 0
         if not assessed.empty and "exposure_warning" in assessed.columns:
             warnings = int(assessed["exposure_warning"].notna().sum())
@@ -186,12 +192,18 @@ def stage_risk_assessment(season: int, week: int) -> Dict[str, Any]:
         return {"status": "error", "stage": "risk_assessment", "error": str(exc)}
 
 
-def stage_agents(season: int, week: int) -> Dict[str, Any]:
-    """Run agent coordinator for consensus decisions."""
+def stage_agents(
+    season: int,
+    week: int,
+    *,
+    run_id: str | None = None,
+    attempt: int | None = None,
+) -> Dict[str, Any]:
+    """Run agent coordinator for consensus decisions on this run's card."""
     try:
         from agents.coordinator import run_all_agents
 
-        decisions = run_all_agents(season, week)
+        decisions = run_all_agents(season, week, run_id=run_id, attempt=attempt)
         approved = sum(1 for d in decisions if d.get("decision") == "APPROVED")
         rejected = sum(1 for d in decisions if d.get("decision") == "REJECTED")
         return {
@@ -258,13 +270,19 @@ def stage_materialize(
 # ── Orchestrator ─────────────────────────────────────────────────────
 
 
+# Risk and agents judge the card, so they run after materialize stages it.
+# The worker publishes only after every stage passes, so a failure in either
+# still keeps the card off the dashboard.
 POST_PREPARE_STAGES = [
     ("odds", stage_odds),
     ("value_ranking", stage_value_ranking),
+    ("materialize", stage_materialize),
     ("risk_assessment", stage_risk_assessment),
     ("agents", stage_agents),
-    ("materialize", stage_materialize),
 ]
+
+# Stages that read or write this attempt's staged card.
+_CARD_STAGES = frozenset({"materialize", "risk_assessment", "agents"})
 
 
 def run_production_pipeline(
@@ -305,7 +323,7 @@ def run_production_pipeline(
                     week,
                     **(
                         {"run_id": run_id, "attempt": attempt}
-                        if stage_name == "materialize" and run_id is not None
+                        if stage_name in _CARD_STAGES and run_id is not None
                         else {}
                     ),
                 ),
