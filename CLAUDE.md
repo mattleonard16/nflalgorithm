@@ -449,10 +449,10 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 25. [RESOLVED] CI gate on per-position MAE — `check_position_mae` in
     `scripts/evaluate_nfl_projections.py`, exposed as the `mae-gate` subcommand and `make mae-gate`.
     Two ways to set the ceilings, and both survive in the merged code.
-    **Absolute (default)**: QB 65.0, RB 26.0, WR 29.0, TE 27.0 — each ~10% above that position's
-    worst single-week MAE in the 2025 walk-forward baseline (QB 59.5, RB 24.0, WR 26.0, TE 24.6
-    from `reports/nfl_backtest_2025_baseline_rows.csv`), so a normal bad week passes and a broken
-    model trips the gate. The original guessed ceilings (QB 18/RB 12/WR 12/TE 9) predated any
+    **Absolute (default)**: QB 64.0, RB 26.0, WR 29.0, TE 26.0 — each ~10% above that position's
+    worst single-week MAE in the 2025 walk-forward with context factors off (QB 58.2, RB 23.4,
+    WR 26.2, TE 23.9 from `reports/nfl_backtest_2025_current_off_rows.csv`, re-derived
+    2026-10-02), so a normal bad week passes and a broken model trips the gate. The original guessed ceilings (QB 18/RB 12/WR 12/TE 9) predated any
     measurement and would have failed every position on real data; they are gone.
     **Regression mode (optional)**: `make mae-gate SEASON=2026 WEEK=1 BASELINE=<walk-forward
     report> [TOLERANCE_PCT=10]` derives each ceiling from that baseline's per-position MAE plus the
