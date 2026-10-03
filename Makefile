@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto week-auto-refresh install-week-refresh db-analyze nfl-backtest production-run health
+.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto week-auto-refresh install-week-refresh db-analyze nfl-backtest nfl-replay production-run health
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -408,6 +408,15 @@ backfill-accuracy:
 nfl-backtest:
 	@test -n "$(SEASON)" || { echo "SEASON is required, e.g. make nfl-backtest SEASON=2025"; exit 1; }
 	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest run --season $(SEASON) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(SHORTENED_GAMES)),--shortened-games $(SHORTENED_GAMES),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),) $(if $(strip $(ROWS_OUTPUT)),--rows-output $(ROWS_OUTPUT),)
+
+# Replay: like nfl-backtest, but predicts through the roster path with each week's injury report
+# and depth chart as of its first kickoff. It rewrites rosters and snapshots, so DATABASE must be a
+# scratch copy (sqlite3 nfl_data.db ".backup <scratch>"); it refuses nfl_data.db itself.
+# Usage: make nfl-replay SEASON=2025 DATABASE=/tmp/replay.db [WEEKS="5 6"] [LABEL=replay] [OUTPUT=...]
+nfl-replay:
+	@test -n "$(SEASON)" || { echo "SEASON is required, e.g. make nfl-replay SEASON=2025 DATABASE=/tmp/replay.db"; exit 1; }
+	@test -n "$(DATABASE)" || { echo "DATABASE is required: a scratch copy of nfl_data.db"; exit 1; }
+	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest replay --season $(SEASON) --database $(DATABASE) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(SHORTENED_GAMES)),--shortened-games $(SHORTENED_GAMES),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),) $(if $(strip $(ROWS_OUTPUT)),--rows-output $(ROWS_OUTPUT),)
 
 run-agents:
 	$(call require_season_week)
