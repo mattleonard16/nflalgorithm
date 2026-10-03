@@ -407,7 +407,7 @@ backfill-accuracy:
 # Usage: make nfl-backtest SEASON=2025 [WEEKS="5 6 7"] [LABEL=baseline] [CONTEXT_FACTORS=on] [OUTPUT=logs/metrics/nfl-backtest-2025-ctx.json]
 nfl-backtest:
 	@test -n "$(SEASON)" || { echo "SEASON is required, e.g. make nfl-backtest SEASON=2025"; exit 1; }
-	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest run --season $(SEASON) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),)
+	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest run --season $(SEASON) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),) $(if $(strip $(ROWS_OUTPUT)),--rows-output $(ROWS_OUTPUT),)
 
 run-agents:
 	$(call require_season_week)
