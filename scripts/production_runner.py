@@ -151,7 +151,7 @@ def stage_odds(season: int, week: int) -> Dict[str, Any]:
 def stage_value_ranking(season: int, week: int) -> Dict[str, Any]:
     """Rank value opportunities with confidence scoring."""
     try:
-        from value_betting_engine import rank_weekly_value
+        from utils.value_ranking import rank_weekly_value
 
         from confidence_engine import score_plays
 

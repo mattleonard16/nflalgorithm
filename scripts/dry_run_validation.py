@@ -24,7 +24,7 @@ from risk_manager import assess_risk
 from utils.db import read_dataframe
 from utils.nfl_markets import MARKET_TO_STAT, prob_over
 from utils.odds_math import implied_probability
-from value_betting_engine import rank_weekly_value
+from utils.value_ranking import rank_weekly_value
 
 logger = logging.getLogger(__name__)
 

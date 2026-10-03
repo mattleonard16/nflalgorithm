@@ -123,12 +123,12 @@ def test_stale_api_visibility_contract_blocks_startup(tmp_path) -> None:
     assert "publication-safe-v1" in (diagnostic.action or "")
 
 
-def test_missing_private_modules_explain_read_only_mode(tmp_path) -> None:
+def test_missing_private_modules_say_the_public_baseline_runs_instead(tmp_path) -> None:
     diagnostic = check_private_modules(tmp_path, required=False)
 
     assert diagnostic.status == "warn"
     assert "Private NFL execution modules are unavailable" in diagnostic.message
-    assert "API read-only features" in (diagnostic.action or "")
+    assert "public baseline" in diagnostic.message
 
 
 def test_pregame_readiness_requires_schedule_roster_and_history() -> None:
