@@ -227,6 +227,47 @@ class TestExposureCaps:
 
 class TestNormalizePortfolioStakes:
 
+    def test_a_bet_priced_at_five_books_counts_once_toward_the_cap(self):
+        # 2026 week 1: the cap summed every book's row, so best-line stakes
+        # were scaled down to 230.81 of a 1000 bankroll.
+        books = ["BookA", "BookB", "BookC", "BookD", "BookE"]
+        df = _make_value_df([
+            {"player_id": f"P{i}", "sportsbook": book, "stake": 100.0}
+            for i in range(4)
+            for book in books
+        ])
+
+        result = normalize_portfolio_stakes(df, bankroll=1000.0)
+
+        assert result["stake"].tolist() == df["stake"].tolist()
+
+    def test_best_line_stakes_over_the_bankroll_scale_to_it(self):
+        df = _make_value_df([
+            {"player_id": f"P{i}", "sportsbook": book, "stake": 200.0,
+             "edge_percentage": edge}
+            for i in range(8)
+            for book, edge in (("BookA", 0.12), ("BookB", 0.10))
+        ])
+
+        result = normalize_portfolio_stakes(df, bankroll=1000.0)
+
+        best = result[result["sportsbook"] == "BookA"]
+        assert best["stake"].sum() == pytest.approx(1000.0)
+
+    def test_scaling_keeps_each_bets_stakes_in_proportion_across_books(self):
+        df = _make_value_df([
+            {"player_id": f"P{i}", "sportsbook": book, "stake": stake,
+             "edge_percentage": edge}
+            for i in range(10)
+            for book, stake, edge in (("BookA", 150.0, 0.12), ("BookB", 120.0, 0.09))
+        ])
+
+        result = normalize_portfolio_stakes(df, bankroll=1000.0)
+
+        ratio = result["stake"] / df["stake"]
+        assert np.allclose(ratio, ratio.iloc[0])
+        assert ratio.iloc[0] == pytest.approx(1000.0 / 1500.0)
+
     def test_scales_proportionally_when_capped_bets_exceed_bankroll(self):
         """Per-bet capped stakes (10% each) can still sum past the bankroll."""
         df = _make_value_df([

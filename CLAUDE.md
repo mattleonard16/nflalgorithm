@@ -281,9 +281,9 @@ from tracked modules only.
 - `materialized_value_view` has one row per sportsbook for each (player, market, side). Anything
   that counts, stakes, grades, or votes on bets goes through `utils/best_line.best_line_per_bet`
   first, or a bet priced at five books counts five times. Grading, the API panels, the risk
-  agent, and `make risk-check` already do. The portfolio stake cap in
-  `materialized_value_view.materialize_week` does not yet: it caps the sum over every book's row,
-  so on the 2026 week 1 card the best-line stakes total 230.81 of a 1000 bankroll.
+  agent, `make risk-check`, and the portfolio stake cap
+  (`risk_manager.normalize_portfolio_stakes`) already do. Before 2026-10-02 the cap summed every
+  book's row, which scaled the 2026 week 1 best-line stakes down to 230.81 of a 1000 bankroll.
 - Season ROI and win rate come from `utils/grading.settled_roi_pct` and `settled_win_rate_pct`:
   profit over settled bets, pushes left out. Do not average weekly `roi_pct` values.
 - The Wednesday `make week-auto` job runs from launchd in this checkout, on whatever branch is

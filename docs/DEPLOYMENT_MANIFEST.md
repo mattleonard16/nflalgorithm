@@ -30,7 +30,7 @@ the private half is missing, so start there.
 | Fix | Tracked (in git) | Local-only (NOT in git) | Effect if the private half is missing |
 |---|---|---|---|
 | Kelly cap default | `config/runtime.py` default `True` | `config.py:193` `_flag("NFL_FEATURE_KELLY_CAP", True)` | `config.py` wins at runtime. An older copy defaults **False**, so per-bet Kelly capping is **off** and full-Kelly fractions (measured up to 0.743) size the bets. |
-| Portfolio stake cap | `risk_manager.normalize_portfolio_stakes`, called from `materialized_value_view.py:105` | — (fully tracked) | None. This one is safe. |
+| Portfolio stake cap | `risk_manager.normalize_portfolio_stakes`, called from `materialized_value_view.materialize_week`; counts each bet once at its best line | none (fully tracked) | None. This one is safe. |
 | Position-keyed sigma | `utils/nfl_sigma.py` | `weekly.py:977` passes `position=position` | Falls back to the `(market, None)` legacy floors. Dispersion silently reverts to the old miscalibrated values (WR/TE rushing ~2.5x too wide). |
 | Live-odds stale filter | `utils/live_odds.py` | `value_betting_engine.rank_weekly_value` | Ranking takes SQL `MAX(as_of)` and can price an in-game quote. |
 | Market-mean blend | `utils/market_blend.py`, `config/runtime.py` (`betting.market_blend_weight`) | `value_betting_engine.rank_weekly_value` | Prices off the raw model `mu`, so a projection far from the line reads as a large edge. Measured on the 2026 W1 slate: 118 flagged bets at 19.3% average edge instead of 68 at 14.1%. |
