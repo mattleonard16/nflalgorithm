@@ -14,6 +14,9 @@ from typing import Any, Mapping
 from sports.nfl import INACTIVE_ROSTER_STATUSES, MARKET_MIN_EXPECTED_VOLUME
 
 OUT_INJURY_STATUSES = frozenset({"OUT", "IR", "DOUBTFUL"})
+# Statuses that mean the player will not play. Doubtful is left out: props void
+# when a player sits, so an if-he-plays projection stays valid for him.
+RULED_OUT_STATUSES = frozenset({"OUT", "IR", "INJURED RESERVE"})
 
 
 def _text(value: Any) -> str:
@@ -40,6 +43,19 @@ def _depth(value: Any) -> int | None:
     if number is None:
         return None
     return int(number)
+
+
+def ruled_out(row: Mapping[str, Any], target_week: int) -> bool:
+    """Return True when the target week's own injury report rules the player out.
+
+    A status carried forward from an earlier week's report does not count: the
+    Wednesday run comes before clubs file, and a player back at practice would
+    lose his projection until the next run.
+    """
+    if _text(row.get("injury_status")) not in RULED_OUT_STATUSES:
+        return False
+    report_week = _number(row.get("injury_report_week"))
+    return report_week is not None and int(report_week) == target_week
 
 
 def likely_to_play(row: Mapping[str, Any], market: str) -> bool:
