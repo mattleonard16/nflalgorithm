@@ -298,7 +298,7 @@ def test_position_gate_blocks_position_above_threshold() -> None:
     gate = check_position_mae(report)
 
     assert gate["passed"] is False
-    assert "TE MAE 30.25 exceeds threshold 27.00 over 70 projections" in gate["blockers"]
+    assert "TE MAE 30.25 exceeds threshold 26.00 over 70 projections" in gate["blockers"]
 
 
 def test_position_gate_skips_thin_samples_without_passing_them() -> None:
