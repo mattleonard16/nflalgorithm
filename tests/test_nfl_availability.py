@@ -1,7 +1,13 @@
 import pandas as pd
 import pytest
 
-from utils.nfl_availability import masked_lagged_ewm, shortened_game_mask
+from utils.nfl_availability import (
+    MAX_VOLUME_MULTIPLIER,
+    masked_lagged_ewm,
+    promote_backup_qbs,
+    redistribute_out_volume,
+    shortened_game_mask,
+)
 
 
 def _games(shares: list[float], player: str = "qb") -> pd.DataFrame:
@@ -65,3 +71,76 @@ def test_with_nothing_flagged_the_average_matches_the_plain_lagged_ewm() -> None
     plain = values.shift(1).ewm(span=3, min_periods=1).mean()
 
     pd.testing.assert_series_equal(masked, plain, check_names=False)
+
+
+def _receivers() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "team": ["BUF", "BUF", "BUF", "BUF", "MIA"],
+            "position": ["WR", "WR", "WR", "TE", "WR"],
+            "expected_targets": [4.0, 6.0, 2.0, 4.0, 7.0],
+        }
+    )
+
+
+def test_an_out_receivers_targets_go_to_teammates_by_share() -> None:
+    out = pd.Series([True, False, False, False, False])
+
+    result = redistribute_out_volume(_receivers(), out)
+
+    # 4 freed x 0.6 damping = 2.4, split 6:2 between the two active WRs.
+    assert result["expected_targets"].tolist()[1:3] == pytest.approx([6.0 + 1.8, 2.0 + 0.6])
+
+
+def test_no_teammate_rises_past_the_cap() -> None:
+    frame = pd.DataFrame(
+        {"team": ["BUF", "BUF"], "position": ["WR", "WR"], "expected_targets": [10.0, 2.0]}
+    )
+
+    result = redistribute_out_volume(frame, pd.Series([True, False]))
+
+    assert result["expected_targets"].iloc[1] == pytest.approx(2.0 * MAX_VOLUME_MULTIPLIER)
+
+
+def test_a_team_with_nobody_out_is_unchanged() -> None:
+    frame = _receivers()
+
+    result = redistribute_out_volume(frame, pd.Series([False] * len(frame)))
+
+    pd.testing.assert_frame_equal(result, frame)
+
+
+def test_volume_stays_within_the_team_and_position() -> None:
+    out = pd.Series([True, False, False, False, False])
+
+    result = redistribute_out_volume(_receivers(), out)
+
+    assert result["expected_targets"].tolist()[3:] == [4.0, 7.0]
+
+
+def _quarterbacks(starter_status: str) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "team": ["BUF", "BUF"],
+            "position": ["QB", "QB"],
+            "depth_rank": [1, 2],
+            "injury_status": [starter_status, None],
+            "expected_passing_attempts": [33.0, 4.0],
+        }
+    )
+
+
+def test_the_backup_qb_starts_when_the_starter_is_out() -> None:
+    frame = _quarterbacks("Out")
+
+    result = promote_backup_qbs(frame, pd.Series([True, False]))
+
+    assert result["p_start"].tolist() == [0.0, 1.0]
+    assert result["expected_passing_attempts"].iloc[1] == pytest.approx(33.0)
+
+
+def test_the_backup_qb_stays_a_backup_when_the_starter_plays() -> None:
+    result = promote_backup_qbs(_quarterbacks("Questionable"), pd.Series([False, False]))
+
+    assert result["p_start"].tolist() == [0.75, 0.02]
+    assert result["expected_passing_attempts"].iloc[1] == pytest.approx(4.0)
