@@ -20,6 +20,15 @@ git verifies them and nothing here needs to.
 
 ---
 
+## A missing private module no longer crashes
+
+Since 2026-10-03 a clone without `weekly.py` or `value_betting_engine.py` runs the tracked public
+baselines (`models/position_specific/baseline.py`, `utils/value_ranking.py`) instead of failing.
+That suits contributors and is wrong for production. **Every deployment must set
+`NFL_REQUIRE_PRIVATE_MODELS=1`**, which turns a missing private file back into a failed run.
+`render.yaml` sets it. To check a run used the real model, read `model_versions` in the
+`prepare_week` summary: `public_baseline_ewma_v1` means the private model was not loaded.
+
 ## Why this matters
 
 Most fixes below are **split across the git boundary**. The tracked half is committed; the wiring
