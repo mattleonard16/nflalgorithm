@@ -153,8 +153,9 @@ Verify: `command grep -n "kickoffs_from_games" scripts/record_outcomes.py` retur
 ### Context factors (`NFL_FEATURE_CONTEXT_FACTORS`) — added 2026-09-02, NOT yet verified on a production checkout
 
 Tracked: `utils/context_factors.py`, `config/runtime.py` (`features.context_factors_enabled`, default
-OFF). The Wednesday cron (`make week-auto`) sets `NFL_FEATURE_CONTEXT_FACTORS=1`, so the private
-half must exist for that to do anything:
+OFF). Since 2026-10-02 the Wednesday cron no longer sets `NFL_FEATURE_CONTEXT_FACTORS=1`, because
+the 2025 walk-forward measured higher yardage MAE with it on. The private half below must still
+exist for a backtest with the flag on to measure anything:
 
 - `config.py` mirrors the flag:
   `context_factors_enabled=_flag("NFL_FEATURE_CONTEXT_FACTORS", False)`.

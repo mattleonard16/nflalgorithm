@@ -378,7 +378,7 @@ week-research:
 	$(DB_ENV) $(PYTHON) -m scripts.weekly_research --season $(SEASON) --week $(WEEK)
 
 # The Wednesday cron entrypoint: resolve the upcoming week from the schedule,
-# refresh data and projections (with context factors on), publish internal
+# refresh data and projections (context factors off), publish internal
 # lines, then grade the completed week and write its research memo. Grading
 # and research degrade to a warning so a results hiccup never blocks the
 # new week's lines.

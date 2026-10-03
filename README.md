@@ -293,8 +293,9 @@ markets, and the full NBA pipeline.
 
 Shipped but not yet validated on real data:
 
-- Game-script and usage-trend multipliers (`utils/context_factors.py`), live behind
-  `NFL_FEATURE_CONTEXT_FACTORS` with no backtest measuring them yet.
+- Game-script and usage-trend multipliers (`utils/context_factors.py`) behind
+  `NFL_FEATURE_CONTEXT_FACTORS`. The 2025 walk-forward measured them raising yardage MAE, so they
+  are off everywhere, the weekly job included.
 - Receptions and anytime touchdown, which no backtest has covered.
 - The market-mean blend in `utils/market_blend.py`, tested but not wired into the ranking path.
 

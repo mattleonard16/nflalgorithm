@@ -368,8 +368,8 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     `weekly.py`, priced (Poisson for anytime TD) in `value_betting_engine.py`, and graded in
     `utils/nfl_markets.py` / `scripts/record_outcomes.py`. Separately, `utils/context_factors.py`
     consumes `spread_line`/`total_line` as a game-script multiplier behind
-    `NFL_FEATURE_CONTEXT_FACTORS` (`config/runtime.py:151`, set by `week-auto`) — see item 31 for
-    its validation status. Still unused: FTN charting; pbp EPA.
+    `NFL_FEATURE_CONTEXT_FACTORS` (`config/runtime.py:151`, off in `week-auto`) — see item 31 for
+    its validation result. Still unused: FTN charting; pbp EPA.
 13. [RESOLVED] Kelly cap in ranking path — enforced at both levels. Per-bet: gitignored
     `value_betting_engine.py:273` caps at `config.betting.max_kelly` (0.10) behind
     `config.features.kelly_cap_enabled` (`NFL_FEATURE_KELLY_CAP`, default ON per
@@ -471,16 +471,15 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 30. [RESOLVED] `materialized_value_view` ranking index — composite `(season, week, edge_percentage)` on `idx_materialized_value_view_lookup`, created on both the SQLite and MySQL branches of `_ensure_indexes`. It supersedes the former `(season, week)` index.
 
 ### Season-start checks (added 2026-09-02)
-31. **Context factors are unvalidated but switched on by the cron.** `utils/context_factors.py`
-    (game script, matchup history, usage trend; composite clipped to [0.85, 1.15]) was committed
-    with its flag defaulting OFF "until a walk-forward backtest validates it" — but `make week-auto`
-    sets `NFL_FEATURE_CONTEXT_FACTORS=1` unconditionally. No backtest has measured it. Run, on the
-    machine that has the private model:
-    `make nfl-backtest SEASON=2025 CONTEXT_FACTORS=off OUTPUT=logs/metrics/bt-2025-off.json` and
-    the same with `CONTEXT_FACTORS=on LABEL=ctx OUTPUT=logs/metrics/bt-2025-on.json`, then
-    `uv run python -m scripts.run_nfl_backtest compare logs/metrics/bt-2025-off.json
-    logs/metrics/bt-2025-on.json`. If MAE does not improve, drop the `NFL_FEATURE_CONTEXT_FACTORS=1`
-    from `week-auto`. The `--off` report is also the `BASELINE` for item 25's gate.
+31. [RESOLVED 2026-10-02, context factors stay off] `utils/context_factors.py` (game script,
+    matchup history, usage trend; composite clipped to [0.85, 1.15]) was switched on by
+    `week-auto` with no backtest behind it. The 2025 walk-forward, 18 weeks and 12,417 rows each
+    way, says it hurts. With it on, passing_yards MAE went 66.28 to 67.83, receiving_yards 21.02 to
+    21.25, and rushing_yards 21.67 to 21.94. Receptions and anytime touchdown did not move.
+    `scripts/week_auto.py` no longer sets the flag. Reports (local only; `reports/` is gitignored):
+    `reports/nfl_backtest_2025_current_off.json`, `reports/nfl_backtest_2025_current_on.json`, and
+    `reports/nfl_backtest_2025_context_factors_compare.json`. The off report is the `BASELINE` for
+    item 25's gate.
 32. **The private wiring for context factors is not in `docs/DEPLOYMENT_MANIFEST.md`'s verified
     set.** What the tracked code expects of `weekly.py` is recorded there now; verify it on the
     production checkout before week 1.

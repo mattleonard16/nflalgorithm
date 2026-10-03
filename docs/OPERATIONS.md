@@ -67,16 +67,17 @@ needs the private modules and real data.
 1. `make migrate && make doctor` — 47 tables, WAL on, no `[FAIL]` rows. `private_modules`
    must PASS here, unlike on a tracked-only clone.
 2. Confirm the private wiring listed in `docs/DEPLOYMENT_MANIFEST.md`, especially the
-   context-factors section (added 2026-09-02, unverified) — the cron turns that flag on.
+   rows for the ruled-out drop and the two default-off flags.
 3. `make ingest-nfl NFL_SEASONS=2024,2025 THROUGH_WEEK=22` then
    `make doctor-preseason SEASON=2026 WEEK=1`.
-4. Validate context factors before the cron uses them (CLAUDE.md item 31):
+4. Context factors are off in `week-auto` since 2026-10-02 (CLAUDE.md item 31). To re-test them
+   after a model change:
    ```bash
    make nfl-backtest SEASON=2025 CONTEXT_FACTORS=off OUTPUT=logs/metrics/bt-2025-off.json
    make nfl-backtest SEASON=2025 CONTEXT_FACTORS=on LABEL=ctx OUTPUT=logs/metrics/bt-2025-on.json
    uv run python -m scripts.run_nfl_backtest compare logs/metrics/bt-2025-off.json logs/metrics/bt-2025-on.json
    ```
-   No improvement means remove `NFL_FEATURE_CONTEXT_FACTORS=1` from `week-auto` before Wednesday.
+   Turn them back on in `scripts/week_auto.py` only if yardage MAE drops.
 5. `make week-refresh SEASON=2026 WEEK=1` and `make doctor-season SEASON=2026 WEEK=1`.
 6. After week 1 results land, pull the actuals and then grade:
    ```bash
