@@ -15,12 +15,14 @@ import logging
 
 # Add project root to path
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Sequence
 
 import nflreadpy as nfl
 import pandas as pd
+import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -154,7 +156,7 @@ def _load_nflverse_by_season(
     optional_missing = set(optional_missing_seasons)
     for season in dict.fromkeys(seasons):
         try:
-            frame = loader([season]).to_pandas()
+            frame = _load_season_with_retry(loader, season, dataset_name)
         except Exception as exc:
             missing_optional_feed = season in optional_missing and _is_missing_feed_error(exc)
             if suppress_errors or missing_optional_feed:
@@ -170,6 +172,67 @@ def _load_nflverse_by_season(
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True, sort=False)
+
+
+DOWNLOAD_ATTEMPTS = 3
+DOWNLOAD_RETRY_BASE_SECONDS = 2.0
+_TRANSIENT_REQUEST_ERRORS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
+
+
+def _load_season_with_retry(
+    loader: Callable[[List[int]], Any], season: int, dataset_name: str
+) -> pd.DataFrame:
+    """Load one season, retrying a dropped connection, timeout, or server error.
+
+    nflreadpy makes a single request with no retry, and one connection reset on a
+    history file killed the 2026-09-30 Wednesday run. After the last attempt the
+    original error is raised, so history still fails loud.
+    """
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        try:
+            return loader([season]).to_pandas()
+        except Exception as exc:
+            if attempt == DOWNLOAD_ATTEMPTS or not _is_transient_download_error(exc):
+                raise
+            delay = DOWNLOAD_RETRY_BASE_SECONDS * 2 ** (attempt - 1)
+            logger.warning(
+                "Download of %s for %s failed (%s); retrying in %.0fs (attempt %d of %d)",
+                dataset_name,
+                season,
+                type(exc).__name__,
+                delay,
+                attempt + 1,
+                DOWNLOAD_ATTEMPTS,
+            )
+            time.sleep(delay)
+    raise AssertionError("unreachable")
+
+
+def _is_transient_download_error(exc: Exception) -> bool:
+    """Return whether a download failed in a way that a retry can fix.
+
+    nflreadpy wraps every requests failure in the builtin ConnectionError, a 404
+    included, so the cause decides. A missing feed is never transient.
+    """
+    if _is_missing_feed_error(exc):
+        return False
+    saw_request_error = False
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, _TRANSIENT_REQUEST_ERRORS):
+            return True
+        if isinstance(current, requests.exceptions.RequestException):
+            saw_request_error = True
+            status = getattr(getattr(current, "response", None), "status_code", None)
+            if status is not None and (status == 429 or status >= 500):
+                return True
+        current = current.__cause__
+    # A bare reset or refused connection that never went through requests.
+    return not saw_request_error and isinstance(exc, ConnectionError)
 
 
 def _is_missing_feed_error(exc: Exception) -> bool:
