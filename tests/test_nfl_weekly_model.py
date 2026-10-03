@@ -217,17 +217,6 @@ class TestEngineerRollingFeatures:
 
         assert result.loc[2, "expected_target_share"] == pytest.approx(0.42)
 
-    def test_a_game_left_early_is_skipped_when_the_flag_is_on(self, monkeypatch):
-        df = _make_player_stats(n_players=1, n_weeks=6)
-        df["snap_percentage"] = [100.0, 100.0, 100.0, 100.0, 10.0, 100.0]
-        df["targets"] = [8.0, 8.0, 8.0, 8.0, 1.0, 8.0]
-        monkeypatch.setattr(config.features, "shortened_games_enabled", True)
-
-        result = _engineer_rolling_features(df, "receiving_yards").set_index("week")
-
-        assert result.loc[6, "targets_last3_avg"] == pytest.approx(8.0)
-        assert result.loc[6, "expected_targets"] == pytest.approx(8.0)
-
     def test_missing_stat_col_filled_with_zero(self):
         """If a stat column is absent from the input, it should be added as zeros."""
         df = _make_player_stats(n_players=1, n_weeks=4)

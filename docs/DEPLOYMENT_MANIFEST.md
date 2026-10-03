@@ -38,7 +38,6 @@ the private half is missing, so start there.
 | Early-season 70/30 role prior | `utils/season_priors.py` | `weekly.py` `_engineer_rolling_features` and `get_nfl_feature_cols` | Week 1 expected_* stays last-6 EWM; last_season_*_pg features are missing so a restored private weekly.py ignores the new helper. |
 | Late-week refresh | `scripts/prepare_nfl_week.py` passes `exclude_teams` | `weekly.predict_week` and `_write_predictions` | Loud, not silent. Every `prepare_week` call fails with `TypeError: predict_week() got an unexpected keyword argument 'exclude_teams'`, so no week gets projections. |
 | Out players get no projection | `utils/slate_eligibility.ruled_out`; `injury_report_week` on `nfl_player_context_snapshots` | `weekly._build_roster_week_data` selects `injury_report_week` and drops rows where `ruled_out(row, week)` holds | A player ruled Out on this week's report keeps a projection, because the history `max()` restores the volume that ingest zeroed. His bets still price and publish. |
-| Shortened-game discount (flag `NFL_FEATURE_SHORTENED_GAMES`, default off) | `utils/nfl_availability.py`; `config/runtime.py` flag; `--shortened-games` in `scripts/run_nfl_backtest.py` | `weekly._engineer_rolling_features` uses `masked_lagged_ewm` and `_build_roster_week_data` drops flagged games before the role EWM, both only when the flag is on | The flag does nothing. Off is the default, so a missing private half changes nothing today. |
 
 ## Required state of each private module
 

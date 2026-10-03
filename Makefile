@@ -404,10 +404,10 @@ backfill-accuracy:
 # CONTEXT_FACTORS=on|off pins the context-factors flag for the run (default:
 # inherit the environment, which is off); OUTPUT saves the report JSON, which
 # is what `compare` and `make mae-gate BASELINE=...` consume.
-# Usage: make nfl-backtest SEASON=2025 [WEEKS="5 6 7"] [LABEL=baseline] [CONTEXT_FACTORS=on] [SHORTENED_GAMES=on] [OUTPUT=logs/metrics/nfl-backtest-2025-ctx.json]
+# Usage: make nfl-backtest SEASON=2025 [WEEKS="5 6 7"] [LABEL=baseline] [CONTEXT_FACTORS=on] [OUTPUT=logs/metrics/nfl-backtest-2025-ctx.json]
 nfl-backtest:
 	@test -n "$(SEASON)" || { echo "SEASON is required, e.g. make nfl-backtest SEASON=2025"; exit 1; }
-	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest run --season $(SEASON) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(SHORTENED_GAMES)),--shortened-games $(SHORTENED_GAMES),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),) $(if $(strip $(ROWS_OUTPUT)),--rows-output $(ROWS_OUTPUT),)
+	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest run --season $(SEASON) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),) $(if $(strip $(ROWS_OUTPUT)),--rows-output $(ROWS_OUTPUT),)
 
 # Replay: like nfl-backtest, but predicts through the roster path with each week's injury report
 # and depth chart as of its first kickoff. It rewrites rosters and snapshots, so DATABASE must be a
@@ -416,7 +416,7 @@ nfl-backtest:
 nfl-replay:
 	@test -n "$(SEASON)" || { echo "SEASON is required, e.g. make nfl-replay SEASON=2025 DATABASE=/tmp/replay.db"; exit 1; }
 	@test -n "$(DATABASE)" || { echo "DATABASE is required: a scratch copy of nfl_data.db"; exit 1; }
-	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest replay --season $(SEASON) --database $(DATABASE) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(SHORTENED_GAMES)),--shortened-games $(SHORTENED_GAMES),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),) $(if $(strip $(ROWS_OUTPUT)),--rows-output $(ROWS_OUTPUT),)
+	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest replay --season $(SEASON) --database $(DATABASE) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),) $(if $(strip $(ROWS_OUTPUT)),--rows-output $(ROWS_OUTPUT),)
 
 run-agents:
 	$(call require_season_week)
