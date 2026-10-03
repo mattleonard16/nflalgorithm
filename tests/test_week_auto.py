@@ -87,7 +87,12 @@ def test_a_broken_notifier_does_not_change_the_exit_code(tmp_path) -> None:
     assert exit_code == 2
 
 
-def test_prediction_runs_with_context_factors_on_and_the_target_week(tmp_path) -> None:
+def test_prediction_runs_for_the_target_week_with_context_factors_off(
+    tmp_path, monkeypatch
+) -> None:
+    # The 2025 walk-forward raised yardage MAE with context factors on, so
+    # the job must not switch them on.
+    monkeypatch.delenv("NFL_FEATURE_CONTEXT_FACTORS", raising=False)
     calls: list[tuple[list[str], dict[str, str]]] = []
 
     def record(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess:
@@ -100,7 +105,7 @@ def test_prediction_runs_with_context_factors_on_and_the_target_week(tmp_path) -
 
     argv, env = next(call for call in calls if call[0][1] == "week-predict")
     assert argv[2:] == ["SEASON=2026", "WEEK=4"]
-    assert env["NFL_FEATURE_CONTEXT_FACTORS"] == "1"
+    assert "NFL_FEATURE_CONTEXT_FACTORS" not in env
     grade_argv = next(call[0] for call in calls if call[0][1] == "week-grade")
     assert grade_argv[2:] == ["SEASON=2026", "WEEK=3"]
 

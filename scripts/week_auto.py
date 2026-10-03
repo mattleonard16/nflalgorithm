@@ -35,7 +35,6 @@ class Step(NamedTuple):
     season: int
     week: int
     fatal: bool
-    extra_env: dict[str, str]
 
 
 def plan_steps(season: int, week: int, *, refresh: bool = False) -> list[Step]:
@@ -45,17 +44,19 @@ def plan_steps(season: int, week: int, *, refresh: bool = False) -> list[Step]:
     republishes lines. It skips grading, which Wednesday already did, and
     week-predict leaves teams whose game has started untouched.
     """
+    # Context factors stay off: on the 2025 walk-forward they raised passing,
+    # receiving, and rushing yards MAE (reports/nfl_backtest_2025_context_factors_compare.json).
     predict = [
-        Step("week-predict", season, week, True, {"NFL_FEATURE_CONTEXT_FACTORS": "1"}),
-        Step("week-lines", season, week, True, {}),
+        Step("week-predict", season, week, True),
+        Step("week-lines", season, week, True),
     ]
     if refresh:
         return predict
-    steps = [Step("db-analyze", season, week, True, {}), *predict]
+    steps = [Step("db-analyze", season, week, True), *predict]
     if week > 1:
         steps += [
-            Step("week-grade", season, week - 1, False, {}),
-            Step("week-research", season, week - 1, False, {}),
+            Step("week-grade", season, week - 1, False),
+            Step("week-research", season, week - 1, False),
         ]
     return steps
 
@@ -109,7 +110,7 @@ def run_week(
         argv = [make, step.target]
         if step.target != "db-analyze":
             argv += [f"SEASON={step.season}", f"WEEK={step.week}"]
-        returncode = run_step(argv, {**os.environ, **step.extra_env}).returncode
+        returncode = run_step(argv, dict(os.environ)).returncode
         if returncode == 0:
             continue
         if not step.fatal:
