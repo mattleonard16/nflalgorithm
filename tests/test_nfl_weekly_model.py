@@ -654,6 +654,37 @@ class TestTrainAndPredict:
 
         assert frame["player_id"].tolist() == ["BUF_out_last_week"]
 
+    def test_a_backup_qb_gets_no_row(self, tmp_db):
+        with sqlite3.connect(tmp_db) as conn:
+            conn.execute("""
+                INSERT INTO games
+                    (game_id, season, week, home_team, away_team, game_date)
+                VALUES ('2026_03_MIA_BUF', 2026, 3, 'BUF', 'MIA', '2026-09-24')
+                """)
+            for gsis_id, depth, starter in (("qb1", 1, 1), ("qb2", 2, 0)):
+                conn.execute(
+                    """
+                    INSERT INTO nfl_roster_players
+                        (season, gsis_id, player_id, player_name, team, position,
+                         roster_status, updated_at)
+                    VALUES (2026, ?, ?, ?, 'BUF', 'QB', 'ACT', 'now')
+                    """,
+                    (gsis_id, f"BUF_{gsis_id}", gsis_id),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO nfl_player_context_snapshots
+                        (season, week, gsis_id, player_id, team, position, depth_rank,
+                         is_starter, expected_passing_attempts, prior_source, captured_at)
+                    VALUES (2026, 3, ?, ?, 'BUF', 'QB', ?, ?, 30, 'roster', 'now')
+                    """,
+                    (gsis_id, f"BUF_{gsis_id}", depth, starter),
+                )
+
+        frame = _build_roster_week_data(2026, 3)
+
+        assert frame["player_id"].tolist() == ["BUF_qb1"]
+
     def test_no_history_role_prior_generates_prediction_with_wider_uncertainty(self, monkeypatch):
         frame = pd.DataFrame(
             {

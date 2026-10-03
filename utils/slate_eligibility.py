@@ -58,6 +58,22 @@ def ruled_out(row: Mapping[str, Any], target_week: int) -> bool:
     return report_week is not None and int(report_week) == target_week
 
 
+def backup_qb(row: Mapping[str, Any]) -> bool:
+    """Return True for a QB the depth chart lists behind the starter.
+
+    Models trained on his past starts project him like a starter: on the 2025
+    replay, backups ran +61 passing yards high and carried the whole passing
+    bias. A QB with no depth entry is not a backup, since missing data is not
+    evidence that he sits.
+    """
+    if _text(row.get("position")) != "QB":
+        return False
+    if int(_number(row.get("is_starter")) or 0) == 1:
+        return False
+    depth = _depth(row.get("depth_rank"))
+    return depth is not None and depth > 1
+
+
 def likely_to_play(row: Mapping[str, Any], market: str) -> bool:
     """Return True when the row is a plausible week-of participant for ``market``."""
     roster_status = _text(row.get("roster_status")) or "ACT"
