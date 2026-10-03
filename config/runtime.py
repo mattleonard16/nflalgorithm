@@ -149,10 +149,6 @@ features = SimpleNamespace(
     # multiplied into predicted mu. Default OFF until a walk-forward backtest
     # validates it; the cron path opts in explicitly.
     context_factors_enabled=env_flag("NFL_FEATURE_CONTEXT_FACTORS"),
-    # Leave games a regular left early out of his rolling averages
-    # (utils/nfl_availability.py). Default OFF until the walk-forward shows
-    # lower yardage MAE with it on.
-    shortened_games_enabled=env_flag("NFL_FEATURE_SHORTENED_GAMES"),
 )
 
 config = SimpleNamespace(
