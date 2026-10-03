@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto db-analyze nfl-backtest production-run health
+.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto week-auto-refresh install-week-refresh db-analyze nfl-backtest production-run health
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -384,6 +384,15 @@ week-research:
 # new week's lines.
 week-auto:
 	$(DB_ENV) $(PYTHON) -m scripts.week_auto
+
+# Saturday: re-predict with Friday's final injury report and republish lines.
+week-auto-refresh:
+	$(DB_ENV) $(PYTHON) -m scripts.week_auto --refresh
+
+install-week-refresh:
+	sed 's#__REPO__#$(CURDIR)#g' ops/launchd/com.nflalgorithm.week-refresh.plist > $(HOME)/Library/LaunchAgents/com.nflalgorithm.week-refresh.plist
+	launchctl unload $(HOME)/Library/LaunchAgents/com.nflalgorithm.week-refresh.plist 2>/dev/null || true
+	launchctl load $(HOME)/Library/LaunchAgents/com.nflalgorithm.week-refresh.plist
 
 backfill-accuracy:
 	@echo "Running historical line accuracy backfill..."
