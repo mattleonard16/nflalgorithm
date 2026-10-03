@@ -387,6 +387,11 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     starter gating in `models/position_specific/weekly.py`, where backup QBs (`depth_rank > 1`) have expected
     attempts scaled by starter probability `p_start` (0.02 for healthy backups, 0.75 for questionable, etc.),
     preventing non-starters from inheriting starter attempt baselines.
+    **Correction (2026-10-02):** the gating cut predicted attempts but not `mu`, because the history
+    `max()` in `_engineer_rolling_features` restores a backup's past starter volume. On the 2025
+    replay through the roster path, starters ran at +1.7 passing yards bias, but 114 backup-QB rows
+    ran at +61 and carried the whole +13 headline bias. Backup QBs (`utils/slate_eligibility.backup_qb`)
+    now get no projection; 2026 week 4 dropped 51 of them.
 
 ### Tier 2 — MEDIUM (correctness/ops)
 14. [RESOLVED] EWMA decay 0.65 / sigma calibration: the market-mu EWMA path in

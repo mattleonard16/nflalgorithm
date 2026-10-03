@@ -132,3 +132,23 @@ def test_an_out_status_with_no_report_week_is_not_ruled_out() -> None:
     from utils.slate_eligibility import ruled_out
 
     assert ruled_out({"injury_status": "Out", "injury_report_week": None}, 4) is False
+
+
+def test_a_qb_listed_behind_the_starter_is_a_backup() -> None:
+    from utils.slate_eligibility import backup_qb
+
+    assert backup_qb({"position": "QB", "depth_rank": 2, "is_starter": 0}) is True
+
+
+def test_starters_unlisted_qbs_and_other_positions_are_not_backups() -> None:
+    from utils.slate_eligibility import backup_qb
+
+    # A QB with no depth chart entry keeps his projection: missing data is not
+    # evidence that he sits.
+    for row in (
+        {"position": "QB", "depth_rank": 1, "is_starter": 1},
+        {"position": "QB", "depth_rank": 2, "is_starter": 1},
+        {"position": "QB", "depth_rank": None, "is_starter": 0},
+        {"position": "WR", "depth_rank": 3, "is_starter": 0},
+    ):
+        assert backup_qb(row) is False
