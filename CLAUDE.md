@@ -350,8 +350,12 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     no-oped, so production bundles and stored pregame evidence are untouched. The report includes
     `by_market_position` (the granularity `utils/nfl_sigma.py` buckets use) and `--rows-output`
     dumps the per-row scored frame for calibration analysis. A `compare` subcommand refuses to
-    compare runs with mismatched scope. 2025 full-season baseline (5,117 predictions, 18/18 weeks,
-    zero problems): overall MAE 26.88, bias +2.81. The item-25 mae-gate ceilings are now
+    compare runs with mismatched scope. The first 2025 full-season baseline (2026-08-28, yardage
+    markets only, 5,117 predictions, 18/18 weeks, zero problems) scored MAE 26.88, bias +2.81. The
+    current model on the same scope (2026-10-02, context factors off, 5,121 predictions) scores
+    MAE 26.50, bias +2.96, with passing_yards still at bias +13.22. The walk-forward predicts from
+    history, so it cannot see the roster-path QB starter gating in item 34. `make nfl-replay`
+    replays 2025 through the roster path for changes like that. The item-25 mae-gate ceilings are now
     calibrated from this run's per-week worst MAE (see item 25); re-derive them from the latest
     `--rows-output` CSV whenever the model or slate changes materially.
 11. [RESOLVED — by deletion] Universal model, no position split. Decision: the orphaned `RBModel` subclass was deleted rather than revived; `models/position_specific/weekly.py` is the single production model path. `BasePositionModel` is retained as the shared base. Revisit per-position splits as new work against weekly.py, not the old subclass.
