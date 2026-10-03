@@ -24,6 +24,7 @@ from typing import Callable, NamedTuple, Optional, Sequence
 logger = logging.getLogger(__name__)
 
 STATUS_PATH = Path("logs/week_auto_status.json")
+REFRESH_STATUS_PATH = Path("logs/week_refresh_status.json")
 
 RunStep = Callable[[list[str], dict[str, str]], subprocess.CompletedProcess]
 Notify = Callable[[str], None]
@@ -37,13 +38,20 @@ class Step(NamedTuple):
     extra_env: dict[str, str]
 
 
-def plan_steps(season: int, week: int) -> list[Step]:
-    """Return the Wednesday steps in order for the upcoming ``season``/``week``."""
-    steps = [
-        Step("db-analyze", season, week, True, {}),
+def plan_steps(season: int, week: int, *, refresh: bool = False) -> list[Step]:
+    """Return the steps in order for the upcoming ``season``/``week``.
+
+    The Saturday refresh re-predicts with Friday's final injury report and
+    republishes lines. It skips grading, which Wednesday already did, and
+    week-predict leaves teams whose game has started untouched.
+    """
+    predict = [
         Step("week-predict", season, week, True, {"NFL_FEATURE_CONTEXT_FACTORS": "1"}),
         Step("week-lines", season, week, True, {}),
     ]
+    if refresh:
+        return predict
+    steps = [Step("db-analyze", season, week, True, {}), *predict]
     if week > 1:
         steps += [
             Step("week-grade", season, week - 1, False, {}),
@@ -79,10 +87,12 @@ def run_week(
     run_step: RunStep = _run_make,
     notify: Notify = _notify_macos,
     status_path: Path = STATUS_PATH,
+    refresh: bool = False,
 ) -> int:
     """Run every step for ``season``/``week`` and return the job's exit code."""
     make = os.environ.get("MAKE", "make")
     status: dict[str, object] = {
+        "kind": "refresh" if refresh else "wednesday",
         "season": season,
         "week": week,
         "started_at": _now(),
@@ -95,7 +105,7 @@ def run_week(
     warnings: list[str] = []
     print(f"=== week-auto {season} W{week} started {status['started_at']} ===", flush=True)
 
-    for step in plan_steps(season, week):
+    for step in plan_steps(season, week, refresh=refresh):
         argv = [make, step.target]
         if step.target != "db-analyze":
             argv += [f"SEASON={step.season}", f"WEEK={step.week}"]
@@ -122,7 +132,8 @@ def _finish(status: dict[str, object], status_path: Path, notify: Notify) -> Non
     if status["ok"]:
         return
     message = (
-        f"{status['season']} W{status['week']} failed at {status['failed_step']} "
+        f"{status['kind']} run for {status['season']} W{status['week']} failed at "
+        f"{status['failed_step']} "
         f"(exit {status['exit_code']})"
     )
     try:
@@ -132,7 +143,12 @@ def _finish(status: dict[str, object], status_path: Path, notify: Notify) -> Non
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    argparse.ArgumentParser(description=__doc__).parse_args(argv)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--refresh", action="store_true", help="Saturday run: re-predict and republish lines only"
+    )
+    args = parser.parse_args(argv)
+    status_path = REFRESH_STATUS_PATH if args.refresh else STATUS_PATH
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     from utils.current_week import resolve_current_week
 
@@ -141,6 +157,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except Exception:
         logger.exception("Could not resolve the upcoming NFL week")
         status: dict[str, object] = {
+            "kind": "refresh" if args.refresh else "wednesday",
             "season": None,
             "week": None,
             "started_at": _now(),
@@ -149,10 +166,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "exit_code": 1,
             "warnings": [],
         }
-        _finish(status, STATUS_PATH, _notify_macos)
+        _finish(status, status_path, _notify_macos)
         return 1
     print(f"Resolved upcoming week: {season} W{week}", flush=True)
-    return run_week(season, week, notify=_notify_macos, status_path=STATUS_PATH)
+    return run_week(
+        season, week, notify=_notify_macos, status_path=status_path, refresh=args.refresh
+    )
 
 
 if __name__ == "__main__":

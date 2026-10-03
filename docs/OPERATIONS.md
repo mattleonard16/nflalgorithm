@@ -125,6 +125,12 @@ needs the private modules and real data.
    graded; a failed grade or memo is recorded as a warning. Check the status file after each
    Wednesday, since a notification can be missed or silenced in System Settings.
 
+   A second job, `com.nflalgorithm.week-refresh`, runs `make week-auto-refresh` on Saturdays at
+   09:00. It re-predicts the week with Friday's final injury report and republishes lines, skipping
+   teams whose game has started, and records its result in `logs/week_refresh_status.json`. Its
+   plist is tracked at `ops/launchd/com.nflalgorithm.week-refresh.plist`; install or reinstall it
+   with `make install-week-refresh`.
+
    `week-auto` does not scrape sportsbook odds or build the value card. Only
    `make production-run` does, and nothing schedules it. A week nobody runs it for has no
    `weekly_odds` rows, and odds that were never captured cannot be graded later. That is why 2026

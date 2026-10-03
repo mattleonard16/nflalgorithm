@@ -123,3 +123,16 @@ def test_an_unresolvable_week_still_records_failure_and_alerts(tmp_path, monkeyp
     assert exit_code == 1
     assert status["failed_step"] == "resolve-week"
     assert len(alerts) == 1
+
+
+def test_the_saturday_refresh_only_repredicts_and_republishes(tmp_path) -> None:
+    make = _FakeMake()
+    status_path = tmp_path / "refresh.json"
+
+    exit_code = week_auto.run_week(
+        2026, 4, run_step=make, notify=lambda m: None, status_path=status_path, refresh=True
+    )
+
+    assert exit_code == 0
+    assert make.steps == ["week-predict", "week-lines"]
+    assert json.loads(status_path.read_text())["kind"] == "refresh"
