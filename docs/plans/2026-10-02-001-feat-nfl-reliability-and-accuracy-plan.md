@@ -64,13 +64,13 @@ The measurement tools cannot judge these changes yet. The only 2025 baseline (`r
 
 - R12. The portfolio stake cap limits the sum of best-line stakes, one per bet, rather than the sum over every sportsbook's row.
 - R13. The risk and agent stages judge the card being built in the current run, and stale verdicts from earlier runs of the same week do not survive.
-- R14. Over and under verdicts for the same prop are stored separately.
 - R15. The learning loop matches projections to actuals through the gsis id bridge, and its failures are logged instead of swallowed.
 
 ### Scope Boundaries
 
 - Odds scraping stays manual. Nothing in this plan schedules or runs `make production-run`.
 - No NBA work, no frontend work, no key rotation, no push or merge.
+- Agent verdicts stay one per prop. The coordinator merges both sides on purpose (`_group_reports` and `_one_vote_per_agent` in `agents/coordinator.py`), so the missing `side` column loses nothing.
 - Doubtful players keep their projections. Props void when a player sits, so an "if he plays" projection stays valid for them.
 
 #### Deferred to Follow-Up Work
@@ -152,8 +152,7 @@ flowchart TB
 | U9 | Give an Out player's volume to teammates | `utils/nfl_availability.py`, `models/position_specific/weekly.py` | U6, U7 |
 | U10 | Discount injury-shortened games | `utils/nfl_availability.py`, `models/position_specific/weekly.py`, `scripts/ingest_real_nfl_data.py` | U5 |
 | U11 | Stake cap on best-line stakes | `materialized_value_view.py` | none |
-| U12 | Risk and agents judge the staged card | `scripts/production_runner.py`, `risk_manager.py`, `agents/base_agent.py`, `agents/coordinator.py` | U13 |
-| U13 | Separate over and under agent verdicts | `schema_migrations.py`, `agents/coordinator.py` | none |
+| U12 | Risk and agents judge the staged card | `scripts/production_runner.py`, `risk_manager.py`, `agents/base_agent.py`, `agents/coordinator.py` | none |
 | U14 | Learning loop id bridge | `learning_loop.py` | none |
 | U15 | Documentation truth pass | `CLAUDE.md`, `docs/OPERATIONS.md`, `docs/DEPLOYMENT_MANIFEST.md`, `docs/ARCHITECTURE.md`, `docs/MODEL_CARD.md` | all |
 
@@ -339,24 +338,11 @@ flowchart TB
   - Rows for the same bet at different books keep their stake ratios after scaling.
 - **Verification:** the tests pass, and `DEPLOYMENT_MANIFEST.md:33`'s claim is corrected.
 
-### U13. Separate over and under agent verdicts
-
-- **Goal:** an over and an under verdict on the same prop no longer overwrite each other.
-- **Requirements:** R14.
-- **Dependencies:** none.
-- **Files:** `schema_migrations.py`, `agents/coordinator.py`, `tests/test_agent_coordinator.py`, `tests/test_migration_crash_recovery.py` if the rebuild pattern applies.
-- **Approach:** add `side` to `agent_decisions` and its primary key through a transactional rebuild like the existing PK-widening migrations, backfilling `side` as `over` for existing rows. Update the upsert on both dialects.
-- **Test scenarios:**
-  - Persisting an over and an under for the same prop keeps two rows.
-  - The migration preserves existing rows and is a no-op on re-run.
-  - The MySQL path of the upsert runs on the `matrix_database` fixture.
-- **Verification:** the tests pass, and the new upsert test is added to the CI MySQL step in `.github/workflows/ci.yml`.
-
 ### U12. Risk and agents judge the staged card
 
 - **Goal:** risk and agent verdicts describe the card built in the same run.
 - **Requirements:** R13. Governed by KTD14.
-- **Dependencies:** U13.
+- **Dependencies:** none.
 - **Files:** `scripts/production_runner.py`, `risk_manager.py`, `agents/base_agent.py`, `agents/coordinator.py`, `tests/test_production_runner_cli.py`, `tests/test_agent_coordinator.py`, `tests/test_risk_manager.py`.
 - **Approach:**
   1. Reorder `POST_PREPARE_STAGES` so `materialize` precedes `risk_assessment` and `agents`.
@@ -403,7 +389,7 @@ flowchart TB
 | Full suite, including private-module tests that CI skips | `make test` | every unit; report the pass and fail counts |
 | Focused tests | `.venv/bin/python -m pytest <test file> -q` with `DB_BACKEND=sqlite SQLITE_DB_PATH=nfl_data.db` | each unit before commit |
 | Formatting on touched lines only | `.venv/bin/black -l 100 --diff -q <file>`; churn must not rise above the HEAD version's | every code unit |
-| Preflight | `make runtime-preflight` and `make doctor` | U2, U3, U7, U13 |
+| Preflight | `make runtime-preflight` and `make doctor` | U2, U3, U7 |
 | Walk-forward gate | `make nfl-backtest SEASON=2025 OUTPUT=... ROWS_OUTPUT=...` then `.venv/bin/python -m scripts.run_nfl_backtest compare <baseline> <candidate>` | U5, U10 |
 | Replay gate | the U6 replay command on a scratch DB copy, then `compare` | U6, U9 |
 | Real-data smoke | `NFL_FEATURE_CONTEXT_FACTORS=1 make week-predict SEASON=2026 WEEK=<current>` after a DB backup | U4, U7 |
