@@ -189,7 +189,10 @@ def normalize_portfolio_stakes(
     bankroll: float,
     max_total_fraction: float = 1.0,
 ) -> pd.DataFrame:
-    """Scale stakes so total stake <= bankroll * max_total_fraction.
+    """Scale stakes so the best-line stakes total <= bankroll * max_total_fraction.
+
+    Each bet counts once, at the row ``utils.best_line.best_line_per_bet`` keeps,
+    and the scale factor applies to every book's row.
 
     Per-bet Kelly capping bounds each bet individually, but a large card can
     still sum past the bankroll. When it does, every ``stake`` (and the
@@ -222,7 +225,9 @@ def normalize_portfolio_stakes(
             f"portfolio cap; offending values: {stakes[invalid].tolist()}"
         )
 
-    total = float(stakes.sum())
+    # The card holds one row per sportsbook, but a bet is placed once, at its
+    # best line. Summing every book's row scaled week 1 to 230.81 of 1000.
+    total = float(best_line_per_bet(df.assign(stake=stakes))["stake"].sum())
     limit = bankroll * max_total_fraction
     if total <= 0 or total <= limit:
         return df.copy()
