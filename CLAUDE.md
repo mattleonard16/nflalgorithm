@@ -47,6 +47,15 @@ histories and never were gitignored. `api/server.py` and `prop_integration.py` w
 2026-09-05: neither held modeling edge, and hiding the API kept 182 tests out of CI. See
 `docs/plans/2026-09-05-003-open-the-public-contribution-boundary-plan.md`.
 
+**Public fallbacks (2026-10-03).** When `weekly.py` or `value_betting_engine.py` is absent, the
+tracked loaders run public baselines instead: `models/position_specific/baseline.py` (last-six-game
+EWMA, `model_version = public_baseline_ewma_v1`) through `weekly_implementation()`, and
+`utils/value_ranking.rank_weekly_value_baseline`. The private file always wins when present, and a
+broken import inside it still fails loud. Set `NFL_REQUIRE_PRIVATE_MODELS=1` on any deployment so a
+lost private file fails the run instead of publishing a baseline card (`render.yaml` sets it).
+`prepare_week` reports `model_versions`, so a baseline run is visible in every summary. 2025
+walk-forward, yardage only: baseline MAE 28.78, private 26.50.
+
 **Consequence for the gitignored set**: edits to those files live only on the local machine and in
 no commit — a fresh clone gets whatever the deployment supplies. When a change spans a gitignored
 module and a tracked one, only the tracked half reaches git. Say so explicitly instead of letting a

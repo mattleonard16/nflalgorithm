@@ -1,6 +1,12 @@
 # Opening the public contribution boundary
 
-Phases 1 and 2 are done. Phase 3 is not started.
+Phases 1 and 2 are done. Phase 3 is built and committed locally (2026-10-03), not pushed.
+
+Phase 3 as built: `models/position_specific/baseline.py` and `utils/value_ranking.py`, loaded
+when the private file is absent. It went one step past the plan below, because building the card
+also needed a public `rank_weekly_value`. On the 2025 walk-forward the baseline scores yardage MAE
+28.78 against 26.50 for the private model. `NFL_REQUIRE_PRIVATE_MODELS=1` keeps deployments
+fail-closed. The push still needs the deliberate yes described under "What cannot be undone".
 
 ## Why
 

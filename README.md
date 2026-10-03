@@ -46,12 +46,18 @@ default and `ODDS_API_KEY` only matters for live odds.
 
 ### Weekly Workflow
 
+Use the next week that has not kicked off. `week-predict` refuses a week whose games are all
+played, so it never overwrites the projections that were made before them.
+
 ```bash
-make week-predict SEASON=2026 WEEK=2       # train on prior weeks, project this one
-make week-materialize SEASON=2026 WEEK=2   # build the value card
-make week-grade SEASON=2026 WEEK=2         # after the games: grade bets, record CLV
-make mae-gate SEASON=2026 WEEK=2           # fail if a position regressed past its ceiling
+make week-predict SEASON=2026 WEEK=5       # project the coming week from games before it
+make week-materialize SEASON=2026 WEEK=5   # build the value card (needs ODDS_API_KEY for lines)
+make week-grade SEASON=2026 WEEK=5         # after the games: grade bets, record CLV
+make mae-gate SEASON=2026 WEEK=5           # fail if a position regressed past its ceiling
 ```
+
+To score the model on a past season, use the walk-forward backtest instead:
+`make nfl-backtest SEASON=2025`.
 
 These are the local path. Production runs through a durable worker instead. See
 [docs/OPERATIONS.md](docs/OPERATIONS.md).
@@ -76,7 +82,7 @@ nflalgorithm/
 ├── api/                 # FastAPI service
 ├── frontend/            # Next.js dashboard
 ├── dashboard/           # Legacy Streamlit UI
-├── tests/               # 2,248 tests
+├── tests/               # pytest suite, runs in CI without the private files
 ├── docs/                # Architecture, operations, model card, troubleshooting
 ├── prop_integration.py  # 3-tier player matching
 └── materialized_value_view.py  # Dashboard data layer
@@ -84,8 +90,11 @@ nflalgorithm/
 
 Four modules are gitignored and supplied by the deployment: `data_pipeline.py`,
 `value_betting_engine.py`, `models/position_specific/weekly.py`, and an optional `config.py`
-override. Almost everything else works without them, and CI runs the full tracked suite.
-[CONTRIBUTING.md](CONTRIBUTING.md) explains what is affected.
+override. A public clone runs tracked baselines in their place: a recent-games projector in
+`models/position_specific/baseline.py` and textbook pricing in `utils/value_ranking.py`. So the
+whole workflow runs on a clone, just with a weaker model. Baseline rows carry
+`model_version = public_baseline_ewma_v1`, so they are never mistaken for the real model's.
+[CONTRIBUTING.md](CONTRIBUTING.md) explains how to measure a change against it.
 
 Math that CI must verify lives in tracked `utils/`, specifically so the private modules can call
 it while the tests still run on a clean clone.
@@ -164,10 +173,18 @@ move a threshold on. Re-check once more weeks are graded.
 ### Projection Accuracy
 
 From the walk-forward backtest (`make nfl-backtest SEASON=2025`), which retrains the model each
-week on strictly earlier data: 5,117 predictions, overall MAE 26.88 yards, bias +2.81.
-Per-position worst single week was QB 59.5, RB 24.0, WR 26.0, TE 24.6, and `make mae-gate` fails
-the build about 10% above each. One-sigma coverage is 68.2% after the recalibration in
-`utils/nfl_sigma.py`.
+week on strictly earlier data, yardage markets only:
+
+| Model | Predictions | MAE (yards) | Bias |
+|-------|-------------|-------------|------|
+| Private model, current | 5,121 | 26.50 | +2.96 |
+| Public baseline (`baseline.py`) | 4,942 | 28.78 | +3.07 |
+
+The baseline is what a public clone runs. It is the number to beat.
+
+For the private model, the per-position worst single week was QB 58.2, RB 23.4, WR 26.2, TE 23.9,
+and `make mae-gate` fails the build about 10% above each. One-sigma coverage is 68.2% after the
+recalibration in `utils/nfl_sigma.py`.
 
 Season and week totals are in `weekly_performance`. Per-bet detail is in `bet_outcomes` and
 `clv_weekly`.
@@ -274,7 +291,7 @@ Never commit `.env`, database credentials or API keys.
 ## Testing
 
 ```bash
-make test          # 2,248 tests
+make test          # full pytest suite
 make lint          # mypy
 make format        # black + isort
 make validate SEASON=2025 WEEKS="1 2 3"   # score persisted pre-kickoff projections
