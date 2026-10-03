@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import polars as pl
 import pytest
+import requests
 
 from scripts import ingest_real_nfl_data
 from scripts.production_runner import stage_prepare_week
@@ -31,6 +32,7 @@ def _stub_optional_pregame_context(monkeypatch):
         "refresh_player_context_snapshots",
         lambda rosters, depth_charts, injuries, through_week: 0,
     )
+    monkeypatch.setattr("time.sleep", lambda seconds: None)
 
 
 def test_cli_defaults_include_current_season(monkeypatch) -> None:
@@ -920,3 +922,90 @@ def test_production_stage_reports_unexpected_ingestion_failure(monkeypatch) -> N
         "stage": "prepare_week",
         "error": "nflverse timed out",
     }
+
+
+def _wrapped_download_error(cause: Exception) -> ConnectionError:
+    """nflreadpy re-raises every requests failure as the builtin ConnectionError."""
+    try:
+        raise cause
+    except Exception as exc:
+        try:
+            raise ConnectionError(f"Failed to download feed: {exc}") from exc
+        except ConnectionError as wrapped:
+            return wrapped
+
+
+def _http_error(status: int) -> requests.HTTPError:
+    response = requests.Response()
+    response.status_code = status
+    return requests.HTTPError(f"{status} error", response=response)
+
+
+def _flaky_loader(failures: list[Exception]):
+    calls: list[list[int]] = []
+
+    def loader(seasons: list[int]) -> _PandasResult:
+        calls.append(seasons)
+        if failures:
+            raise failures.pop(0)
+        return _PandasResult(pd.DataFrame({"season": seasons, "week": [1]}))
+
+    return loader, calls
+
+
+def test_a_dropped_connection_is_retried_before_the_ingest_fails() -> None:
+    # 2026-09-30: a connection reset on a history-season file killed the Wednesday job.
+    reset = _wrapped_download_error(requests.exceptions.ConnectionError("Connection reset by peer"))
+    loader, calls = _flaky_loader([reset])
+
+    frame = ingest_real_nfl_data._load_nflverse_by_season(loader, [2024], "injuries")
+
+    assert len(calls) == 2
+    assert frame["season"].tolist() == [2024]
+
+
+def test_a_server_error_is_retried() -> None:
+    loader, calls = _flaky_loader([_wrapped_download_error(_http_error(503))])
+
+    ingest_real_nfl_data._load_nflverse_by_season(loader, [2024], "injuries")
+
+    assert len(calls) == 2
+
+
+def test_a_download_that_keeps_timing_out_raises_after_three_attempts() -> None:
+    timeouts = [
+        _wrapped_download_error(requests.exceptions.ReadTimeout("timed out")) for _ in range(5)
+    ]
+    loader, calls = _flaky_loader(timeouts)
+
+    with pytest.raises(ConnectionError, match="Failed to download"):
+        ingest_real_nfl_data._load_nflverse_by_season(loader, [2024], "injuries")
+
+    assert len(calls) == 3
+
+
+def test_a_missing_history_feed_is_not_retried() -> None:
+    loader, calls = _flaky_loader([_wrapped_download_error(_http_error(404))])
+
+    with pytest.raises(ConnectionError):
+        ingest_real_nfl_data._load_nflverse_by_season(loader, [2024], "injuries")
+
+    assert len(calls) == 1
+
+
+def test_a_forbidden_download_is_not_retried() -> None:
+    loader, calls = _flaky_loader([_wrapped_download_error(_http_error(403))])
+
+    with pytest.raises(ConnectionError):
+        ingest_real_nfl_data._load_nflverse_by_season(loader, [2024], "injuries")
+
+    assert len(calls) == 1
+
+
+def test_a_parse_error_is_not_retried() -> None:
+    loader, calls = _flaky_loader([ValueError("Failed to parse data")])
+
+    with pytest.raises(ValueError, match="Failed to parse"):
+        ingest_real_nfl_data._load_nflverse_by_season(loader, [2024], "injuries")
+
+    assert len(calls) == 1
