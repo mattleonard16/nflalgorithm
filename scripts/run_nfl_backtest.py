@@ -59,6 +59,7 @@ from utils.nfl_replay import (
     require_scratch_database,
     roster_for_week,
 )
+from utils.season_priors import training_weeks_before
 
 DEFAULT_WEEKS = tuple(range(1, 19))
 
@@ -87,14 +88,8 @@ def _patch_for_backtest(weekly, model_dir: Path) -> None:
 
 
 def _training_tuples(season: int, week: int, history_seasons: int) -> list[tuple[int, int]]:
-    """(season, week) pairs strictly before the target week, bounded by depth."""
-    frame = read_dataframe(
-        "SELECT DISTINCT season, week FROM player_stats_enhanced "
-        "WHERE (season < ? OR (season = ? AND week < ?)) AND season >= ? "
-        "ORDER BY season, week",
-        (season, season, week, season - history_seasons),
-    )
-    return [(int(row.season), int(row.week)) for row in frame.itertuples(index=False)]
+    available = read_dataframe("SELECT DISTINCT season, week FROM player_stats_enhanced")
+    return training_weeks_before(available, season, week, history_seasons)
 
 
 def _load_actuals(season: int, weeks: tuple[int, ...]) -> pd.DataFrame:
