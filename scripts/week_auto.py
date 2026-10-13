@@ -46,13 +46,15 @@ def plan_steps(season: int, week: int, *, refresh: bool = False) -> list[Step]:
     """
     # Context factors stay off: on the 2025 walk-forward they raised passing,
     # receiving, and rushing yards MAE (reports/nfl_backtest_2025_context_factors_compare.json).
-    predict = [
-        Step("week-predict", season, week, True),
-        Step("week-lines", season, week, True),
-    ]
+    lines = Step("week-lines", season, week, True)
     if refresh:
-        return predict
-    steps = [Step("db-analyze", season, week, True), *predict]
+        # Same stats as Wednesday, so Wednesday's models still apply.
+        return [Step("week-predict", season, week, True), lines]
+    steps = [
+        Step("db-analyze", season, week, True),
+        Step("week-train-predict", season, week, True),
+        lines,
+    ]
     if week > 1:
         steps += [
             Step("week-grade", season, week - 1, False),

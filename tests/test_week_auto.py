@@ -40,20 +40,26 @@ def test_a_clean_run_records_success_and_sends_no_alert(tmp_path) -> None:
     exit_code, steps, alerts, status = _run(tmp_path, week=4)
 
     assert exit_code == 0
-    assert steps == ["db-analyze", "week-predict", "week-lines", "week-grade", "week-research"]
+    assert steps == [
+        "db-analyze",
+        "week-train-predict",
+        "week-lines",
+        "week-grade",
+        "week-research",
+    ]
     assert alerts == []
     assert status["ok"] is True
     assert (status["season"], status["week"], status["failed_step"]) == (2026, 4, None)
 
 
 def test_a_failed_prediction_stops_the_run_and_alerts(tmp_path) -> None:
-    exit_code, steps, alerts, status = _run(tmp_path, week=4, failures={"week-predict": 2})
+    exit_code, steps, alerts, status = _run(tmp_path, week=4, failures={"week-train-predict": 2})
 
     assert exit_code == 2
-    assert steps == ["db-analyze", "week-predict"]
-    assert len(alerts) == 1 and "week-predict" in alerts[0]
+    assert steps == ["db-analyze", "week-train-predict"]
+    assert len(alerts) == 1 and "week-train-predict" in alerts[0]
     assert status["ok"] is False
-    assert (status["failed_step"], status["exit_code"]) == ("week-predict", 2)
+    assert (status["failed_step"], status["exit_code"]) == ("week-train-predict", 2)
 
 
 def test_a_failed_grade_is_a_warning_and_the_memo_still_runs(tmp_path) -> None:
@@ -69,7 +75,7 @@ def test_a_failed_grade_is_a_warning_and_the_memo_still_runs(tmp_path) -> None:
 def test_week_one_has_nothing_to_grade(tmp_path) -> None:
     _, steps, _, _ = _run(tmp_path, week=1)
 
-    assert steps == ["db-analyze", "week-predict", "week-lines"]
+    assert steps == ["db-analyze", "week-train-predict", "week-lines"]
 
 
 def test_a_broken_notifier_does_not_change_the_exit_code(tmp_path) -> None:
@@ -103,7 +109,7 @@ def test_prediction_runs_for_the_target_week_with_context_factors_off(
         2026, 4, run_step=record, notify=lambda m: None, status_path=tmp_path / "s.json"
     )
 
-    argv, env = next(call for call in calls if call[0][1] == "week-predict")
+    argv, env = next(call for call in calls if call[0][1] == "week-train-predict")
     assert argv[2:] == ["SEASON=2026", "WEEK=4"]
     assert "NFL_FEATURE_CONTEXT_FACTORS" not in env
     grade_argv = next(call[0] for call in calls if call[0][1] == "week-grade")
