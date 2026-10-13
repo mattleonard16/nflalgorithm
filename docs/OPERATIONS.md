@@ -117,6 +117,14 @@ needs the private modules and real data.
    `make ingest-nfl` by hand when history needs a refresh. Before 2026-10-02 the job ran a full
    `make ingest-nfl` first, and a dropped download of a 2024 file was enough to skip the week.
 
+   The Wednesday prediction step is `make week-train-predict`. After the new stats load, it
+   retrains the models on the window the walk-forward backtest scores: the two prior seasons,
+   playoffs included, plus this season's earlier weeks. Then it predicts. Saturday's refresh
+   reuses Wednesday's models. Before 2026-10-12 nothing retrained in season, and the 2026 week 5
+   card came from models trained on 2026-09-07 from ten 2025 weeks. Retraining cut yardage MAE
+   from 26.93 to 26.50 on 2025 (14 of 18 weeks better) and from 26.58 to 26.25 on 2026 weeks 1
+   to 4. The durable `make production-run` path does not retrain yet.
+
    The schedule is `~/Library/LaunchAgents/com.nflalgorithm.week-auto.plist`: Wednesdays at 09:00,
    in this checkout, on whatever branch is checked out at that moment, logging to
    `logs/week_auto.log`. `make week-auto` runs `scripts/week_auto.py`, which writes

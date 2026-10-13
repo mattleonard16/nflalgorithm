@@ -164,7 +164,8 @@ def training_weeks_before(
 ) -> list[tuple[int, int]]:
     """Weeks strictly before ``season``/``week``, back ``history_seasons`` seasons.
 
-    Playoff weeks stay in. This is the window the walk-forward backtest scores.
+    Playoff weeks stay in. The walk-forward backtest scores this window, and the
+    Wednesday job trains on it, so the served model is the one the backtest measured.
     """
     if available is None or available.empty:
         return []
