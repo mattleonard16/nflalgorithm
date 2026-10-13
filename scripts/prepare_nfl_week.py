@@ -9,12 +9,13 @@ from datetime import datetime, timezone
 from typing import Any, Optional, Sequence
 
 from config import config
-from models.position_specific import predict_week
+from models.position_specific import baseline, predict_week, weekly_implementation
 from schema_migrations import MigrationManager
 from scripts.ingest_real_nfl_data import NFL_TEAM_COUNT, default_history_seasons, ingest_seasons
 from scripts.populate_player_dim import populate_player_dim
 from sports.nfl import INACTIVE_ROSTER_STATUSES
-from utils.db import fetchall, fetchone
+from utils.db import fetchall, fetchone, read_dataframe
+from utils.season_priors import training_weeks_before
 
 MIN_GSIS_HISTORY_COVERAGE = 0.95
 MIN_ROSTER_HISTORY_COVERAGE = 0.50
@@ -215,12 +216,36 @@ def _count_players_with_history(season: int) -> int:
     )
 
 
+def _stat_weeks():
+    return read_dataframe("SELECT DISTINCT season, week FROM player_stats_enhanced")
+
+
+def retrain_models(season: int, week: int) -> int:
+    """Retrain on the weeks the walk-forward backtest scores; return how many.
+
+    Without this the deployed models stay whatever was last trained by hand,
+    which on 2026-10-07 was ten 2025 weeks from 2026-09-07.
+    """
+    weeks = training_weeks_before(_stat_weeks(), season, week)
+    if not weeks:
+        raise RuntimeError(f"No stat weeks before season {season} week {week} to train on")
+    implementation = weekly_implementation()
+    # The public baseline has nothing to fit and saves nothing.
+    if not implementation.train_weekly_models(weeks) and implementation is not baseline:
+        raise RuntimeError(
+            f"Retraining on {len(weeks)} weeks saved no model; "
+            "refusing to predict with the previous ones"
+        )
+    return len(weeks)
+
+
 def prepare_week(
     season: int,
     week: int,
     *,
     history_seasons: Optional[list[int]] = None,
     refresh_history: Optional[bool] = None,
+    retrain: bool = False,
 ) -> dict[str, Any]:
     """Refresh source data and produce a validated weekly prediction slate."""
     if season < 2000:
@@ -286,6 +311,7 @@ def prepare_week(
     kicked_off_teams = frozenset(team for home, away, _ in started for team in (home, away))
 
     player_dim_updates = populate_player_dim()
+    trained_weeks = retrain_models(season, week) if retrain else None
     predictions = predict_week(season, week, roster_backed=True, exclude_teams=kicked_off_teams)
     if predictions.empty:
         raise RuntimeError(
@@ -314,6 +340,7 @@ def prepare_week(
         # "public_baseline_ewma_v1" means the private model was not installed.
         "model_versions": sorted(predictions["model_version"].astype(str).unique()),
         "kicked_off_teams": sorted(kicked_off_teams),
+        "trained_weeks": trained_weeks,
     }
 
 
@@ -338,6 +365,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Reuse locally ingested historical stats and only refresh the target season",
     )
+    parser.add_argument(
+        "--retrain",
+        action="store_true",
+        help="Retrain the models on the backtest window after ingest and before predicting",
+    )
     return parser.parse_args(argv)
 
 
@@ -359,6 +391,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         args.week,
         history_seasons=history_seasons,
         refresh_history=refresh_history,
+        retrain=args.retrain,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
 
