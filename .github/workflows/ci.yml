@@ -77,7 +77,7 @@ jobs:
           DB_BACKEND: sqlite
           SQLITE_DB_PATH: nfl_data.db
       - name: Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           file: ./coverage.xml
           fail_ci_if_error: false
