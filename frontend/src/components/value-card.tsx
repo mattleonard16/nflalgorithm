@@ -54,7 +54,7 @@ import type {
   AgentReviewStatus,
   AvailableWeek,
 } from "@/lib/types";
-import { useAuth } from "@/lib/auth-context";
+import { isPipelineOperator, useAuth } from "@/lib/auth-context";
 import { ExplainPopover } from "@/components/explain-popover";
 import { RiskPanel } from "@/components/risk-panel";
 import { AddToSlipModal } from "@/components/add-to-slip-modal";
@@ -400,6 +400,17 @@ export function ValueCard() {
         : null,
     [selectedWeek, filterOptions]
   );
+  // Slider position while dragging; committed to filterOptions on release so
+  // a drag triggers one fetch instead of one per step.
+  const [minEdgeDraft, setMinEdgeDraft] = useState(filterOptions.minEdge);
+  // Pipeline polling outlives the render that started it; read the filters
+  // current at completion, not the ones captured at poll start.
+  const filtersRef = useRef<DashboardFilters | null>(filters);
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
+  // /api/run and /review require a pipeline operator; other users get 403.
+  const canOperate = isPipelineOperator(user);
 
   // Stop polling on unmount
   useEffect(() => {
@@ -412,8 +423,6 @@ export function ValueCard() {
 
   // Poll pipeline run status
   const startPolling = useCallback((runId: string) => {
-    if (!filters) return;
-    const activeFilters = filters;
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
@@ -423,9 +432,11 @@ export function ValueCard() {
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
           setRefreshing(false);
-          if (run.status === "completed") {
-            const betsData = await getValueBets(activeFilters, false);
-            setBets(betsData.bets);
+          const currentFilters = filtersRef.current;
+          if (run.status === "completed" && currentFilters) {
+            const betsData = await getValueBets(currentFilters, false);
+            // Filters may have moved again while this request was in flight.
+            if (filtersRef.current === currentFilters) setBets(betsData.bets);
           }
         }
       } catch {
@@ -434,11 +445,11 @@ export function ValueCard() {
         setRefreshing(false);
       }
     }, 2000);
-  }, [filters]);
+  }, []);
 
   // Trigger refresh
   const handleRefresh = async () => {
-    if (!filters || !user) return;
+    if (!filters || !canOperate) return;
     setRefreshing(true);
     try {
       const run = await triggerPipelineRun(filters.season, filters.week, true, false);
@@ -464,28 +475,21 @@ export function ValueCard() {
       });
   }, []);
 
-  // Fetch public data only after metadata resolves a real season/week.
+  // Fetch the card only after metadata resolves a real season/week. This is
+  // the only request that depends on the edge/best-line filters.
   useEffect(() => {
     if (!filters) return;
     const activeFilters = filters;
     let cancelled = false;
 
-    async function loadData() {
+    async function loadBets() {
       setLoading(true);
       setError(null);
 
       try {
-        const [betsData, perfData, corrData, riskData] = await Promise.all([
-          getValueBets(activeFilters, false),
-          getPerformance(activeFilters.season),
-          getCorrelationAnalysis(activeFilters.season, activeFilters.week).catch(() => null),
-          getRiskSummary(activeFilters.season, activeFilters.week).catch(() => null),
-        ]);
+        const betsData = await getValueBets(activeFilters, false);
         if (cancelled) return;
         setBets(betsData.bets);
-        setPerformance(perfData);
-        setCorrelations(corrData);
-        setRiskSummary(riskData);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Failed to load data");
@@ -494,11 +498,40 @@ export function ValueCard() {
         if (!cancelled) setLoading(false);
       }
     }
-    loadData();
+    loadBets();
     return () => {
       cancelled = true;
     };
   }, [filters]);
+
+  // Season/week-scoped data: independent of the filters, so changing them
+  // does not refetch it.
+  useEffect(() => {
+    if (!selectedWeek) return;
+    const activeWeek = selectedWeek;
+    let cancelled = false;
+
+    async function loadWeekData() {
+      const [perfData, corrData, riskData] = await Promise.all([
+        getPerformance(activeWeek.season).catch((err: unknown) => {
+          if (!cancelled) {
+            setError(err instanceof Error ? err.message : "Failed to load performance");
+          }
+          return null;
+        }),
+        getCorrelationAnalysis(activeWeek.season, activeWeek.week).catch(() => null),
+        getRiskSummary(activeWeek.season, activeWeek.week).catch(() => null),
+      ]);
+      if (cancelled) return;
+      setPerformance(perfData);
+      setCorrelations(corrData);
+      setRiskSummary(riskData);
+    }
+    loadWeekData();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedWeek]);
 
   // Operational diagnostics require an authenticated reader.
   useEffect(() => {
@@ -681,12 +714,13 @@ export function ValueCard() {
             <Label className="text-[11px] text-slate-500 uppercase tracking-wider">
               Min Edge{" "}
               <span className="text-primary/80 font-[family-name:var(--font-jetbrains)]">
-                {(filterOptions.minEdge * 100).toFixed(0)}%
+                {(minEdgeDraft * 100).toFixed(0)}%
               </span>
             </Label>
             <Slider
-              value={[filterOptions.minEdge * 100]}
-              onValueChange={(v) =>
+              value={[minEdgeDraft * 100]}
+              onValueChange={(v) => setMinEdgeDraft(v[0] / 100)}
+              onValueCommit={(v) =>
                 setFilterOptions((current) => ({ ...current, minEdge: v[0] / 100 }))
               }
               min={0}
@@ -751,7 +785,7 @@ export function ValueCard() {
               </>
             )}
 
-            {user && filters && pipelineRun && pipelineRun.status === "completed" && (
+            {canOperate && filters && pipelineRun && pipelineRun.status === "completed" && (
               <Button
                 variant="outline"
                 size="sm"
@@ -796,7 +830,7 @@ export function ValueCard() {
               </Button>
             )}
 
-            {user && filters && (
+            {canOperate && filters && (
               <Button
                 variant="outline"
                 size="sm"

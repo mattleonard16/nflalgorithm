@@ -81,7 +81,9 @@ export function PerformanceWidget({ collapsed = false }: PerformanceWidgetProps)
 }
 
 function WeekCard({ week }: { week: WeeklySummaryItem }) {
-    const winRate = (week.wins / (week.wins + week.losses)) * 100;
+    const decided = week.wins + week.losses;
+    // A week of only pushes/ungraded bets has no win rate (0/0 would be NaN).
+    const winRate = decided > 0 ? (week.wins / decided) * 100 : null;
     const isPositive = week.roi_pct > 0;
 
     return (
@@ -111,17 +113,19 @@ function WeekCard({ week }: { week: WeeklySummaryItem }) {
                     {week.wins}-{week.losses}
                     {week.pushes > 0 && `-${week.pushes}`}
                 </span>
-                <span>{winRate.toFixed(0)}% win</span>
+                <span>{winRate !== null ? `${winRate.toFixed(0)}% win` : "— win"}</span>
             </div>
             {/* Progress bar */}
             <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                <div
-                    className={cn(
-                        "h-full rounded-full transition-all",
-                        winRate >= 50 ? "bg-emerald-500" : "bg-red-500"
-                    )}
-                    style={{ width: `${Math.min(winRate, 100)}%` }}
-                />
+                {winRate !== null && (
+                    <div
+                        className={cn(
+                            "h-full rounded-full transition-all",
+                            winRate >= 50 ? "bg-emerald-500" : "bg-red-500"
+                        )}
+                        style={{ width: `${Math.min(winRate, 100)}%` }}
+                    />
+                )}
             </div>
         </div>
     );
