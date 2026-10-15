@@ -14,6 +14,7 @@ from config import config
 from confidence_engine import score_plays
 from risk_manager import normalize_portfolio_stakes
 from utils.db import _get_backend, execute, executemany, get_connection
+from utils.nfl_markets import GAMMA_MARKETS
 from value_betting_engine import rank_weekly_value
 
 logger = logging.getLogger(__name__)
@@ -73,8 +74,13 @@ def materialize_week(
         
         payload['generated_at'] = datetime.now(timezone.utc).isoformat()
 
-        # Sanity filters: drop obviously broken probabilities/edges before persisting
-        payload['sigma'] = payload['sigma'].astype(float).clip(lower=7.5)
+        # Sanity filters: drop obviously broken probabilities/edges before persisting.
+        # The 7.5 sigma floor is in yards. Applied to a count market it swamps
+        # the mean (receptions mu ~5.5, anytime-TD mu < 1) and the ungrounded
+        # screen below then drops every such row, so floor yardage only.
+        is_yardage = payload['market'].isin(GAMMA_MARKETS)
+        payload['sigma'] = payload['sigma'].astype(float)
+        payload.loc[is_yardage, 'sigma'] = payload.loc[is_yardage, 'sigma'].clip(lower=7.5)
         payload['p_win'] = payload['p_win'].clip(0.01, 0.99)
 
         large_gap_mask = (
@@ -96,13 +102,17 @@ def materialize_week(
         # covers 556 of 1,396 rows.
         #
         # sigma >= mu is the observable signature: for a genuine skill-position
-        # projection the mean exceeds the spread. This lives here, in the
-        # tracked materialization path, rather than in the model, because every
+        # yardage projection the mean exceeds the spread. Count markets are
+        # exempt: an anytime-TD mean below 1 always sits under its spread, and
+        # that is the shape of the stat, not a missing history. This lives
+        # here, in the tracked materialization path, rather than in the model,
+        # because every
         # card passes through this chokepoint regardless of which producer
         # generated it — including deployments whose private model code differs
         # from this machine's.
         ungrounded_mask = (
-            payload['mu'].notna()
+            payload['market'].isin(GAMMA_MARKETS)
+            & payload['mu'].notna()
             & payload['sigma'].notna()
             & (payload['sigma'].astype(float) >= payload['mu'].astype(float))
         )
