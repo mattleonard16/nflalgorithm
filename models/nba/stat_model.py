@@ -39,7 +39,7 @@ from sklearn.linear_model import Ridge
 from sklearn.model_selection import TimeSeriesSplit
 
 from sports.markets import get_sport
-from utils.db import executemany, read_dataframe
+from utils.db import executemany, get_backend, read_dataframe
 from utils.nba_sigma import compute_player_sigma
 from utils.nba_usage import compute_usage_features
 
@@ -454,6 +454,13 @@ def train(market: str) -> None:
 
     log.info("[%s] Training on %d rows after dropping NaN rows", market, len(df))
 
+    # TimeSeriesSplit splits by row position, so rows must be in time order.
+    # Features are already computed (rolling ones per player), so reordering
+    # here is safe; sorted by (player_id, game_date) the folds were blocks of
+    # player ids, each validating on players unseen in training rather than on
+    # later games. Stable sort keeps same-day rows in player_id order.
+    df = df.sort_values(["game_date", "player_id"], kind="mergesort").reset_index(drop=True)
+
     X = df[feature_cols].values
     y = df[y_col].values
 
@@ -825,14 +832,31 @@ def predict(market: str, game_date: str | None = None, _minutes_lookup: dict | N
             )
         )
 
-    sql = """
-        INSERT OR REPLACE INTO nba_projections (
+    columns = """
             player_id, player_name, team, season, game_date,
             game_id, market, projected_value, confidence, sigma,
             volatility_score, usage_rate, predicted_minutes, predicted_rate,
             rate_sigma
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
+    # `INSERT OR REPLACE` is SQLite-only syntax; MySQL overwrites on the
+    # UNIQUE(player_id, game_id, market) key instead.
+    if get_backend() == "mysql":
+        sql = f"""
+        INSERT INTO nba_projections ({columns})
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            player_name=VALUES(player_name), team=VALUES(team), season=VALUES(season),
+            game_date=VALUES(game_date), projected_value=VALUES(projected_value),
+            confidence=VALUES(confidence), sigma=VALUES(sigma),
+            volatility_score=VALUES(volatility_score), usage_rate=VALUES(usage_rate),
+            predicted_minutes=VALUES(predicted_minutes), predicted_rate=VALUES(predicted_rate),
+            rate_sigma=VALUES(rate_sigma)
+        """
+    else:
+        sql = f"""
+        INSERT OR REPLACE INTO nba_projections ({columns})
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
     executemany(sql, rows)
     log.info("[%s] Wrote %d projections to nba_projections for %s", market, len(rows), today)
 

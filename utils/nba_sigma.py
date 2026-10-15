@@ -48,7 +48,9 @@ def compute_player_sigma(
     market : str
         Market type for floor/default lookup (pts, reb, ast, fg3m).
     decay : float
-        EWMA decay factor. Higher values weight recent games more.
+        EWMA decay factor: a game k games back gets weight ``decay ** k``
+        relative to the most recent one. Lower values concentrate weight on
+        recent games; values near 1.0 approach an equal-weighted std.
 
     Returns
     -------

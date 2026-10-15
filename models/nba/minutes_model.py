@@ -347,6 +347,11 @@ class MinutesModel:
             log.error("[minutes] Insufficient training data (%d rows).", n_samples)
             return {"cv_mae": float("nan"), "n_samples": n_samples}
 
+        # TimeSeriesSplit splits by row position: put rows in time order (the
+        # rolling features are already computed per player) so each fold
+        # validates on later games, not on a later block of player ids.
+        df = df.sort_values(["game_date", "player_id"], kind="mergesort").reset_index(drop=True)
+
         X = df[FEATURE_COLS].values
         y = df["min"].values
 

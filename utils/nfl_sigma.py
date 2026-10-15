@@ -157,7 +157,9 @@ def compute_player_sigma(
         Player position (QB/RB/WR/TE) for position-bucketed calibration.
         None (or an unknown position) reproduces the legacy per-market behavior.
     decay : float
-        EWMA decay factor. Higher values weight recent games more.
+        EWMA decay factor: a game k games back gets weight ``decay ** k``
+        relative to the most recent one. Lower values concentrate weight on
+        recent games; values near 1.0 approach an equal-weighted std.
 
     Returns
     -------
