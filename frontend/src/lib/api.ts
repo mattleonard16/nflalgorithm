@@ -521,8 +521,10 @@ export async function getCurrentUser(): Promise<User | null> {
 /**
  * Record a new bet on the slip (auth required)
  */
-export async function recordBet(payload: RecordBetPayload): Promise<{ message: string }> {
-  return fetchAPIAuth<{ message: string }>("/api/user/bets", {
+export async function recordBet(
+  payload: RecordBetPayload
+): Promise<{ bet_id: string; message: string }> {
+  return fetchAPIAuth<{ bet_id: string; message: string }>("/api/user/bets", {
     method: "POST",
     body: JSON.stringify(payload),
   });

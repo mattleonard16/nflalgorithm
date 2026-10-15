@@ -372,22 +372,29 @@ export interface WeeklySummaryResponse {
 
 // ── User Bet Slip ─────────────────────────────────────────────────────────────
 
+// Mirrors a row from GET /api/user/bets (columns of user_bets). `outcome` and
+// `graded_at` stay null until the bet is graded.
 export interface UserBet {
   bet_id: string;
   season: number | null;
   week: number | null;
   player_id: string;
+  player_name: string | null;
   market: string;
   sportsbook: string;
+  side: "over" | "under" | string;
   line: number;
   price: number;
-  stake: number;
-  edge_at_placement: number | null;
+  stake_units: number;
+  stake_dollars: number | null;
+  model_edge: number | null;
+  confidence_tier: string | null;
   placed_at: string;
   actual_result: number | null;
-  result: string | null;
+  outcome: string | null;
   profit_units: number | null;
-  settled_at: string | null;
+  profit_dollars: number | null;
+  graded_at: string | null;
 }
 
 export interface UserStats {
@@ -400,14 +407,20 @@ export interface UserStats {
   roi: number;
 }
 
+// Mirrors BetCreate in api/server.py (POST /api/user/bets). `price` is an
+// integer American price on the backend.
 export interface RecordBetPayload {
   season: number;
   week: number;
   player_id: string;
   market: string;
   sportsbook: string;
+  side: "over" | "under";
   line: number;
   price: number;
-  stake: number;
-  edge_at_placement?: number;
+  stake_units: number;
+  player_name?: string | null;
+  model_edge?: number | null;
+  confidence_tier?: string | null;
+  stake_dollars?: number | null;
 }
