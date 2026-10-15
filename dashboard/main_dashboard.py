@@ -531,7 +531,7 @@ def render_sidebar():
     with col1:
         refresh_clicked = st.button("Refresh", use_container_width=True)
     with col2:
-        export_clicked = st.button("Export", use_container_width=True)
+        st.button("Export", use_container_width=True)
     
     st.sidebar.markdown("---")
     

@@ -219,7 +219,6 @@ class TestSignificanceTests:
 
     def test_divergent_distributions_detected(self):
         """Very different distributions should be caught."""
-        n = 100
         # Regular: mostly overs (90%), near-zero line_diff
         reg_hit = np.array([1] * 90 + [0] * 10)
         reg = pd.DataFrame({

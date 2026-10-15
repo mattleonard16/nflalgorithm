@@ -115,7 +115,7 @@ def test_rank_weekly_value_with_valid_data(temp_db):
 
 def test_materialize_week_with_valid_data(temp_db):
     """Test that materialize_week correctly handles valid data."""
-    result = materialize_week(2023, 1, min_edge=0.0)
+    materialize_week(2023, 1, min_edge=0.0)
     
     # Check that data was materialized
     with sqlite3.connect(temp_db) as conn:

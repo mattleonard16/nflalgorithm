@@ -151,7 +151,7 @@ def main():
 
         # Show top opportunities as pretty table
         if isinstance(opportunities, pd.DataFrame) and len(opportunities) > 0:
-            print(f"\nTOP VALUE OPPORTUNITIES:")
+            print("\nTOP VALUE OPPORTUNITIES:")
             top = opportunities.copy()
             # Normalize edge% to percentage if in fraction
             if "edge_percentage" in top.columns and top["edge_percentage"].max() <= 1.0:
@@ -187,7 +187,7 @@ def main():
         else:
             print("\nNo value opportunities found.")
 
-        print(f"\nUPDATE COMPLETE")
+        print("\nUPDATE COMPLETE")
         print(f"Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     except Exception as e:

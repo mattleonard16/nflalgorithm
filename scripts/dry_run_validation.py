@@ -452,7 +452,7 @@ def _print_summary(report: Dict[str, Any]) -> None:
     ab = report.get("ab_comparison", {})
     raw_m = ab.get("raw", {})
     filt_m = ab.get("agent_filtered", {})
-    print(f"\nA/B Comparison:")
+    print("\nA/B Comparison:")
     print(f"  Raw:    {raw_m.get('total_picks', 0)} picks, avg edge={raw_m.get('avg_edge', 0):.4f}")
     print(
         f"  Agents: {filt_m.get('total_picks', 0)} picks, avg edge={filt_m.get('avg_edge', 0):.4f}"

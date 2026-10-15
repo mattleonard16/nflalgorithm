@@ -12,7 +12,7 @@ def value_visibility_scope(*, demo_mode: bool | None = None) -> tuple[str, tuple
     if show_fixtures:
         return "1 = 1", ()
 
-    predicate = f"""
+    predicate = """
         v.published_run_id IS NOT NULL
         AND LOWER(TRIM(v.sportsbook)) <> ?
         AND EXISTS (

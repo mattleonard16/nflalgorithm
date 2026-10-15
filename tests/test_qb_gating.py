@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from data_pipeline import QB_BASELINE_ATTEMPTS, compute_pass_attempts_predicted
 from models.position_specific.weekly import _eligible_role_mask

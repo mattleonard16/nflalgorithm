@@ -193,7 +193,8 @@ class PipelineWorker:
                     # An unhandled runner exception may follow an external side
                     # effect whose acknowledgement was lost. Without an explicit
                     # stage result proving retry safety, fail closed.
-                    write_terminal(lambda: self.service.fail(job, str(exc), retryable=False))
+                    reason = str(exc)
+                    write_terminal(lambda: self.service.fail(job, reason, retryable=False))
                 except LeaseLostError as lease_exc:
                     mark_lease_lost(str(lease_exc))
                 return

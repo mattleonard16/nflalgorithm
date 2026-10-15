@@ -58,7 +58,7 @@ def main() -> None:
     checks = run_drift_checks(args.date, markets=markets)
 
     print(f"\n{'='*60}")
-    print(f"  Drift Detection Results")
+    print("  Drift Detection Results")
     print(f"{'='*60}")
 
     for check in checks:
