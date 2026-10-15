@@ -104,9 +104,10 @@ def build_why_payloads_batch(
         key = f"{pid}:{mkt}"
         try:
             result[key] = build_why_payload(season, week, pid, mkt)
-        except Exception as exc:
-            logger.warning("Failed to build why for %s: %s", key, exc)
-            result[key] = {"error": str(exc)}
+        except Exception:
+            # The payload is public; keep exception text in the server log.
+            logger.exception("Failed to build why for %s", key)
+            result[key] = {"error": "explainability unavailable"}
     return result
 
 
