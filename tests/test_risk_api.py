@@ -108,15 +108,17 @@ class TestCorrelationAPI:
     def test_correlation_groups_have_players(self, client, db):
         _seed_bets(db)
         resp = client.get("/api/analytics/correlation?season=2025&week=22")
+        assert resp.status_code == 200
         data = resp.json()
 
-        if data["correlation_groups"]:
-            group = data["correlation_groups"][0]
-            assert "group" in group
-            assert "type" in group
-            assert "players" in group
-            assert "combined_stake" in group
-            assert len(group["players"]) >= 2
+        # The seeded KC QB + TE share a game, so at least one group must exist.
+        assert data["correlation_groups"], "Seeded KC stack should yield a correlation group"
+        group = data["correlation_groups"][0]
+        assert "group" in group
+        assert "type" in group
+        assert "players" in group
+        assert "combined_stake" in group
+        assert len(group["players"]) >= 2
 
 
 class TestRiskSummaryAPI:
