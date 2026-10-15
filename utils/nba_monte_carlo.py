@@ -26,6 +26,12 @@ _MINUTES_MAX = 48.0
 # Regularisation added to correlation matrix before Cholesky
 _CHOL_EPS = 1e-6
 
+# Seed used when the caller passes neither ``rng`` nor ``seed``, so the same
+# inputs give the same probabilities run to run (re-materializing a slate must
+# not flip bets across the edge threshold on simulation noise). Matches the
+# fixed seed in ``utils/risk_utils.monte_carlo_drawdown``.
+DEFAULT_SEED = 42
+
 
 # ---------------------------------------------------------------------------
 # Core simulation: single-variable and two-variable (minutes × rate)
@@ -41,6 +47,7 @@ def monte_carlo_prob(
     rng: np.random.Generator | None = None,
     minutes_mu: float | None = None,
     minutes_sigma: float | None = None,
+    seed: int | None = DEFAULT_SEED,
 ) -> tuple[float, float]:
     """Simulate P(stat > line) and P(stat < line) via Monte Carlo.
 
@@ -57,12 +64,15 @@ def monte_carlo_prob(
     n_sims : int
         Number of simulation draws.
     rng : numpy Generator or None
-        Seeded RNG for reproducibility. Uses default_rng() if None.
+        RNG to draw from. When None, ``np.random.default_rng(seed)`` is used.
     minutes_mu : float or None
         Mean predicted minutes.  Enables minutes × rate decomposition for
         rate markets (pts/reb/ast) when provided together with minutes_sigma.
     minutes_sigma : float or None
         Std-dev of predicted minutes.
+    seed : int or None
+        Seed for the RNG built when ``rng`` is None. Defaults to
+        ``DEFAULT_SEED`` (deterministic); pass None for fresh entropy.
 
     Returns
     -------
@@ -70,7 +80,7 @@ def monte_carlo_prob(
         Probabilities that always sum to exactly 1.0.
     """
     if rng is None:
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(seed)
 
     use_minutes = (
         market in _RATE_MARKETS
@@ -216,6 +226,7 @@ def monte_carlo_portfolio(
     correlation_matrix: np.ndarray,
     n_sims: int = 10_000,
     rng: np.random.Generator | None = None,
+    seed: int | None = DEFAULT_SEED,
 ) -> list[dict]:
     """Simulate correlated multi-stat outcomes for a single player.
 
@@ -229,7 +240,10 @@ def monte_carlo_portfolio(
     n_sims : int
         Number of simulation draws.
     rng : numpy Generator or None
-        Seeded RNG for reproducibility.
+        RNG to draw from. When None, ``np.random.default_rng(seed)`` is used.
+    seed : int or None
+        Seed for the RNG built when ``rng`` is None. Defaults to
+        ``DEFAULT_SEED`` (deterministic); pass None for fresh entropy.
 
     Returns
     -------
@@ -238,7 +252,7 @@ def monte_carlo_portfolio(
         mc_p_over, mc_p_under.
     """
     if rng is None:
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(seed)
 
     n = len(projections)
     if n == 0:

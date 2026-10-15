@@ -385,10 +385,9 @@ class TestMonteCarloIntegration:
 
         from nba_value_engine import rank_nba_value
 
-        results_default = rank_nba_value(GAME_DATE, SEASON, min_edge=0.0)
         results_mc = rank_nba_value(GAME_DATE, SEASON, min_edge=0.0, use_monte_carlo=True)
 
-        # Both should return results for the same player
+        # The Monte Carlo path should still return results
         assert len(results_mc) > 0, "No results with use_monte_carlo=True"
 
         required_keys = {
@@ -422,3 +421,45 @@ class TestMonteCarloIntegration:
         assert len(results) > 0
         for row in results:
             assert row.get("mc_p_win") is None
+
+
+
+class TestDeterministicDefaultSeed:
+    def test_monte_carlo_prob_repeatable_without_rng(self):
+        from utils.nba_monte_carlo import monte_carlo_prob
+
+        a = monte_carlo_prob(25.0, 6.0, 24.5, "pts", n_sims=2_000)
+        b = monte_carlo_prob(25.0, 6.0, 24.5, "pts", n_sims=2_000)
+        assert a == b
+
+    def test_monte_carlo_prob_seed_changes_draws(self):
+        from utils.nba_monte_carlo import monte_carlo_prob
+
+        a = monte_carlo_prob(25.0, 6.0, 24.5, "pts", n_sims=2_000, seed=1)
+        b = monte_carlo_prob(25.0, 6.0, 24.5, "pts", n_sims=2_000, seed=2)
+        assert a != b
+
+    def test_explicit_rng_takes_precedence_over_seed(self):
+        import numpy as np
+
+        from utils.nba_monte_carlo import monte_carlo_prob
+
+        a = monte_carlo_prob(25.0, 6.0, 24.5, "pts", n_sims=2_000, rng=np.random.default_rng(7))
+        b = monte_carlo_prob(
+            25.0, 6.0, 24.5, "pts", n_sims=2_000, rng=np.random.default_rng(7), seed=99
+        )
+        assert a == b
+
+    def test_portfolio_repeatable_without_rng(self):
+        import numpy as np
+
+        from utils.nba_monte_carlo import monte_carlo_portfolio
+
+        projections = [
+            {"market": "pts", "mu": 25.0, "sigma": 6.0, "line": 24.5},
+            {"market": "fg3m", "mu": 2.5, "sigma": 1.5, "line": 2.5},
+        ]
+        corr = np.eye(2)
+        a = monte_carlo_portfolio(projections, corr, n_sims=2_000)
+        b = monte_carlo_portfolio(projections, corr, n_sims=2_000)
+        assert [r["mc_p_over"] for r in a] == [r["mc_p_over"] for r in b]

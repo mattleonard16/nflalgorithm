@@ -226,6 +226,9 @@ def tune_market(market: str, n_trials: int) -> None:
         return
 
     log.info("[%s] Tuning on %d rows …", market, len(df))
+    # TimeSeriesSplit splits by row position: time-order the rows (features are
+    # already computed) so folds are chronological, not blocks of player ids.
+    df = df.sort_values(["game_date", "player_id"], kind="mergesort").reset_index(drop=True)
     X = df[feature_cols].values
     y = df[market].values
 
@@ -283,6 +286,8 @@ def tune_minutes(n_trials: int) -> None:
         return
 
     log.info("[minutes] Tuning on %d rows …", len(df))
+    # Chronological rows so TimeSeriesSplit folds are time-ordered (see above).
+    df = df.sort_values(["game_date", "player_id"], kind="mergesort").reset_index(drop=True)
     X = df[MINUTES_FEATURE_COLS].values
     y = df["min"].values
 

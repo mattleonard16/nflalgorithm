@@ -461,6 +461,15 @@ class TestParseEvents:
         rows = _parse_events(FAKE_EVENTS, season=2025)
         assert all(r["game_date"] == "2026-02-17" for r in rows)
 
+    def test_evening_tip_keeps_eastern_date(self, db):
+        """A 7:30pm ET tip is 00:30Z the next day; it belongs to the ET date
+        that projections and box scores use, not the UTC date."""
+        from scripts.scrape_nba_odds import _parse_events
+        late = [{**FAKE_EVENTS[0], "commence_time": "2026-02-18T00:30:00Z"}]
+        rows = _parse_events(late, season=2025)
+        assert rows
+        assert all(r["game_date"] == "2026-02-17" for r in rows)
+
     def test_empty_events_returns_empty(self, db):
         from scripts.scrape_nba_odds import _parse_events
         rows = _parse_events([], season=2025)
@@ -754,3 +763,27 @@ class TestModeledMarketsFilter:
         from scripts.scrape_nba_odds import MODELED_MARKETS
         assert isinstance(MODELED_MARKETS, frozenset)
         assert MODELED_MARKETS == frozenset({"pts", "reb", "ast", "fg3m"})
+
+
+
+class TestSlateDate:
+    @pytest.mark.parametrize(
+        "commence_time, expected",
+        [
+            ("2026-02-18T00:30:00Z", "2026-02-17"),  # 7:30pm EST
+            ("2026-02-18T03:00:00Z", "2026-02-17"),  # 10pm EST west-coast tip
+            ("2026-02-17T17:00:00Z", "2026-02-17"),  # noon EST matinee
+            ("2026-04-01T23:30:00Z", "2026-04-01"),  # 7:30pm EDT
+            ("2026-04-02T02:00:00+00:00", "2026-04-01"),  # 10pm EDT
+            ("2026-02-18T00:30:00", "2026-02-17"),  # naive is treated as UTC
+        ],
+    )
+    def test_utc_commence_time_maps_to_eastern_date(self, commence_time, expected):
+        from scripts.scrape_nba_odds import _slate_date
+
+        assert _slate_date(commence_time) == expected
+
+    def test_unparseable_falls_back_to_a_date(self):
+        from scripts.scrape_nba_odds import _slate_date
+
+        assert len(_slate_date("not-a-time")) == 10
