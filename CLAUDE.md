@@ -85,6 +85,9 @@ make ingest-nfl
 
 # Run tests
 make test
+make lint        # ruff pyflakes rules; CI blocks on this
+make typecheck   # mypy; known backlog, not yet a gate
+make requirements  # regenerate requirements.txt from uv.lock (CI checks it is current)
 
 # Weekly workflow (local/manual — see docs/OPERATIONS.md for the production run)
 make week-predict SEASON=2025 WEEK=13
@@ -399,14 +402,20 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     rather than a version table; recovery from any partial run is `make migrate` again. Crash
     safety of the PK-widening rebuilds is covered by `tests/test_migration_crash_recovery.py`. See
     docs/OPERATIONS.md "Migrations: re-run forward, no rollback".
-19. [Documented non-blocker] Opening vs closing line: opening is derivable as the first stored
-    snapshot (`MIN(as_of)` per key, `scripts/backfill_line_accuracy.py:load_opening_lines`,
-    consumed by `make backfill-accuracy`), bounded by scrape cadence rather than true market-open.
-    CLV (`utils/clv.py`) intentionally grades entry-vs-close, not open-vs-close — that is by
-    design, not a gap. `backfill_line_accuracy.py` compares `as_of` as SQLite TEXT (lexical, not
-    chronological) — fine for consistently-formatted UTC timestamps but unlike `utils/clv.py` and
-    `utils/matching.py`, which parse with pandas for true chronological ordering. Latent gap, not
-    fixed here.
+19. [RESOLVED] Opening vs closing line: opening is derivable as the first stored snapshot
+    (`scripts/backfill_line_accuracy.py:load_opening_lines`, consumed by `make backfill-accuracy`),
+    bounded by scrape cadence rather than true market-open. CLV (`utils/clv.py`) intentionally
+    grades entry-vs-close, not open-vs-close — by design, not a gap. The backfill now picks
+    open/close by `as_of` parsed as UTC (chronological, like `utils/clv.py`) rather than TEXT
+    `MIN`/`MAX`, and screens odds through `utils/odds_quality.filter_gradeable_odds` so SimBook
+    lines never feed hit rates.
+    **CLV sign (fixed 2026-10)**: points CLV is `close - entry` for an over (negated for an
+    under), so an over taken at 50.5 that closes at 54.5 is +4. It was previously inverted, as was
+    the model-fallback `clv_bp`; any `clv_weekly` / `weekly_performance.clv_avg` rows written
+    before the fix carry the opposite sign. When the line moved, the market branch prices the
+    entry line on the close-implied mean instead of comparing fair probabilities at two lines.
+    `scripts/record_outcomes.py` now carries `implied_prob`/`implied_prob_under` into CLV, so a
+    pure price move is graded off the market rather than the model.
 20. [RESOLVED] Tier-3 name-only match: position-guarded via `utils/matching.positions_compatible`
     at both tier-3 paths (`prop_integration.py:276-277`, `:315-316`) and the tier-3b fuzzy path;
     suffix handling is non-destructive (`utils/matching.py:91-132`, roster-verified tier 2.5 at
@@ -425,7 +434,9 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     error responses (`utils/api_exceptions.py`, `tests/test_api_exception_handler.py`).
 
 ### Tier 3 — LOWER (polish)
-24. Property tests for Kelly/edge/vig math.
+24. [RESOLVED] Property tests for Kelly/edge/vig math — `tests/test_betting_math_properties.py`
+    (seeded samples + boundaries; hypothesis is not installed). The only tracked Kelly is
+    `nba_value_engine.kelly_fraction`; the NFL Kelly lives in the private engine.
 25. [RESOLVED] CI gate on per-position MAE — `check_position_mae` in
     `scripts/evaluate_nfl_projections.py`, exposed as the `mae-gate` subcommand and `make mae-gate`.
     Two ways to set the ceilings, and both survive in the merged code.
