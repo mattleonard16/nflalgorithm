@@ -40,3 +40,21 @@ def test_implied_probability_no_vig_raises_on_zero_total(monkeypatch):
     monkeypatch.setattr(utils.odds_math, "implied_probability", lambda _: 0.0)
     with pytest.raises(ValueError):
         implied_probability_no_vig(-110, -110)
+
+
+@pytest.mark.parametrize("odds", [0, 50, -50, 99, -99, float("nan")])
+def test_values_strictly_between_minus_and_plus_100_are_rejected(odds):
+    """No American price lies in (-100, +100). Accepting 50 returned 0.667 and
+    priced a bet off a bad cell."""
+    with pytest.raises(ValueError, match="American odds"):
+        implied_probability(odds)
+    with pytest.raises(ValueError, match="American odds"):
+        utils.odds_math.american_to_decimal(odds)
+    with pytest.raises(ValueError, match="American odds"):
+        implied_probability_no_vig(-110, odds)
+
+
+@pytest.mark.parametrize("odds", [-100, 100])
+def test_even_money_is_valid_at_both_signs(odds):
+    assert implied_probability(odds) == pytest.approx(0.5)
+    assert utils.odds_math.american_to_decimal(odds) == pytest.approx(2.0)

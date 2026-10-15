@@ -105,7 +105,8 @@ def test_resolve_closing_lines_orders_by_time_not_string():
 
 
 def test_compute_clv_over_beats_close_when_line_rises():
-    """Took over 50.5, market closed at 54.5 → negative points CLV."""
+    """Took over 50.5, market closed at 54.5 → the over bettor holds the
+    easier number, +4 points."""
     entry = {"line": 50.5, "side": "over", "price": -110, "under_price": -110}
     close = {
         "close_line": 54.5,
@@ -118,12 +119,12 @@ def test_compute_clv_over_beats_close_when_line_rises():
     result = compute_clv(entry, close)
 
     assert result["status"] == STATUS_OK
-    assert result["clv_points"] == pytest.approx(-4.0)
+    assert result["clv_points"] == pytest.approx(4.0)
     assert result["close_line"] == 54.5
     assert result["closed_at"] == "2025-11-27T18:00:00+00:00"
 
 
-def test_compute_clv_over_gains_when_line_drops():
+def test_compute_clv_over_loses_when_line_drops():
     entry = {"line": 54.5, "side": "over", "price": -110, "under_price": -110}
     close = {
         "close_line": 50.5,
@@ -133,11 +134,11 @@ def test_compute_clv_over_gains_when_line_drops():
         "snapshot_count": 4,
     }
 
-    assert compute_clv(entry, close)["clv_points"] == pytest.approx(4.0)
+    assert compute_clv(entry, close)["clv_points"] == pytest.approx(-4.0)
 
 
 def test_compute_clv_under_sign_is_corrected():
-    """An under bettor gains when the line moves up — opposite sign to over."""
+    """An under bettor gains when the line moves down — opposite sign to over."""
     close = {
         "close_line": 54.5,
         "close_price": -110,
@@ -149,8 +150,8 @@ def test_compute_clv_under_sign_is_corrected():
     over = compute_clv({"line": 50.5, "side": "over", "price": -110, "under_price": -110}, close)
     under = compute_clv({"line": 50.5, "side": "under", "price": -110, "under_price": -110}, close)
 
-    assert over["clv_points"] == pytest.approx(-4.0)
-    assert under["clv_points"] == pytest.approx(4.0)
+    assert over["clv_points"] == pytest.approx(4.0)
+    assert under["clv_points"] == pytest.approx(-4.0)
 
 
 def test_compute_clv_bp_uses_no_vig_probabilities():
@@ -242,7 +243,8 @@ def test_compute_clv_one_sided_quote_without_model_reports_unknown_bp():
     result = compute_clv(entry, close)
 
     assert result["status"] == STATUS_OK
-    assert result["clv_points"] == pytest.approx(2.0)
+    # Over 50.5 against a 48.5 close: the over bettor took the worse number.
+    assert result["clv_points"] == pytest.approx(-2.0)
     assert result["clv_bp"] is None
 
 
@@ -267,8 +269,9 @@ def test_compute_clv_one_sided_quote_falls_back_to_model_distribution():
     result = compute_clv(entry, close)
 
     assert result["status"] == STATUS_OK
-    # Line moved against the over bettor, so fair p_over at the close is lower.
-    assert result["clv_bp"] < 0
+    # The line rose to 54.5: the over at 50.5 is likelier to win than the over
+    # at the close, so the bettor beat it.
+    assert result["clv_bp"] > 0
 
 
 def test_an_unmoved_line_with_only_stored_entry_probabilities_is_zero():
@@ -427,7 +430,113 @@ def test_resolve_then_compute_end_to_end():
     )
 
     assert result["status"] == STATUS_OK
-    assert result["clv_points"] == pytest.approx(-4.0)
+    assert result["clv_points"] == pytest.approx(4.0)
+
+
+# ---------------------------------------------------------------------------
+# Line movement in the market branch
+# ---------------------------------------------------------------------------
+
+
+def _two_sided_close(line: float, price: int = -110, under_price: int = -110) -> dict:
+    return {
+        "close_line": line,
+        "close_price": price,
+        "close_under_price": under_price,
+        "closed_at": "2025-11-27T18:00:00+00:00",
+        "snapshot_count": 3,
+    }
+
+
+def test_market_clv_prices_a_line_move_at_the_entry_line():
+    """Over 50.5 at -110/-110 against a 54.5 close at -110/-110 used to read
+    0 bp: two fair probabilities at two different lines. The close is now
+    translated to our line through the mean it implies."""
+    from utils.market_blend import implied_mean
+    from utils.nfl_markets import prob_over
+
+    entry = {
+        "line": 50.5,
+        "side": "over",
+        "price": -110,
+        "under_price": -110,
+        "mu": 60.0,
+        "sigma": 20.0,
+        "market": "receiving_yards",
+    }
+
+    result = compute_clv(entry, _two_sided_close(54.5))
+
+    close_mean = implied_mean(54.5, 20.0, 0.5, market="receiving_yards")
+    expected = prob_over(close_mean, 20.0, 50.5, market="receiving_yards") - 0.5
+    assert result["clv_bp"] == pytest.approx(expected * 10_000, abs=1e-2)
+    assert result["clv_bp"] > 0
+
+
+def test_market_clv_on_a_moved_line_without_sigma_is_unknown():
+    """Without a curve the close cannot be moved to our line. Unknown, not 0."""
+    entry = {"line": 50.5, "side": "over", "price": -110, "under_price": -110}
+
+    result = compute_clv(entry, _two_sided_close(54.5))
+
+    assert result["status"] == STATUS_OK
+    assert result["clv_points"] == pytest.approx(4.0)
+    assert result["clv_bp"] is None
+
+
+_MODEL = {"mu": 52.0, "sigma": 18.0, "market": "receiving_yards"}
+
+
+@pytest.mark.parametrize("side", ["over", "under"])
+@pytest.mark.parametrize("branch", ["market", "model"])
+def test_a_line_move_toward_our_side_is_positive_clv(side, branch):
+    """The close moved to a number harder for our side: we beat it."""
+    entry_line = 50.5
+    close_line = entry_line + 4.0 if side == "over" else entry_line - 4.0
+    entry = {"line": entry_line, "side": side, "price": -110, **_MODEL}
+    close = _two_sided_close(close_line)
+    if branch == "market":
+        entry["under_price"] = -110
+    else:
+        close["close_under_price"] = None
+
+    result = compute_clv(entry, close)
+
+    assert result["clv_points"] == pytest.approx(4.0)
+    assert result["clv_bp"] > 0
+
+    # And the mirror move is negative.
+    away = dict(close, close_line=2 * entry_line - close_line)
+    mirrored = compute_clv(entry, away)
+    assert mirrored["clv_points"] == pytest.approx(-4.0)
+    assert mirrored["clv_bp"] < 0
+
+
+@pytest.mark.parametrize("side", ["over", "under"])
+def test_a_price_move_toward_our_side_is_positive_clv(side):
+    """Same line, the market shortened our side: we beat the close."""
+    entry = {"line": 50.5, "side": side, "price": -110, "under_price": -110, **_MODEL}
+    shorter_over = _two_sided_close(50.5, price=-140, under_price=120)
+    shorter_under = _two_sided_close(50.5, price=120, under_price=-140)
+
+    toward = compute_clv(entry, shorter_over if side == "over" else shorter_under)
+    away = compute_clv(entry, shorter_under if side == "over" else shorter_over)
+
+    assert toward["clv_points"] == pytest.approx(0.0)
+    assert toward["clv_bp"] > 0
+    assert away["clv_bp"] < 0
+
+
+def test_out_of_range_odds_cells_are_treated_as_missing():
+    """A 0 or 50 in a price cell is not American odds; it must not crash the
+    grading run or price a probability."""
+    entry = {"line": 50.5, "side": "over", "price": 50, "under_price": -110}
+
+    result = compute_clv(entry, _two_sided_close(50.5, price=0))
+
+    assert result["status"] == STATUS_OK
+    assert result["clv_bp"] is None
+    assert result["close_price"] is None
 
 
 # ---------------------------------------------------------------------------

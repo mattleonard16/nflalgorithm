@@ -24,6 +24,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from utils.market_blend import implied_mean
 from utils.nfl_markets import prob_over
 from utils.odds_math import implied_probability_no_vig
 
@@ -237,7 +238,9 @@ def _as_odds(value: Any) -> int | None:
         odds = int(float(str(value)))
     except (TypeError, ValueError):
         return None
-    return odds or None
+    # American odds never fall strictly between -100 and +100; a 0 or 50 here
+    # is a bad cell, and ``implied_probability`` refuses it.
+    return odds if abs(odds) >= 100 else None
 
 
 def compute_clv(entry: Mapping[str, Any], close: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -271,9 +274,10 @@ def compute_clv(entry: Mapping[str, Any], close: Mapping[str, Any] | None) -> di
     if entry_line is None or close_line is None:
         return _insufficient("entry or closing line missing")
 
-    # Points CLV: an over bettor gains when the line moves down, an under
-    # bettor when it moves up.
-    raw_points = entry_line - close_line
+    # Points CLV: an over bettor beat the close when the line moved up after he
+    # took it (over 50.5 against a 54.5 close holds the easier number), an under
+    # bettor when it moved down.
+    raw_points = close_line - entry_line
     clv_points = raw_points if side == "over" else -raw_points
 
     mu = _as_float(entry.get("mu"))
@@ -301,29 +305,33 @@ def compute_clv(entry: Mapping[str, Any], close: Mapping[str, Any] | None) -> di
     close_market = _market_fair_prob(close, "close_price", "close_under_price", side)
 
     if entry_market is not None and close_market is not None:
-        entry_prob: float | None = entry_market
-        close_prob: float | None = close_market
+        # Price movement at the same line: we beat the close when the fair
+        # probability of our side rose after we took it.
+        if entry_line == close_line:
+            clv_prob: float | None = close_market - entry_market
+        else:
+            close_at_entry = _close_prob_at_entry_line(
+                close_market, close_line, entry_line, side, sigma=sigma, market=market
+            )
+            clv_prob = None if close_at_entry is None else close_at_entry - entry_market
     elif has_model:
         # No market probability on one side. The model's own distribution is a
         # consistent basis for both, and it still measures the move: the same
-        # curve read at the entry line against the closing line.
+        # curve read at the entry line against the closing line. Our line beats
+        # the close when our side is likelier to win at our line than at theirs.
         entry_prob = _fair_prob(
             entry_line, None, None, side, mu=mu, sigma=sigma, market=market
         )
         close_prob = _fair_prob(
             close_line, None, None, side, mu=mu, sigma=sigma, market=market
         )
+        clv_prob = entry_prob - close_prob
     else:
         # One-sided quote and no model distribution: probability-space CLV is
         # not computable. Report unknown rather than inventing a 0.
-        entry_prob = close_prob = None
+        clv_prob = None
 
-    if entry_prob is None or close_prob is None:
-        clv_bp = None
-    else:
-        # We beat the close when the fair probability of our side rose after we
-        # took it: the number we hold is now better than the market's.
-        clv_bp = round((close_prob - entry_prob) * 10_000.0, 4)
+    clv_bp = None if clv_prob is None else round(clv_prob * 10_000.0, 4)
 
     return {
         "status": STATUS_OK,
@@ -333,6 +341,40 @@ def compute_clv(entry: Mapping[str, Any], close: Mapping[str, Any] | None) -> di
         "close_price": _as_odds(close.get("close_price")),
         "closed_at": close.get("closed_at"),
     }
+
+
+def _close_prob_at_entry_line(
+    close_prob: float,
+    close_line: float,
+    entry_line: float,
+    side: str,
+    *,
+    sigma: float | None,
+    market: str | None,
+) -> float | None:
+    """The closing market's fair probability of ``side`` at the *entry* line.
+
+    Two fair probabilities at two different lines are not comparable: over
+    50.5 at -110/-110 against a 54.5 close at -110/-110 reads as no change,
+    although the over bettor holds a number four yards better. So recover the
+    mean the close implies (``utils.market_blend.implied_mean``, the same curve
+    the bet was priced on) and price our line on it.
+
+    Needs a positive model ``sigma`` for the curve's spread. Without one, or
+    when the close implies no usable mean, returns ``None``: unknown, never a
+    wrong number.
+    """
+    if sigma is None or not sigma > 0:
+        return None
+    p_over_close = close_prob if side == "over" else 1.0 - close_prob
+    try:
+        mean = implied_mean(close_line, sigma, p_over_close, market=market)
+    except ValueError:
+        return None
+    if pd.isna(mean):
+        return None
+    p_over = prob_over(mean, sigma, entry_line, market=market)
+    return p_over if side == "over" else 1.0 - p_over
 
 
 def _insufficient(reason: str) -> dict[str, Any]:

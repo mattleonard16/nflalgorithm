@@ -134,6 +134,16 @@ class TestCorrelationDetection:
         result = detect_correlations(df)
         assert result["correlation_group"].isna().all()
 
+    @pytest.mark.parametrize("missing", [None, np.nan])
+    def test_missing_team_never_matches_another_missing_team(self, missing):
+        """Two rows in different games with no team are not one game."""
+        df = _make_value_df([
+            {"player_id": "QB1", "market": "passing_yards", "team": missing, "event_id": "G1"},
+            {"player_id": "WR1", "market": "receiving_yards", "team": missing, "event_id": "G2"},
+        ])
+        result = detect_correlations(df)
+        assert result["correlation_group"].isna().all()
+
 
 # ── Team stack detection ──────────────────────────────────────────────
 
