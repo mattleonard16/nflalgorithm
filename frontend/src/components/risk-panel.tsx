@@ -70,13 +70,13 @@ export function RiskPanel({
             <span className="text-[11px] text-slate-500">
               Total Stake:{" "}
               <span className="text-slate-300 font-[family-name:var(--font-jetbrains)] tabular-nums">
-                {riskSummary.total_stake.toFixed(2)}u
+                ${riskSummary.total_stake.toFixed(2)}
               </span>
             </span>
             <span className="text-[11px] text-slate-500">
               Bankroll:{" "}
               <span className="text-slate-300 font-[family-name:var(--font-jetbrains)] tabular-nums">
-                {riskSummary.bankroll.toFixed(0)}u
+                ${riskSummary.bankroll.toFixed(0)}
               </span>
             </span>
           </div>
@@ -116,7 +116,7 @@ export function RiskPanel({
                       : "Same Team"}
                 </span>
                 <span className="text-[10px] text-slate-500 font-[family-name:var(--font-jetbrains)]">
-                  {group.combined_stake.toFixed(2)}u combined
+                  ${group.combined_stake.toFixed(2)} combined
                 </span>
               </div>
               <div className="text-[11px] text-slate-300 leading-relaxed">

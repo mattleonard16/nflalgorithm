@@ -59,8 +59,10 @@ const FALLBACK_COLORS = ["#d4a84b", "#c4b08a", "#8a9a7b", "#7a8796", "#b85c4a"];
 export default function AnalyticsPage() {
   const [meta, setMeta] = useState<MetaResponse | null>(null);
   const [slateWeeks, setSlateWeeks] = useState<AvailableWeek[]>([]);
-  const [season, setSeason] = useState(2025);
-  const [week, setWeek] = useState(13);
+  // Null until the current week resolves, so nothing is fetched for a
+  // placeholder week first.
+  const [season, setSeason] = useState<number | null>(null);
+  const [week, setWeek] = useState<number | null>(null);
   const [edgeDist, setEdgeDist] = useState<EdgeDistribution | null>(null);
   const [positions, setPositions] = useState<PositionStats[]>([]);
   const [markets, setMarkets] = useState<MarketStats[]>([]);
@@ -68,7 +70,8 @@ export default function AnalyticsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const { watchlist } = useWatchlist();
-  const watchedThisWeek = filterForWeek(watchlist, season, week);
+  const watchedThisWeek =
+    season !== null && week !== null ? filterForWeek(watchlist, season, week) : [];
 
   // Resolve the week to show. Published cards win; otherwise fall back to the
   // algorithm slate so the watched picks land on a week that actually exists.
@@ -89,7 +92,12 @@ export default function AnalyticsPage() {
       }
 
       const slate = await getProjectionWeeks().catch(() => null);
-      if (cancelled || !slate || slate.available_weeks.length === 0) return;
+      if (cancelled) return;
+      if (!slate || slate.available_weeks.length === 0) {
+        // No week to show: stop the loading state instead of spinning forever.
+        setLoading(false);
+        return;
+      }
       setSlateWeeks(slate.available_weeks);
       setSeason(slate.available_weeks[0].season);
       setWeek(slate.available_weeks[0].week);
@@ -107,28 +115,49 @@ export default function AnalyticsPage() {
   const seasonOptions = [...new Set(weekOptions.map((w) => w.season))];
   const weekNumbers = weekOptions.filter((w) => w.season === season).map((w) => w.week);
 
+  // Switching season keeps the week only if that season has it; otherwise
+  // jump to the season's first listed week rather than fetch a missing one.
+  const handleSeasonChange = (nextSeason: number) => {
+    const seasonWeeks = weekOptions.filter((w) => w.season === nextSeason).map((w) => w.week);
+    setSeason(nextSeason);
+    if (seasonWeeks.length > 0 && (week === null || !seasonWeeks.includes(week))) {
+      setWeek(seasonWeeks[0]);
+    }
+  };
+
   // Fetch analytics data when season/week changes
   useEffect(() => {
+    if (season === null || week === null) return;
+    const activeSeason = season;
+    const activeWeek = week;
+    let cancelled = false;
+
     async function load() {
       setLoading(true);
       setError(null);
 
       try {
         const [edge, pos, mkt] = await Promise.all([
-          getEdgeDistribution(season, week),
-          getAnalyticsByPosition(season, week),
-          getAnalyticsByMarket(season, week),
+          getEdgeDistribution(activeSeason, activeWeek),
+          getAnalyticsByPosition(activeSeason, activeWeek),
+          getAnalyticsByMarket(activeSeason, activeWeek),
         ]);
+        if (cancelled) return;
         setEdgeDist(edge);
         setPositions(pos.positions);
         setMarkets(mkt.markets);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load analytics");
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load analytics");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
     load();
+    return () => {
+      cancelled = true;
+    };
   }, [season, week]);
 
   // Prepare chart data
@@ -164,14 +193,15 @@ export default function AnalyticsPage() {
             <div className="space-y-2">
               <Label className="text-slate-400">Season</Label>
               <Select
-                value={season.toString()}
-                onValueChange={(v) => setSeason(parseInt(v))}
+                value={season?.toString() ?? ""}
+                disabled={season === null}
+                onValueChange={(v) => handleSeasonChange(parseInt(v))}
               >
                 <SelectTrigger className="w-32 bg-[#0d1220] border-slate-700 text-slate-100">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-[#0d1220] border-slate-700">
-                  {(seasonOptions.length > 0 ? seasonOptions : [season]).map((s) => (
+                  {(seasonOptions.length > 0 ? seasonOptions : season !== null ? [season] : []).map((s) => (
                     <SelectItem key={s} value={s.toString()} className="text-slate-100">
                       {s}
                     </SelectItem>
@@ -183,14 +213,15 @@ export default function AnalyticsPage() {
             <div className="space-y-2">
               <Label className="text-slate-400">Week</Label>
               <Select
-                value={week.toString()}
+                value={week?.toString() ?? ""}
+                disabled={week === null}
                 onValueChange={(v) => setWeek(parseInt(v))}
               >
                 <SelectTrigger className="w-24 bg-[#0d1220] border-slate-700 text-slate-100">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-[#0d1220] border-slate-700">
-                  {(weekNumbers.length > 0 ? weekNumbers : [week]).map((w) => (
+                  {(weekNumbers.length > 0 ? weekNumbers : week !== null ? [week] : []).map((w) => (
                     <SelectItem key={w} value={w.toString()} className="text-slate-100">
                       {w}
                     </SelectItem>
@@ -214,7 +245,9 @@ export default function AnalyticsPage() {
           <div className="flex items-baseline justify-between gap-3 flex-wrap">
             <CardTitle className="text-slate-100">Watched Slate</CardTitle>
             <p className="text-xs text-slate-500">
-              Algorithm picks you are tracking for Season {season} &middot; Week {week}
+              {season !== null && week !== null
+                ? <>Algorithm picks you are tracking for Season {season} &middot; Week {week}</>
+                : "Algorithm picks you are tracking"}
               {watchedThisWeek.length > 0 && (
                 <>
                   {" "}

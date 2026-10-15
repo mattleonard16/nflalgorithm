@@ -26,9 +26,21 @@ import type {
   ArchitectureStatus,
   ProjectionWeeksResponse,
   ProjectionsResponse,
+  UserPreferences,
 } from "./types";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+/**
+ * Base URL for every backend call. `??`, not `||`: an explicitly empty
+ * NEXT_PUBLIC_API_URL means same-origin (relative URLs behind a proxy), and
+ * only an unset variable falls back to the local API.
+ */
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+/**
+ * Dispatched on `window` when an authenticated call gets a 401 and the stored
+ * session is cleared, so the auth context can drop the signed-in user.
+ */
+export const AUTH_EXPIRED_EVENT = "auth:expired";
 
 /**
  * Generic fetch wrapper with error handling
@@ -452,6 +464,9 @@ async function fetchAPIAuth<T>(endpoint: string, options?: RequestInit): Promise
   if (!response.ok) {
     if (response.status === 401) {
       clearSessionToken();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+      }
     }
     const errorText = await response.text();
     throw new Error(`API Error (${response.status}): ${errorText}`);
@@ -521,8 +536,10 @@ export async function getCurrentUser(): Promise<User | null> {
 /**
  * Record a new bet on the slip (auth required)
  */
-export async function recordBet(payload: RecordBetPayload): Promise<{ message: string }> {
-  return fetchAPIAuth<{ message: string }>("/api/user/bets", {
+export async function recordBet(
+  payload: RecordBetPayload
+): Promise<{ bet_id: string; message: string }> {
+  return fetchAPIAuth<{ bet_id: string; message: string }>("/api/user/bets", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -544,4 +561,40 @@ export async function getUserBets(season?: number, week?: number): Promise<{ bet
  */
 export async function getUserStats(): Promise<UserStats> {
   return fetchAPIAuth<UserStats>("/api/user/stats");
+}
+
+// ============================================================================
+// User Settings API
+// ============================================================================
+
+/**
+ * Get the current user's saved preferences (auth required). The backend
+ * returns null when no preferences row exists yet.
+ */
+export async function getUserPreferences(): Promise<UserPreferences | null> {
+  return fetchAPIAuth<UserPreferences | null>("/api/user/preferences");
+}
+
+/**
+ * Replace the current user's preferences (auth required).
+ */
+export async function updateUserPreferences(prefs: UserPreferences): Promise<boolean> {
+  return fetchAPIAuth<boolean>("/api/user/preferences", {
+    method: "PUT",
+    body: JSON.stringify(prefs),
+  });
+}
+
+/**
+ * Update the current user's bankroll in dollars (auth required). The backend
+ * reads it from the query string, not a JSON body.
+ */
+export async function updateUserBankroll(
+  bankroll: number
+): Promise<{ message: string; bankroll: number }> {
+  const params = new URLSearchParams({ bankroll: bankroll.toString() });
+  return fetchAPIAuth<{ message: string; bankroll: number }>(
+    `/api/user/bankroll?${params.toString()}`,
+    { method: "PUT" }
+  );
 }

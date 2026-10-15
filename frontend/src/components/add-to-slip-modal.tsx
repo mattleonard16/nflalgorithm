@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
+import { cn, sideLabel } from "@/lib/utils";
 import { recordBet } from "@/lib/api";
 import type { ValueBet } from "@/lib/types";
 import { X } from "lucide-react";
@@ -24,18 +24,26 @@ export function AddToSlipModal({
   onClose,
   onSuccess,
 }: AddToSlipModalProps) {
-  const [stake, setStake] = useState<string>(
-    bet.stake > 0 ? bet.stake.toFixed(2) : "1.00"
-  );
+  // Units, not bet.stake: the card's stake is portfolio dollars against the
+  // model bankroll, so prefilling it here would record dollars as units.
+  const [stake, setStake] = useState<string>("1.00");
   const [sportsbook, setSportsbook] = useState<string>(bet.sportsbook ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The backend requires an explicit side. Never guess one: a bet recorded on
+  // the wrong side grades backwards.
+  const rawSide = bet.side?.toLowerCase();
+  const side = rawSide === "over" || rawSide === "under" ? rawSide : null;
   const stakeNum = parseFloat(stake);
   const isValidStake = !isNaN(stakeNum) && stakeNum > 0;
 
   const handleSubmit = async () => {
     if (!isValidStake) return;
+    if (!side) {
+      setError("This bet has no over/under side, so it can't be added to your slip.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -43,12 +51,15 @@ export function AddToSlipModal({
         season,
         week,
         player_id: bet.player_id,
+        player_name: bet.player_name,
         market: bet.market,
         sportsbook: sportsbook || bet.sportsbook,
+        side,
         line: bet.line,
-        price: bet.price,
-        stake: stakeNum,
-        edge_at_placement: bet.edge_percentage,
+        price: Math.round(bet.price),
+        stake_units: stakeNum,
+        model_edge: bet.edge_percentage,
+        confidence_tier: bet.confidence_tier ?? null,
       });
       onSuccess?.();
       onClose();
@@ -100,7 +111,7 @@ export function AddToSlipModal({
           <div className="bg-slate-800/30 rounded-lg py-2.5">
             <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Line</p>
             <p className="text-base font-bold text-slate-200 font-[family-name:var(--font-jetbrains)]">
-              O {bet.line?.toFixed(1)}
+              {side ? sideLabel(side) : "?"} {bet.line?.toFixed(1)}
             </p>
           </div>
           <div className="bg-slate-800/30 rounded-lg py-2.5">
@@ -167,6 +178,11 @@ export function AddToSlipModal({
           )}
 
           {/* Error */}
+          {!side && !error && (
+            <p className="text-xs text-amber-400 bg-amber-900/10 border border-amber-800/30 rounded-md px-3 py-2">
+              This bet has no over/under side, so it can&apos;t be added to your slip.
+            </p>
+          )}
           {error && (
             <p className="text-xs text-red-400 bg-red-900/10 border border-red-800/30 rounded-md px-3 py-2">
               {error}
@@ -186,7 +202,7 @@ export function AddToSlipModal({
             <Button
               size="sm"
               onClick={handleSubmit}
-              disabled={submitting || !isValidStake}
+              disabled={submitting || !isValidStake || !side}
               className="flex-1 bg-primary text-primary-foreground hover:bg-amber-300 disabled:opacity-50"
             >
               {submitting ? "Recording…" : "Add to Slip"}
