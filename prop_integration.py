@@ -301,15 +301,23 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
         ]
 
     # ---- Tier 3b: fuzzy name + market (for typos) -------------------
+    # Score every admissible pair first, then assign greedily by score so
+    # one odds quote matches at most one projection (best score wins).
+    # Matching each projection independently let TB_chris_godwin and
+    # NYJ_chris_rodwin both claim TB_chris_godwinn. A typo is weak evidence
+    # on its own, so the teams must also agree when both are known.
     if not proj_remaining.empty and not odds_remaining.empty:
-        for _, pr in proj_remaining.iterrows():
+        candidates = []
+        for p_idx, (_, pr) in enumerate(proj_remaining.iterrows()):
             p_norm = pr["norm_name"]
             p_market = pr["market"]
+            p_team = pr.get("team_canon", "") or ""
             p_pos = _pid_position(pr["player_id"], stats_map, roster_pos)
-            best_score = 0.0
-            best_odds_row = None
-            for _, orow in odds_remaining.iterrows():
+            for o_idx, (_, orow) in enumerate(odds_remaining.iterrows()):
                 if orow["market"] != p_market:
+                    continue
+                o_team = orow.get("odds_team_canon", "") or ""
+                if p_team and o_team and p_team != o_team:
                     continue
                 o_pos = _pid_position(orow["player_id"], stats_map, roster_pos)
                 if not positions_compatible(p_pos, o_pos, p_market):
@@ -319,28 +327,38 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
                     # the same suffix evidence must block them again.
                     continue
                 ratio = SequenceMatcher(None, p_norm, orow["norm_name"]).ratio()
-                if ratio > best_score and ratio >= 0.80:
-                    best_score = ratio
-                    best_odds_row = orow
-            if best_odds_row is not None:
-                # Build a merged-style dict manually
-                merged = {}
-                for c in pr.index:
-                    merged[f"{c}_proj"] = pr[c]
-                for c in best_odds_row.index:
-                    merged[f"{c}_odds"] = best_odds_row[c]
-                merged["norm_name"] = p_norm
-                merged["market"] = p_market
-                conf = min(0.85, best_score)
-                o_pos = _pid_position(best_odds_row["player_id"], stats_map, roster_pos)
-                mtype = ("fuzzy_name" if (p_pos or o_pos)
-                         else "fuzzy_name_unverified_position")
-                matched_rows.append(
-                    _build_row(merged, tier=3, match_type=mtype,
-                               confidence=conf, stats_map=stats_map,
-                               injury_map=injury_map, season=season,
-                               week=week, is_dict=True)
-                )
+                if ratio >= 0.80:
+                    candidates.append((ratio, p_idx, o_idx, pr, orow, p_pos))
+
+        # Stable sort: equal scores keep projection-then-odds order, so a
+        # projection still takes the first of several equally good quotes.
+        candidates.sort(key=lambda c: -c[0])
+        used_proj: set = set()
+        used_odds: set = set()
+        for best_score, p_idx, _o_idx, pr, best_odds_row, p_pos in candidates:
+            odds_key = (best_odds_row["player_id"], best_odds_row["market"])
+            if p_idx in used_proj or odds_key in used_odds:
+                continue
+            used_proj.add(p_idx)
+            used_odds.add(odds_key)
+            # Build a merged-style dict manually
+            merged = {}
+            for c in pr.index:
+                merged[f"{c}_proj"] = pr[c]
+            for c in best_odds_row.index:
+                merged[f"{c}_odds"] = best_odds_row[c]
+            merged["norm_name"] = pr["norm_name"]
+            merged["market"] = pr["market"]
+            conf = min(0.85, best_score)
+            o_pos = _pid_position(best_odds_row["player_id"], stats_map, roster_pos)
+            mtype = ("fuzzy_name" if (p_pos or o_pos)
+                     else "fuzzy_name_unverified_position")
+            matched_rows.append(
+                _build_row(merged, tier=3, match_type=mtype,
+                           confidence=conf, stats_map=stats_map,
+                           injury_map=injury_map, season=season,
+                           week=week, is_dict=True)
+            )
 
     if not matched_rows:
         return empty

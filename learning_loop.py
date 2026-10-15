@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
 from config import config
-from utils.db import executemany, read_dataframe
+from utils.db import executemany, get_backend, read_dataframe
 from utils.nfl_markets import MARKET_TO_STAT
 
 logger = logging.getLogger(__name__)
@@ -208,13 +208,27 @@ def update_agent_performance(
     if not records:
         return 0
 
-    insert_sql = """
-    INSERT OR REPLACE INTO agent_performance (
-        season, week, agent_name, player_id, market,
-        recommendation, confidence, final_decision, outcome,
-        profit_units, correct, recorded_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """
+    # `INSERT OR REPLACE` is SQLite-only; MySQL spells the same upsert on the
+    # same primary key `ON DUPLICATE KEY UPDATE`.
+    key_columns = ("season", "week", "agent_name", "player_id", "market")
+    value_columns = (
+        "recommendation",
+        "confidence",
+        "final_decision",
+        "outcome",
+        "profit_units",
+        "correct",
+        "recorded_at",
+    )
+    columns = ", ".join(key_columns + value_columns)
+    placeholders = ", ".join("?" for _ in key_columns + value_columns)
+    if get_backend() == "mysql":
+        updates = ", ".join(f"{c} = VALUES({c})" for c in value_columns)
+        conflict = f"ON DUPLICATE KEY UPDATE {updates}"
+    else:
+        updates = ", ".join(f"{c} = excluded.{c}" for c in value_columns)
+        conflict = f"ON CONFLICT({', '.join(key_columns)}) DO UPDATE SET {updates}"
+    insert_sql = f"INSERT INTO agent_performance ({columns}) VALUES ({placeholders}) {conflict}"
     executemany(insert_sql, records)
     logger.info("Inserted %d agent performance records for s=%d w=%d", len(records), season, week)
     return len(records)
@@ -722,7 +736,7 @@ def main() -> None:
                 f"({tp['hit_rate']:.1%}), avg profit={tp['avg_profit']:.2f}"
             )
         if recs["recommendations"]:
-            print(f"\nRecommendations:")
+            print("\nRecommendations:")
             for rec in recs["recommendations"]:
                 print(f"  [{rec['tier']}] {rec['action']}: {rec['reason']}")
 
@@ -760,7 +774,7 @@ def _print_report_summary(report: Dict[str, Any]) -> None:
 
     recs = report.get("threshold_recommendations", {})
     if recs.get("recommendations"):
-        print(f"\nThreshold Recommendations:")
+        print("\nThreshold Recommendations:")
         for rec in recs["recommendations"]:
             print(f"  [{rec['tier']}] {rec['action']}: {rec['reason']}")
 

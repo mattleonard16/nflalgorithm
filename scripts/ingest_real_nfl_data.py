@@ -34,7 +34,7 @@ from utils.db import (
     read_dataframe,
 )
 from utils.game_context import CONTEXT_COLUMNS, extract_game_context, home_favored_by
-from utils.player_id_utils import canonicalize_team, make_player_id
+from utils.player_id_utils import canonicalize_team, make_player_id, normalize_name
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -344,23 +344,23 @@ def fetch_pbp_red_zone(seasons: List[int]) -> pd.DataFrame:
 
 
 def _normalize_name_for_merge(name: str) -> str:
-    """Strip punctuation, lowercase, collapse whitespace.
+    """Strip accents and punctuation, drop suffix tokens, lowercase, squash.
 
     nflreadpy weekly stats expose `player_name` as "A.Rodgers" and
     `player_display_name` as "Aaron Rodgers". snap_counts exposes
     `player` as "Aaron Rodgers". Normalizing both sides to lowercased
     alphanumerics lets the join survive punctuation/suffix drift
     (Jr/Sr/III, hyphenation, apostrophes).
+
+    Punctuation must go before suffixes are dropped: the old order only
+    stripped a trailing " jr", so "Michael Pittman Jr." keyed as
+    "michaelpittmanjr" against snap counts' "michaelpittman" and every such
+    player got snap_percentage 0. ``normalize_name`` is the same rule the
+    player ids use (suffix tokens jr/sr/ii/iii/iv/v anywhere in the name).
     """
     if name is None or (isinstance(name, float) and pd.isna(name)):
         return ""
-    s = str(name).lower()
-    # Drop common suffixes after a space
-    for suf in (" jr", " sr", " ii", " iii", " iv", " v"):
-        if s.endswith(suf):
-            s = s[: -len(suf)]
-    # Keep only letters/digits
-    return "".join(ch for ch in s if ch.isalnum())
+    return normalize_name(str(name)).replace(" ", "")
 
 
 def _merge_snap_counts(df: pd.DataFrame, snaps: pd.DataFrame) -> pd.DataFrame:

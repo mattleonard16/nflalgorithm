@@ -19,12 +19,41 @@ from agents.market_bias_agent import MarketBiasAgent
 from agents.model_diagnostics_agent import ModelDiagnosticsAgent
 from agents.odds_agent import OddsAgent
 from agents.risk_agent import RiskAgent
-from utils.db import execute, get_connection
+from utils.db import execute, get_backend, get_connection
 
 logger = logging.getLogger(__name__)
 
 # Minimum number of agents that must agree for consensus approval
 CONSENSUS_THRESHOLD = 3
+
+_DECISION_KEY = ("season", "week", "player_id", "market")
+_DECISION_COLUMNS = _DECISION_KEY + (
+    "decision",
+    "merged_confidence",
+    "votes",
+    "rationale",
+    "coordinator_override",
+    "agent_reports",
+    "decided_at",
+)
+
+
+def _decision_upsert_sql() -> str:
+    """Upsert on the agent_decisions primary key in the active dialect.
+
+    ``INSERT OR REPLACE`` is SQLite-only; on MySQL it is a syntax error, which
+    left production ``agent_decisions`` empty. Same key, same semantics.
+    """
+    columns = ", ".join(_DECISION_COLUMNS)
+    placeholders = ", ".join("?" for _ in _DECISION_COLUMNS)
+    update_columns = [c for c in _DECISION_COLUMNS if c not in _DECISION_KEY]
+    if get_backend() == "mysql":
+        updates = ", ".join(f"{c} = VALUES({c})" for c in update_columns)
+        conflict = f"ON DUPLICATE KEY UPDATE {updates}"
+    else:
+        updates = ", ".join(f"{c} = excluded.{c}" for c in update_columns)
+        conflict = f"ON CONFLICT({', '.join(_DECISION_KEY)}) DO UPDATE SET {updates}"
+    return f"INSERT INTO agent_decisions ({columns}) VALUES ({placeholders}) {conflict}"
 
 
 def _group_reports(
@@ -108,7 +137,11 @@ def _persist_decisions(
     season: int,
     week: int,
 ) -> int:
-    """Write decisions to the agent_decisions table. Returns row count."""
+    """Write decisions to the agent_decisions table. Returns row count.
+
+    Raises on failure, after rolling back, so the caller's stage reports an
+    error instead of a successful run that persisted nothing.
+    """
     if not decisions:
         return 0
 
@@ -129,25 +162,19 @@ def _persist_decisions(
             now,
         ))
 
-    try:
-        with get_connection() as conn:
+    sql = _decision_upsert_sql()
+    with get_connection() as conn:
+        try:
             for row in rows:
-                execute(
-                    """
-                    INSERT OR REPLACE INTO agent_decisions
-                    (season, week, player_id, market, decision,
-                     merged_confidence, votes, rationale, coordinator_override,
-                     agent_reports, decided_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    row,
-                    conn=conn,
-                )
+                execute(sql, row, conn=conn)
             conn.commit()
-        return len(rows)
-    except Exception as exc:
-        logger.error("Failed to persist agent decisions: %s", exc)
-        return 0
+        except Exception as exc:
+            conn.rollback()
+            logger.error("Failed to persist agent decisions: %s", exc)
+            raise RuntimeError(
+                f"Failed to persist {len(rows)} agent decisions for s={season} w={week}"
+            ) from exc
+    return len(rows)
 
 
 def run_all_agents(
@@ -170,6 +197,11 @@ def run_all_agents(
         One decision dict per player/market with keys: player_id, market,
         decision, merged_confidence, votes, rationale, override,
         agent_reports.
+
+    Raises
+    ------
+    RuntimeError
+        When the decisions cannot be persisted.
     """
     agents: List[BaseAgent] = [
         OddsAgent(),
@@ -224,14 +256,14 @@ def _print_decision_summary(decisions: List[Dict[str, Any]]) -> None:
     approved = [d for d in decisions if d["decision"] == "APPROVED"]
     rejected = [d for d in decisions if d["decision"] == "REJECTED"]
 
-    print(f"\nAgent Coordinator Summary")
-    print(f"========================")
+    print("\nAgent Coordinator Summary")
+    print("========================")
     print(f"Total decisions: {len(decisions)}")
     print(f"Approved: {len(approved)}")
     print(f"Rejected: {len(rejected)}")
 
     if approved:
-        print(f"\nApproved plays:")
+        print("\nApproved plays:")
         for d in sorted(approved, key=lambda x: x["merged_confidence"], reverse=True):
             pid = d.get("player_id", "?")
             mkt = d.get("market", "?")
@@ -240,7 +272,7 @@ def _print_decision_summary(decisions: List[Dict[str, Any]]) -> None:
             print(f"  {pid} {mkt}: conf={conf:.2f}{override}")
 
     if rejected:
-        print(f"\nRejected plays:")
+        print("\nRejected plays:")
         for d in rejected[:10]:
             pid = d.get("player_id", "?")
             mkt = d.get("market", "?")
