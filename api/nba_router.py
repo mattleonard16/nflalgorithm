@@ -204,9 +204,14 @@ class NbaRiskSummaryResponse(BaseModel):
 # Schedule helpers (simple cache to avoid hammering NBA.com)
 # ---------------------------------------------------------------------------
 
-_schedule_cache: dict[str, Any] = {"ts": 0.0, "data": None}
+_schedule_cache: dict[str, Any] = {"ts": 0.0, "data": None, "failed": False}
+# Guards _schedule_cache only; never held across the upstream call.
 _schedule_lock = threading.Lock()
+# Single-flight: at most one thread talks to NBA.com at a time.
+_schedule_fetch_lock = threading.Lock()
 _CACHE_TTL = 300  # 5 minutes
+_FAILURE_TTL = 60  # negative cache: an outage is retried at most once a minute
+_SCOREBOARD_TIMEOUT = 10  # seconds; nba_api defaults to 30
 
 VALID_MARKETS = {"pts", "reb", "ast", "fg3m"}
 _PLAYERS_SORT_COLS = {"pts": "avg_pts", "reb": "avg_reb", "ast": "avg_ast", "fg3m": "avg_fg3m"}
@@ -223,41 +228,79 @@ def _resolve_game_date(game_date: str | None) -> str:
     return game_date
 
 
+def _load_live_scoreboard() -> list[dict]:
+    from nba_api.live.nba.endpoints import scoreboard
+
+    board = scoreboard.ScoreBoard(timeout=_SCOREBOARD_TIMEOUT)
+    raw = board.get_dict()["scoreboard"]["games"]
+    games = []
+    for g in raw:
+        status_text = g.get("gameStatusText", "")
+        home = g["homeTeam"]
+        away = g["awayTeam"]
+        games.append(
+            {
+                "game_id": g["gameId"],
+                "game_date": g["gameEt"][:10],
+                "home_team": home["teamTricode"],
+                "away_team": away["teamTricode"],
+                "status": status_text,
+                "home_score": home.get("score"),
+                "away_score": away.get("score"),
+            }
+        )
+    return games
+
+
+def _cached_schedule(now: float) -> list[dict] | None:
+    """Return the cached schedule while it is fresh. Caller holds _schedule_lock."""
+    ttl = _FAILURE_TTL if _schedule_cache["failed"] else _CACHE_TTL
+    if now - _schedule_cache["ts"] < ttl:
+        if _schedule_cache["data"] is not None:
+            return _schedule_cache["data"]
+        if _schedule_cache["failed"]:
+            return []
+    return None
+
+
 def _fetch_live_schedule() -> list[dict]:
     with _schedule_lock:
-        now = time.time()
-        if now - _schedule_cache["ts"] < _CACHE_TTL and _schedule_cache["data"] is not None:
-            return _schedule_cache["data"]
+        fresh = _cached_schedule(time.time())
+        stale = _schedule_cache["data"]
+    if fresh is not None:
+        return fresh
 
+    # With stale data on hand, callers that lose the race serve it at once
+    # rather than queueing behind the upstream call. Without it they wait
+    # (bounded) for the in-flight fetch to land in the cache.
+    if stale is not None:
+        acquired = _schedule_fetch_lock.acquire(blocking=False)
+    else:
+        acquired = _schedule_fetch_lock.acquire(timeout=_SCOREBOARD_TIMEOUT + 1)
+    if not acquired:
+        return stale if stale is not None else []
+
+    try:
+        with _schedule_lock:
+            fresh = _cached_schedule(time.time())
+        if fresh is not None:
+            return fresh
         try:
-            from nba_api.live.nba.endpoints import scoreboard
-
-            board = scoreboard.ScoreBoard()
-            raw = board.get_dict()["scoreboard"]["games"]
-            games = []
-            for g in raw:
-                status_text = g.get("gameStatusText", "")
-                home = g["homeTeam"]
-                away = g["awayTeam"]
-                games.append(
-                    {
-                        "game_id": g["gameId"],
-                        "game_date": g["gameEt"][:10],
-                        "home_team": home["teamTricode"],
-                        "away_team": away["teamTricode"],
-                        "status": status_text,
-                        "home_score": home.get("score"),
-                        "away_score": away.get("score"),
-                    }
-                )
-            _schedule_cache["ts"] = now
-            _schedule_cache["data"] = games
-            return games
+            games = _load_live_scoreboard()
         except Exception as exc:
             log.warning("Could not fetch live NBA schedule: %s", exc)
-            if _schedule_cache["data"] is not None:
-                return _schedule_cache["data"]
-            return []
+            with _schedule_lock:
+                _schedule_cache["ts"] = time.time()
+                _schedule_cache["failed"] = True
+                data = _schedule_cache["data"]
+            return data if data is not None else []
+        with _schedule_lock:
+            _schedule_cache["ts"] = time.time()
+            _schedule_cache["data"] = games
+            _schedule_cache["failed"] = False
+        return games
+    finally:
+        _schedule_fetch_lock.release()
 
 
 # ---------------------------------------------------------------------------
