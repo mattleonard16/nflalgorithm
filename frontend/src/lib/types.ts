@@ -424,3 +424,18 @@ export interface RecordBetPayload {
   confidence_tier?: string | null;
   stake_dollars?: number | null;
 }
+
+// Mirrors UserPreferences in api/auth.py (GET/PUT /api/user/preferences).
+// Edge, Kelly fraction, and max stake are fractions (0.05 = 5%).
+export interface UserPreferences {
+  default_min_edge: number;
+  default_kelly_fraction: number;
+  default_max_stake: number;
+  best_line_only: boolean;
+  show_synthetic_odds: boolean;
+  defense_multipliers: boolean;
+  weather_adjustments: boolean;
+  injury_weighting: boolean;
+  preferred_sportsbooks: string | null;
+  preferred_markets: string | null;
+}
