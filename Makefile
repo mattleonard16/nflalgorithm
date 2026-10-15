@@ -133,7 +133,8 @@ install-uv:
 		export PATH="$$HOME/.cargo/bin:$$PATH"; \
 	fi
 	uv python pin 3.13
-	@start_time=$$(date +%s); \
+	@set -e; \
+	start_time=$$(date +%s); \
 	uv sync --frozen; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
@@ -144,7 +145,8 @@ install-uv:
 # Traditional venv installation
 install-venv:
 	@echo "Installing dependencies with venv..."
-	@start_time=$$(date +%s); \
+	@set -e; \
+	start_time=$$(date +%s); \
 	python3.13 -m venv venv; \
 	venv/bin/pip install --upgrade pip; \
 	venv/bin/pip install -r requirements.txt; \
@@ -158,7 +160,7 @@ install-venv:
 fast-sync:
 	@if command -v uv >/dev/null 2>&1; then \
 		echo "Lightning-fast UV dependency sync..."; \
-		time uv sync --frozen; \
+		time uv sync --frozen || exit $$?; \
 		echo "Sync complete!"; \
 	else \
 		echo "UV not available. Run 'make install-uv' first."; \
@@ -170,18 +172,30 @@ test:
 	@echo "Running test suite with $(ENV_TYPE)..."
 	@start_time=$$(date +%s); \
 	$(PYTHON) -m pytest tests/ -v --cov=. --cov-report=html; \
+	rc=$$?; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
-	echo "Tests complete in $${duration}s! Coverage report in htmlcov/"
+	if [ $$rc -eq 0 ]; then \
+		echo "Tests complete in $${duration}s! Coverage report in htmlcov/"; \
+	else \
+		echo "Tests FAILED (exit $$rc) after $${duration}s" >&2; \
+	fi; \
+	exit $$rc
 
 # Linting with environment detection
 lint:
 	@echo "Running mypy type checking with $(ENV_TYPE)..."
 	@start_time=$$(date +%s); \
 	$(PYTHON) -m mypy . --ignore-missing-imports; \
+	rc=$$?; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
-	echo "Linting complete in $${duration}s!"
+	if [ $$rc -eq 0 ]; then \
+		echo "Linting complete in $${duration}s!"; \
+	else \
+		echo "Linting FAILED (exit $$rc) after $${duration}s" >&2; \
+	fi; \
+	exit $$rc
 
 # Code formatting with environment detection
 format:
@@ -198,9 +212,15 @@ validate:
 	$(DB_ENV) $(PYTHON) -m scripts.evaluate_nfl_projections evaluate \
 		--season $(SEASON) --weeks $(WEEKS) \
 		--output logs/metrics/nfl-projection-evaluation-$(SEASON).json; \
+	rc=$$?; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
-	echo "Evaluation complete in $${duration}s."
+	if [ $$rc -eq 0 ]; then \
+		echo "Evaluation complete in $${duration}s."; \
+	else \
+		echo "Evaluation FAILED (exit $$rc) after $${duration}s" >&2; \
+	fi; \
+	exit $$rc
 
 # Per-position MAE gate. Exits non-zero when a position regresses past its
 # ceiling, so this is safe to chain into a release check. With BASELINE set to
@@ -230,7 +250,8 @@ dashboard:
 # Upgrade the local SQLite schema before the API starts. Production MySQL
 # migrations remain an explicit deployment concern.
 api-preflight:
-	@if [ "$(DB_BACKEND)" = "sqlite" ]; then \
+	@set -e; \
+	if [ "$(DB_BACKEND)" = "sqlite" ]; then \
 		if [ -f "$(SQLITE_DB_PATH)" ]; then \
 			mkdir -p "$(MIGRATION_BACKUP_DIR)"; \
 			backup_path="$(MIGRATION_BACKUP_DIR)/$$(basename "$(SQLITE_DB_PATH)").$$(date -u +%Y%m%dT%H%M%SZ).$$$$.bak"; \
@@ -309,18 +330,24 @@ report:
 	$(call require_season_week)
 	@echo "Running weekly report pipeline (season=$(SEASON) week=$(WEEK)) with $(ENV_TYPE)..."
 	@start_time=$$(date +%s); \
-	$(PYTHON) -m scripts.run_prop_update --season $(SEASON) --week $(WEEK); \
+	$(PYTHON) -m scripts.run_prop_update --season $(SEASON) --week $(WEEK) && \
 	$(PYTHON) -m scripts.enhanced_visualizer --season $(SEASON) --week $(WEEK); \
+	rc=$$?; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
-	echo "Reports generated in $${duration}s! Available in reports/"
+	if [ $$rc -eq 0 ]; then \
+		echo "Reports generated in $${duration}s! Available in reports/"; \
+	else \
+		echo "Report pipeline FAILED (exit $$rc) after $${duration}s" >&2; \
+	fi; \
+	exit $$rc
 	@echo "Enhanced outputs: reports/enhanced_dashboard.html, reports/value_bets_enhanced.csv, reports/quick_picks.md"
 
 # Enhanced report only
 enhanced-report:
 	$(call require_season_week)
 	@echo "Building enhanced report (season=$(SEASON) week=$(WEEK)) with $(ENV_TYPE)..."
-	$(PYTHON) -m scripts.enhanced_visualizer --season $(SEASON) --week $(WEEK); \
+	$(PYTHON) -m scripts.enhanced_visualizer --season $(SEASON) --week $(WEEK) && \
 	if command -v open >/dev/null 2>&1; then open reports/enhanced_dashboard.html || true; fi
 
 # Weekly flow for specific week/season
@@ -688,7 +715,8 @@ add-dep:
 		echo "Usage: make add-dep PKG=package_name"; \
 		exit 1; \
 	fi
-	@if command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ]; then \
+	@set -e; \
+	if command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ]; then \
 		echo "Adding $(PKG) with UV..."; \
 		uv add $(PKG); \
 		echo "Added $(PKG) to pyproject.toml and uv.lock"; \
