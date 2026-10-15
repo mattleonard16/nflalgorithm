@@ -274,8 +274,8 @@ def compute_clv(entry: Mapping[str, Any], close: Mapping[str, Any] | None) -> di
     if entry_line is None or close_line is None:
         return _insufficient("entry or closing line missing")
 
-    # Points CLV: an over bettor beat the close when the line moved up after he
-    # took it (over 50.5 against a 54.5 close holds the easier number), an under
+    # Points CLV: an over bettor beat the close when the line moved up after the bet
+    # was placed (over 50.5 against a 54.5 close holds the easier number), an under
     # bettor when it moved down.
     raw_points = close_line - entry_line
     clv_points = raw_points if side == "over" else -raw_points
