@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 # Ensure project root is on sys.path so tests can import top-level modules
@@ -54,8 +56,17 @@ os.environ.setdefault("RATE_LIMIT_GLOBAL_PER_MIN", "0")
 # The normal suite is deterministic SQLite. The focused database-integration
 # matrix opts into a real MySQL service with TEST_DB_BACKEND=mysql.
 TEST_DB_BACKEND = os.getenv("TEST_DB_BACKEND", "sqlite").lower()
-TEST_DB_DIR = Path(__file__).parent / "_tmp"
-TEST_DB_DIR.mkdir(exist_ok=True)
+TEST_DB_ROOT = Path(__file__).parent / "_tmp"
+TEST_DB_ROOT.mkdir(exist_ok=True)
+# One private directory per pytest process (and per xdist worker), so two
+# concurrent sessions never delete or migrate each other's database. A fixed
+# path here let one session wipe the file out from under another mid-run.
+TEST_DB_DIR = Path(
+    tempfile.mkdtemp(
+        prefix=f"session-{os.getpid()}-{os.getenv('PYTEST_XDIST_WORKER', 'main')}-",
+        dir=TEST_DB_ROOT,
+    )
+)
 TEST_DB_PATH = TEST_DB_DIR / "test_suite.db"
 
 if TEST_DB_BACKEND == "mysql":
@@ -65,8 +76,7 @@ if TEST_DB_BACKEND == "mysql":
     os.environ["DB_BACKEND"] = "mysql"
     os.environ["DB_URL"] = test_db_url
 else:
-    # Reset the file each session to avoid stale data bleeding into tests.
-    TEST_DB_PATH.unlink(missing_ok=True)
+    # The directory is fresh, so no stale data can bleed into this session.
     TEST_DB_PATH.touch()
     os.environ["DB_BACKEND"] = "sqlite"
     os.environ["SQLITE_DB_PATH"] = str(TEST_DB_PATH)
@@ -76,6 +86,11 @@ else:
 from schema_migrations import MigrationManager
 
 MigrationManager(TEST_DB_PATH if TEST_DB_BACKEND == "sqlite" else "unused-mysql-path").run()
+
+
+def pytest_unconfigure(config) -> None:
+    """Remove this session's private database directory (and WAL sidecars)."""
+    shutil.rmtree(TEST_DB_DIR, ignore_errors=True)
 
 
 # Shared fixture for clearing NBA cache before tests that use TestClient

@@ -17,6 +17,10 @@ concurrency:
 
 jobs:
   # Known vulnerabilities in pinned Python dependencies. Blocking.
+  # requirements.txt is the exact-version export of uv.lock (runtime deps, no
+  # dev group) and is what Dockerfile.api installs, so this audits the deployed
+  # set. The export is regenerated here and must match the committed file, so a
+  # stale requirements.txt cannot hide a vulnerable lock.
   pip-audit:
     runs-on: ubuntu-latest
     steps:
@@ -24,7 +28,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Audit requirements.txt
+      - uses: astral-sh/setup-uv@v6
+      - name: requirements.txt matches uv.lock
+        run: |
+          make requirements
+          git diff --exit-code -- requirements.txt
+      - name: Audit pinned requirements.txt
         run: |
           pip install pip-audit
           pip-audit -r requirements.txt --no-deps --desc off

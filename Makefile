@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto db-analyze nfl-backtest production-run health
+.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate requirements mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto db-analyze nfl-backtest production-run health
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -133,7 +133,8 @@ install-uv:
 		export PATH="$$HOME/.cargo/bin:$$PATH"; \
 	fi
 	uv python pin 3.13
-	@start_time=$$(date +%s); \
+	@set -e; \
+	start_time=$$(date +%s); \
 	uv sync --frozen; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
@@ -144,10 +145,12 @@ install-uv:
 # Traditional venv installation
 install-venv:
 	@echo "Installing dependencies with venv..."
-	@start_time=$$(date +%s); \
+	@set -e; \
+	start_time=$$(date +%s); \
 	python3.13 -m venv venv; \
 	venv/bin/pip install --upgrade pip; \
 	venv/bin/pip install -r requirements.txt; \
+	venv/bin/pip install --group dev; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
 	echo "Creating directories..."; \
@@ -158,7 +161,7 @@ install-venv:
 fast-sync:
 	@if command -v uv >/dev/null 2>&1; then \
 		echo "Lightning-fast UV dependency sync..."; \
-		time uv sync --frozen; \
+		time uv sync --frozen || exit $$?; \
 		echo "Sync complete!"; \
 	else \
 		echo "UV not available. Run 'make install-uv' first."; \
@@ -170,18 +173,34 @@ test:
 	@echo "Running test suite with $(ENV_TYPE)..."
 	@start_time=$$(date +%s); \
 	$(PYTHON) -m pytest tests/ -v --cov=. --cov-report=html; \
+	rc=$$?; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
-	echo "Tests complete in $${duration}s! Coverage report in htmlcov/"
+	if [ $$rc -eq 0 ]; then \
+		echo "Tests complete in $${duration}s! Coverage report in htmlcov/"; \
+	else \
+		echo "Tests FAILED (exit $$rc) after $${duration}s" >&2; \
+	fi; \
+	exit $$rc
 
-# Linting with environment detection
+# Linting with environment detection. ruff (pyflakes rules, the same check CI
+# blocks on) runs first; mypy runs even when ruff fails so one pass reports
+# both. Either failure fails the target.
 lint:
-	@echo "Running mypy type checking with $(ENV_TYPE)..."
+	@echo "Running ruff and mypy with $(ENV_TYPE)..."
 	@start_time=$$(date +%s); \
+	$(PYTHON) -m ruff check .; \
+	ruff_rc=$$?; \
 	$(PYTHON) -m mypy . --ignore-missing-imports; \
+	mypy_rc=$$?; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
-	echo "Linting complete in $${duration}s!"
+	if [ $$ruff_rc -eq 0 ] && [ $$mypy_rc -eq 0 ]; then \
+		echo "Linting complete in $${duration}s!"; \
+	else \
+		echo "Linting FAILED after $${duration}s (ruff exit $$ruff_rc, mypy exit $$mypy_rc)" >&2; \
+		exit 1; \
+	fi
 
 # Code formatting with environment detection
 format:
@@ -198,9 +217,15 @@ validate:
 	$(DB_ENV) $(PYTHON) -m scripts.evaluate_nfl_projections evaluate \
 		--season $(SEASON) --weeks $(WEEKS) \
 		--output logs/metrics/nfl-projection-evaluation-$(SEASON).json; \
+	rc=$$?; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
-	echo "Evaluation complete in $${duration}s."
+	if [ $$rc -eq 0 ]; then \
+		echo "Evaluation complete in $${duration}s."; \
+	else \
+		echo "Evaluation FAILED (exit $$rc) after $${duration}s" >&2; \
+	fi; \
+	exit $$rc
 
 # Per-position MAE gate. Exits non-zero when a position regresses past its
 # ceiling, so this is safe to chain into a release check. With BASELINE set to
@@ -230,7 +255,8 @@ dashboard:
 # Upgrade the local SQLite schema before the API starts. Production MySQL
 # migrations remain an explicit deployment concern.
 api-preflight:
-	@if [ "$(DB_BACKEND)" = "sqlite" ]; then \
+	@set -e; \
+	if [ "$(DB_BACKEND)" = "sqlite" ]; then \
 		if [ -f "$(SQLITE_DB_PATH)" ]; then \
 			mkdir -p "$(MIGRATION_BACKUP_DIR)"; \
 			backup_path="$(MIGRATION_BACKUP_DIR)/$$(basename "$(SQLITE_DB_PATH)").$$(date -u +%Y%m%dT%H%M%SZ).$$$$.bak"; \
@@ -309,18 +335,24 @@ report:
 	$(call require_season_week)
 	@echo "Running weekly report pipeline (season=$(SEASON) week=$(WEEK)) with $(ENV_TYPE)..."
 	@start_time=$$(date +%s); \
-	$(PYTHON) -m scripts.run_prop_update --season $(SEASON) --week $(WEEK); \
+	$(PYTHON) -m scripts.run_prop_update --season $(SEASON) --week $(WEEK) && \
 	$(PYTHON) -m scripts.enhanced_visualizer --season $(SEASON) --week $(WEEK); \
+	rc=$$?; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
-	echo "Reports generated in $${duration}s! Available in reports/"
+	if [ $$rc -eq 0 ]; then \
+		echo "Reports generated in $${duration}s! Available in reports/"; \
+	else \
+		echo "Report pipeline FAILED (exit $$rc) after $${duration}s" >&2; \
+	fi; \
+	exit $$rc
 	@echo "Enhanced outputs: reports/enhanced_dashboard.html, reports/value_bets_enhanced.csv, reports/quick_picks.md"
 
 # Enhanced report only
 enhanced-report:
 	$(call require_season_week)
 	@echo "Building enhanced report (season=$(SEASON) week=$(WEEK)) with $(ENV_TYPE)..."
-	$(PYTHON) -m scripts.enhanced_visualizer --season $(SEASON) --week $(WEEK); \
+	$(PYTHON) -m scripts.enhanced_visualizer --season $(SEASON) --week $(WEEK) && \
 	if command -v open >/dev/null 2>&1; then open reports/enhanced_dashboard.html || true; fi
 
 # Weekly flow for specific week/season
@@ -688,13 +720,21 @@ add-dep:
 		echo "Usage: make add-dep PKG=package_name"; \
 		exit 1; \
 	fi
-	@if command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ]; then \
+	@set -e; \
+	if command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ]; then \
 		echo "Adding $(PKG) with UV..."; \
 		uv add $(PKG); \
-		echo "Added $(PKG) to pyproject.toml and uv.lock"; \
+		$(MAKE) requirements; \
+		echo "Added $(PKG) to pyproject.toml, uv.lock, and requirements.txt"; \
 	else \
 		echo "Adding $(PKG) with pip..."; \
 		$(PIP_INSTALL) $(PKG); \
-		$(PYTHON) -m pip freeze > requirements.txt; \
-		echo "Added $(PKG) and updated requirements.txt"; \
+		echo "Installed $(PKG) into venv only. requirements.txt is generated from uv.lock:"; \
+		echo "add $(PKG) to pyproject.toml, then run 'uv lock && make requirements'."; \
 	fi
+
+# requirements.txt is an export of uv.lock (runtime deps only, pinned), used by
+# Dockerfile.api, the venv fallback, and pip-audit. Regenerate after any lock change.
+requirements:
+	uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements.txt \
+		-o requirements.txt

@@ -126,13 +126,13 @@ def test_wr_traded_player_team_mismatch_tolerated(tmp_path: Path) -> None:
         result = join_odds_projections(2024, 5)
     
     # Should find Davante Adams via normalized name match
-    if not result.empty:
-        davante_rows = result[
-            result['normalized_name'].str.contains('davante', case=False, na=False)
-        ]
-        assert not davante_rows.empty, "Davante Adams should match despite team mismatch"
-        row = davante_rows.iloc[0]
-        assert row['match_tier'] in [2, 3], "Should be tier 2 or 3 (name match)"
+    assert not result.empty, "The traded WR's odds row should join to a projection"
+    davante_rows = result[
+        result['normalized_name'].str.contains('davante', case=False, na=False)
+    ]
+    assert not davante_rows.empty, "Davante Adams should match despite team mismatch"
+    row = davante_rows.iloc[0]
+    assert row['match_tier'] in [2, 3], "Should be tier 2 or 3 (name match)"
 
 
 def test_wr_team_variant_matches(tmp_path: Path) -> None:
@@ -157,11 +157,11 @@ def test_wr_team_variant_matches(tmp_path: Path) -> None:
     with use_database(db_path):
         result = join_odds_projections(2024, 5)
     
-    if not result.empty:
-        kirk_rows = result[
-            result['normalized_name'].str.contains('christian kirk', case=False, na=False)
-        ]
-        assert not kirk_rows.empty, "Christian Kirk should match despite JAX/JAC variant"
+    assert not result.empty, "The JAX/JAC odds row should join to a projection"
+    kirk_rows = result[
+        result['normalized_name'].str.contains('christian kirk', case=False, na=False)
+    ]
+    assert not kirk_rows.empty, "Christian Kirk should match despite JAX/JAC variant"
 
 
 def test_normalize_player_name() -> None:
