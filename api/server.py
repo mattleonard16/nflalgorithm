@@ -1,10 +1,10 @@
 """FastAPI backend for NFL Algorithm dashboard."""
 
 import asyncio
-import csv
 import io
 import json
 import logging
+import math
 import os
 import threading
 import uuid
@@ -13,9 +13,11 @@ from typing import Any, Dict, List, Literal, Optional
 
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field, field_validator
 
 from api.auth import (
     UserCreate,
@@ -24,7 +26,6 @@ from api.auth import (
     UserResponse,
     authenticate_user,
     create_user,
-    generate_session_id,
     get_user_preferences,
     logout_user,
     update_bankroll,
@@ -34,11 +35,23 @@ from api.auth import (
 from api.pipeline_router import require_pipeline_operator, require_pipeline_reader
 from api.value_visibility import value_visibility_scope
 from config import config
-from utils.db import execute, fetchall, fetchone, get_connection, read_dataframe
+from utils.db import execute, fetchone, read_dataframe
 
 logger = logging.getLogger(__name__)
 
 PUBLIC_VALUE_VISIBILITY_CONTRACT = "publication-safe-v1"
+
+
+def _records(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Convert a frame to JSON-safe records, mapping NaN/NaT to None.
+
+    A numeric column that mixes NULL and numbers comes back from the database
+    as float with NaN, which Starlette's encoder (allow_nan=False) rejects
+    with a 500. Boxing to object first keeps ints as ints.
+    """
+    if df.empty:
+        return []
+    return df.astype(object).where(df.notna(), None).to_dict(orient="records")
 
 
 # ── Pydantic response models (Feature 2: Contract Hardening) ──────────
@@ -84,19 +97,27 @@ class ValueBetsResponse(BaseModel):
 class BetCreate(BaseModel):
     """Boundary-validated payload for POST /api/user/bets (FR-T0-3)."""
 
-    season: int
-    week: int
-    player_id: str
-    market: str
-    sportsbook: str
+    season: int = Field(..., ge=2000, le=2100)
+    week: int = Field(..., ge=1, le=22)
+    player_id: str = Field(..., min_length=1, max_length=128)
+    market: str = Field(..., min_length=1, max_length=64)
+    sportsbook: str = Field(..., min_length=1, max_length=64)
     side: Literal["over", "under"]
-    line: float
+    line: float = Field(..., ge=0, le=10_000, allow_inf_nan=False)
     price: int
-    stake_units: float
-    player_name: Optional[str] = None
-    model_edge: Optional[float] = None
-    confidence_tier: Optional[str] = None
-    stake_dollars: Optional[float] = None
+    stake_units: float = Field(..., gt=0, le=100, allow_inf_nan=False)
+    player_name: Optional[str] = Field(None, max_length=128)
+    model_edge: Optional[float] = Field(None, allow_inf_nan=False)
+    confidence_tier: Optional[str] = Field(None, max_length=32)
+    stake_dollars: Optional[float] = Field(None, ge=0, le=10_000_000, allow_inf_nan=False)
+
+    @field_validator("price")
+    @classmethod
+    def _american_odds(cls, value: int) -> int:
+        # American odds never fall in the open interval (-100, 100).
+        if -100 < value < 100 or abs(value) > 100_000:
+            raise ValueError("price must be American odds (<= -100 or >= 100)")
+        return value
 
 
 class PipelineRunResponse(BaseModel):
@@ -123,6 +144,27 @@ app = FastAPI(
 from api.nba_router import router as nba_router  # noqa: E402
 
 app.include_router(nba_router)
+
+
+def _json_safe(value: Any) -> Any:
+    """Replace non-finite floats so the payload survives allow_nan=False."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def _request_validation_handler(request: Request, exc: RequestValidationError):
+    # FastAPI's default handler echoes the rejected input, so a NaN body value
+    # (json.loads accepts the NaN literal) would turn its own 422 into a 500.
+    return JSONResponse(
+        status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))}
+    )
+
 
 # CORS middleware
 _default_origins = ["http://localhost:3000", "http://localhost:3001"]
@@ -301,6 +343,13 @@ async def get_value_bets(
             query += " AND COALESCE(pd.position, ps.position) = ?"
             params.append(position)
 
+        # A pinned response is cached under its run_id, so it must only
+        # contain that run's rows; otherwise a newer publish would be served
+        # under an older run's key.
+        if run_id:
+            query += " AND v.published_run_id = ?"
+            params.append(run_id)
+
         query += " ORDER BY v.edge_percentage DESC"
 
         df = read_dataframe(query, params=params)
@@ -323,10 +372,11 @@ async def get_value_bets(
         # If best_line_only, group by player_id + market and keep best edge
         if best_line_only:
             df = df.sort_values("edge_percentage", ascending=False)
-            df = df.groupby(["player_id", "market", "side"]).first().reset_index()
+            # dropna=False keeps legacy rows whose side is NULL.
+            df = df.groupby(["player_id", "market", "side"], dropna=False).first().reset_index()
 
         # Convert to records
-        bets = df.to_dict(orient="records")
+        bets = _records(df)
 
         # Attach explainability payloads if requested
         if include_why:
@@ -363,9 +413,9 @@ async def get_value_bets(
             value_bets_cache.set(cache_key, result)
 
         return result
-    except Exception as e:
-        logger.error(f"Error fetching value bets: {e}")
-        raise HTTPException(status_code=500, detail=f"Error fetching value bets: {str(e)}")
+    except Exception:
+        logger.exception("Error fetching value bets")
+        raise HTTPException(status_code=500, detail="Error fetching value bets")
 
 
 @app.get("/api/performance")
@@ -411,7 +461,7 @@ async def get_performance(season: Optional[int] = Query(None, description="Filte
                 "win_rate": 0.0,
             }
 
-        weeks = df.to_dict(orient="records")
+        weeks = _records(df)
 
         # Calculate summary
         total_bets = int(df["total_bets"].sum())
@@ -428,7 +478,7 @@ async def get_performance(season: Optional[int] = Query(None, description="Filte
             "total_losses": total_losses,
             "total_pushes": total_pushes,
             "total_profit": total_profit,
-            "overall_roi": float(df["roi_pct"].mean()) if not df.empty else 0.0,
+            "overall_roi": float(df["roi_pct"].mean()) if df["roi_pct"].notna().any() else 0.0,
             "win_rate": win_rate,
         }
     except Exception as e:
@@ -478,7 +528,7 @@ async def get_outcomes(
         df = read_dataframe(query, params=[season, week])
 
         return {
-            "outcomes": df.to_dict(orient="records") if not df.empty else [],
+            "outcomes": _records(df),
             "total": len(df),
         }
     except Exception as e:
@@ -527,7 +577,7 @@ async def get_health(
                 "overall_status": "unknown",
             }
 
-        feeds = df.to_dict(orient="records")
+        feeds = _records(df)
 
         # Determine overall status based on freshness
         now = datetime.now(timezone.utc)
@@ -567,7 +617,7 @@ async def get_health(
 async def get_edge_distribution(
     season: int = Query(..., description="NFL season year"),
     week: int = Query(..., description="Week number"),
-    bins: int = Query(20, description="Number of histogram bins"),
+    bins: int = Query(20, ge=1, le=100, description="Number of histogram bins"),
 ):
     """Get edge distribution histogram data."""
     try:
@@ -637,7 +687,7 @@ async def get_by_position(
         df = read_dataframe(query, params=[*visibility_params, season, week])
 
         return {
-            "by_position": df.to_dict(orient="records") if not df.empty else [],
+            "by_position": _records(df),
         }
     except Exception as e:
         logger.error(f"Error fetching by-position stats: {e}")
@@ -670,7 +720,7 @@ async def get_by_market(
         df = read_dataframe(query, params=[*visibility_params, season, week])
 
         return {
-            "by_market": df.to_dict(orient="records") if not df.empty else [],
+            "by_market": _records(df),
         }
     except Exception as e:
         logger.error(f"Error fetching by-market stats: {e}")
@@ -703,7 +753,7 @@ async def get_weekly_summary(
         df = read_dataframe(query, params=[weeks])
 
         return {
-            "weeks": df.to_dict(orient="records") if not df.empty else [],
+            "weeks": _records(df),
         }
     except Exception as e:
         logger.error(f"Error fetching weekly summary: {e}")
@@ -795,9 +845,9 @@ async def get_explainability(
 
         payload = build_why_payload(season, week, player_id, market)
         return {"player_id": player_id, "market": market, "why": payload}
-    except Exception as e:
-        logger.error(f"Error building explainability: {e}")
-        raise HTTPException(status_code=500, detail=f"Explainability error: {str(e)}")
+    except Exception:
+        logger.exception("Error building explainability")
+        raise HTTPException(status_code=500, detail="Explainability unavailable")
 
 
 # ── Risk & correlation endpoints (Feature 5) ─────────────────────────
@@ -865,9 +915,9 @@ async def get_correlation_analysis(
             )
 
         return {"correlation_groups": groups, "team_stacks": team_stack_list}
-    except Exception as e:
-        logger.error(f"Error in correlation analysis: {e}")
-        raise HTTPException(status_code=500, detail=f"Correlation analysis error: {str(e)}")
+    except Exception:
+        logger.exception("Error in correlation analysis")
+        raise HTTPException(status_code=500, detail="Correlation analysis unavailable")
 
 
 @app.get("/api/analytics/risk-summary")
@@ -946,9 +996,9 @@ async def get_risk_summary(
             },
             "warnings": warnings,
         }
-    except Exception as e:
-        logger.error(f"Error in risk summary: {e}")
-        raise HTTPException(status_code=500, detail=f"Risk summary error: {str(e)}")
+    except Exception:
+        logger.exception("Error in risk summary")
+        raise HTTPException(status_code=500, detail="Risk summary unavailable")
 
 
 # ── Export endpoints (P1: UX polish) ─────────────────────────────
@@ -1008,9 +1058,9 @@ async def export_csv(
             media_type="text/csv",
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
-    except Exception as e:
-        logger.error(f"Error exporting CSV: {e}")
-        raise HTTPException(status_code=500, detail=f"Export error: {str(e)}")
+    except Exception:
+        logger.exception("Error exporting CSV")
+        raise HTTPException(status_code=500, detail="Export failed")
 
 
 @app.get("/api/export/bundle")
@@ -1039,7 +1089,7 @@ async def export_bundle(
             bets_query,
             params=[*visibility_params, season, week],
         )
-        bets_list = bets_df.to_dict(orient="records") if not bets_df.empty else []
+        bets_list = _records(bets_df)
 
         if config.api.demo_mode:
             run_row = fetchone(
@@ -1078,7 +1128,7 @@ async def export_bundle(
 
         # Try to include correlation and risk data
         try:
-            from risk_manager import compute_exposure, detect_correlations, detect_team_stacks
+            from risk_manager import detect_team_stacks
 
             risk_query = f"""
                 SELECT v.player_id, pd.player_name, pd.position, v.team, v.market,
@@ -1107,9 +1157,9 @@ async def export_bundle(
             media_type="application/json",
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
-    except Exception as e:
-        logger.error(f"Error exporting bundle: {e}")
-        raise HTTPException(status_code=500, detail=f"Export bundle error: {str(e)}")
+    except Exception:
+        logger.exception("Error exporting bundle")
+        raise HTTPException(status_code=500, detail="Export bundle failed")
 
 
 # ── Agent review endpoint (P2: Agent teamwork) ──────────────────
@@ -1183,71 +1233,63 @@ _review_runs_in_flight: set[str] = set()
 
 
 def _run_agent_review_background(run_id: str, season: int, week: int):
-    """Execute agent review in background and store results in agent_decisions."""
+    """Run the agent coordinator and record the outcome on the pipeline run.
+
+    Fails closed: when the coordinator raises or produces no decisions, no
+    agent_decisions rows are written on its behalf. The failure is recorded
+    in report_json so /review-status reports it instead of a silent approval.
+    """
     try:
-        from agents.coordinator import AgentCoordinator
+        from agents.coordinator import run_all_agents
 
-        coordinator = AgentCoordinator()
-        coordinator.run_review(season, week)
+        decisions = run_all_agents(season, week)
+    except Exception:
+        logger.exception("Agent review failed for run %s", run_id)
+        _record_agent_review_outcome(run_id, error="Agent review failed")
+        return
 
-        # Update run metadata to record review timestamp
-        execute(
-            """
+    if not decisions:
+        logger.error("Agent review for run %s produced no decisions", run_id)
+        _record_agent_review_outcome(run_id, error="Agent review produced no decisions")
+        return
+
+    _record_agent_review_outcome(run_id, error=None)
+
+
+def _record_agent_review_outcome(run_id: str, *, error: Optional[str]) -> None:
+    """Stamp the review result into pipeline_runs.report_json.
+
+    json_set/json_object exist with the same path syntax in SQLite and MySQL 8.
+    Success sets agent_review_at and clears agent_review_error; failure sets
+    only agent_review_error, leaving any earlier successful review in place.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    if error is None:
+        sql = """
             UPDATE pipeline_runs
             SET report_json = CASE
                 WHEN report_json IS NOT NULL
-                THEN json_set(report_json, '$.agent_review_at', ?)
-                ELSE json_object('agent_review_at', ?)
+                THEN json_set(report_json, '$.agent_review_at', ?, '$.agent_review_error', NULL)
+                ELSE json_object('agent_review_at', ?, 'agent_review_error', NULL)
             END
             WHERE run_id = ?
-            """,
-            params=(
-                datetime.now(timezone.utc).isoformat(),
-                datetime.now(timezone.utc).isoformat(),
-                run_id,
-            ),
-        )
-    except ImportError:
-        logger.warning("Agent coordinator not available; storing stub review")
-        _store_stub_agent_review(season, week)
-    except Exception as exc:
-        logger.error("Agent review failed: %s", exc)
-        _store_stub_agent_review(season, week)
-
-
-def _store_stub_agent_review(season: int, week: int):
-    """Store a stub agent review when the full coordinator isn't available."""
-    visibility_sql, visibility_params = value_visibility_scope()
-    bets_query = f"""
-        SELECT v.player_id, v.market FROM materialized_value_view v
-        WHERE {visibility_sql}
-          AND v.season = ? AND v.week = ?
-    """
-    rows = fetchall(bets_query, params=(*visibility_params, season, week))
-    for row in rows:
-        player_id, market_name = row[0], row[1]
-        existing = fetchone(
-            "SELECT 1 FROM agent_decisions WHERE season = ? AND week = ? AND player_id = ? AND market = ?",
-            params=(season, week, player_id, market_name),
-        )
-        if not existing:
-            execute(
-                """
-                INSERT INTO agent_decisions
-                    (season, week, player_id, market, decision, merged_confidence,
-                     votes, rationale, decided_at)
-                VALUES (?, ?, ?, ?, 'APPROVED', 0.70,
-                        '{"model": "APPROVE", "risk": "APPROVE", "market": "PENDING", "diagnostics": "PENDING"}',
-                        'Auto-approved pending full agent review', ?)
-                """,
-                params=(
-                    season,
-                    week,
-                    player_id,
-                    market_name,
-                    datetime.now(timezone.utc).isoformat(),
-                ),
-            )
+        """
+        params: tuple = (now, now, run_id)
+    else:
+        sql = """
+            UPDATE pipeline_runs
+            SET report_json = CASE
+                WHEN report_json IS NOT NULL
+                THEN json_set(report_json, '$.agent_review_error', ?)
+                ELSE json_object('agent_review_error', ?)
+            END
+            WHERE run_id = ?
+        """
+        params = (error, error, run_id)
+    try:
+        execute(sql, params=params)
+    except Exception:
+        logger.exception("Could not record agent review outcome for run %s", run_id)
 
 
 @app.get("/api/run/{run_id}/review-status")
@@ -1267,11 +1309,13 @@ async def get_agent_review_status(
         raise HTTPException(status_code=404, detail="Run not found")
 
     review_at = None
+    review_error = None
     if row[0]:
         try:
             report = json.loads(row[0])
             review_at = report.get("agent_review_at")
-        except (json.JSONDecodeError, TypeError):
+            review_error = report.get("agent_review_error")
+        except (json.JSONDecodeError, TypeError, AttributeError):
             pass
 
     # Count agent decisions for this season/week
@@ -1285,6 +1329,7 @@ async def get_agent_review_status(
         "run_id": run_id,
         "reviewed": review_at is not None,
         "reviewed_at": review_at,
+        "review_error": review_error,
         "decision_count": decision_count,
     }
 
@@ -1503,7 +1548,7 @@ async def get_user_bets(
         df = read_dataframe(query, params=params)
 
         return {
-            "bets": df.to_dict(orient="records") if not df.empty else [],
+            "bets": _records(df),
             "total": len(df),
         }
     except Exception as e:
@@ -1671,7 +1716,7 @@ async def backtest_summary(
             model_beats_line_pct = None
             total_bets = 0
 
-        recent_picks = picks_df.to_dict(orient="records") if not picks_df.empty else []
+        recent_picks = _records(picks_df)
 
         return {
             "summary": {

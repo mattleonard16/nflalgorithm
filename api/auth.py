@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
-from pydantic import BaseModel, EmailStr, computed_field
+from pydantic import BaseModel, EmailStr, Field, computed_field
 
 from utils.db import execute, fetchone
 
@@ -27,6 +27,10 @@ MIN_PASSWORD_LENGTH = 8
 # log in with a prefix of the password they registered with.
 MAX_PASSWORD_LENGTH = 72
 _BCRYPT_ROUNDS = 12
+# Verified against when the email is unknown so a miss costs the same bcrypt
+# work as a wrong password; otherwise response time reveals registered emails.
+# Same cost factor as _BCRYPT_ROUNDS. It hashes no real credential.
+_DUMMY_BCRYPT_HASH = b"$2b$12$hLtpv3fPcgBP0Xspvb7EC.g/XB0wbLnKToi7Ccds4K7V/Rvqaq5em"
 
 
 class UserCreate(BaseModel):
@@ -61,16 +65,16 @@ class UserResponse(BaseModel):
 
 
 class UserPreferences(BaseModel):
-    default_min_edge: float = 0.05
-    default_kelly_fraction: float = 0.25
-    default_max_stake: float = 0.02
+    default_min_edge: float = Field(0.05, ge=0, le=1, allow_inf_nan=False)
+    default_kelly_fraction: float = Field(0.25, ge=0, le=1, allow_inf_nan=False)
+    default_max_stake: float = Field(0.02, ge=0, le=1, allow_inf_nan=False)
     best_line_only: bool = True
     show_synthetic_odds: bool = False
     defense_multipliers: bool = True
     weather_adjustments: bool = True
     injury_weighting: bool = True
-    preferred_sportsbooks: Optional[str] = None
-    preferred_markets: Optional[str] = None
+    preferred_sportsbooks: Optional[str] = Field(None, max_length=1000)
+    preferred_markets: Optional[str] = Field(None, max_length=1000)
 
 
 def hash_password(password: str) -> str:
@@ -110,6 +114,14 @@ def verify_password(password: str, password_hash: str) -> bool:
             logger.warning("Malformed bcrypt hash encountered during verify")
             return False
     return _verify_legacy_sha256(password, password_hash)
+
+
+def _burn_dummy_bcrypt(password: str) -> None:
+    """Spend one bcrypt verify so unknown-email logins match known-email timing."""
+    try:
+        bcrypt.checkpw(password.encode("utf-8")[:MAX_PASSWORD_LENGTH], _DUMMY_BCRYPT_HASH)
+    except ValueError:
+        pass
 
 
 def generate_session_id() -> str:
@@ -173,6 +185,7 @@ def authenticate_user(login: UserLogin) -> Optional[dict]:
     )
 
     if not row:
+        _burn_dummy_bcrypt(login.password)
         return None
 
     user_id, email, password_hash, name, tier, bankroll, created_at = row

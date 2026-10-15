@@ -36,6 +36,11 @@ _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 _WINDOW_SECONDS = 60.0
 
+# Upper bound on buckets held per tier. Idle buckets are pruned losslessly
+# (a fully refilled bucket is the same as no bucket); past this cap the
+# least recently seen are dropped so memory stays bounded under IP churn.
+_MAX_TRACKED_CLIENTS = 10_000
+
 
 def _read_limit(name: str, default: int) -> int:
     """Read a per-minute limit from the environment, failing loud on garbage."""
@@ -65,14 +70,19 @@ def client_identifier(scope: dict[str, Any], *, trust_proxy: bool) -> str:
     """Resolve the client address, honoring X-Forwarded-For only behind a proxy.
 
     Trusting the header unconditionally would let any caller mint a fresh
-    identity per request and bypass the limiter entirely.
+    identity per request and bypass the limiter entirely. Behind the proxy the
+    rightmost entry is the one our proxy appended (the peer it saw); everything
+    to its left came from the client and can be forged, so it is never used.
     """
     if trust_proxy:
+        hops: list[str] = []
         for raw_name, raw_value in scope.get("headers") or ():
             if raw_name == b"x-forwarded-for":
-                forwarded = raw_value.decode("latin-1").split(",")[0].strip()
-                if forwarded:
-                    return forwarded
+                hops.extend(raw_value.decode("latin-1").split(","))
+        for hop in reversed(hops):
+            forwarded = hop.strip()
+            if forwarded:
+                return forwarded
     client = scope.get("client")
     if client:
         return str(client[0])
@@ -94,12 +104,16 @@ class _Decision:
 class _TokenBucketTier:
     """Fixed per-minute token budget refilled continuously, keyed by client."""
 
-    def __init__(self, name: str, limit_per_minute: int) -> None:
+    def __init__(
+        self, name: str, limit_per_minute: int, *, max_clients: int = _MAX_TRACKED_CLIENTS
+    ) -> None:
         self.name = name
         self.limit = limit_per_minute
         self._refill_per_second = limit_per_minute / _WINDOW_SECONDS if limit_per_minute else 0.0
         self._state: dict[str, tuple[float, float]] = {}
         self._lock = threading.Lock()
+        self._max_clients = max(1, max_clients)
+        self._last_prune: float | None = None
 
     @property
     def enabled(self) -> bool:
@@ -110,6 +124,12 @@ class _TokenBucketTier:
             return _Decision(allowed=True, tier=self.name, retry_after=0)
 
         with self._lock:
+            if (
+                self._last_prune is None
+                or now - self._last_prune >= _WINDOW_SECONDS
+                or len(self._state) >= self._max_clients
+            ):
+                self._prune(now)
             tokens, last_seen = self._state.get(key, (float(self.limit), now))
             tokens = min(float(self.limit), tokens + (now - last_seen) * self._refill_per_second)
             if tokens >= 1.0:
@@ -120,6 +140,26 @@ class _TokenBucketTier:
 
         retry_after = max(1, int(deficit / self._refill_per_second) + 1)
         return _Decision(allowed=False, tier=self.name, retry_after=retry_after)
+
+    def _prune(self, now: float) -> None:
+        """Drop refilled buckets, then the stalest past the cap. Caller holds the lock."""
+        self._last_prune = now
+        limit = float(self.limit)
+        self._state = {
+            key: (tokens, last_seen)
+            for key, (tokens, last_seen) in self._state.items()
+            if tokens + (now - last_seen) * self._refill_per_second < limit
+        }
+        if len(self._state) >= self._max_clients:
+            # Evict down to 90% of the cap so a full table is not re-sorted on
+            # every request.
+            keep = max(0, int(self._max_clients * 0.9) - 1)
+            newest = sorted(self._state.items(), key=lambda item: item[1][1], reverse=True)
+            self._state = dict(newest[:keep])
+
+    def tracked_clients(self) -> int:
+        with self._lock:
+            return len(self._state)
 
     def reset(self) -> None:
         with self._lock:

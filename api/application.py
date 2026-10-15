@@ -23,6 +23,8 @@ except ModuleNotFoundError as exc:
         "API module before starting the service."
     ) from exc
 
+from fastapi.middleware.cors import CORSMiddleware
+
 from api.diagnostics import router as diagnostics_router
 from api.pipeline_router import router as pipeline_router
 from api.projections_router import router as projections_router
@@ -57,5 +59,12 @@ install_exception_handlers(app)
 # the limiter regardless of which private api.server it ships. Limits are read
 # from the environment at construction; invalid values fail startup loud.
 app.add_middleware(RateLimitMiddleware)
+# add_middleware wraps outermost, which would put the limiter outside CORS and
+# send 429s without Access-Control-* headers (browsers then report a CORS error
+# instead of the rate limit). Move CORS back to the outside.
+_cors = [m for m in app.user_middleware if m.cls is CORSMiddleware]
+for _middleware in _cors:
+    app.user_middleware.remove(_middleware)
+    app.user_middleware.insert(0, _middleware)
 
 __all__ = ["app"]

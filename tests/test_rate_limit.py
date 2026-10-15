@@ -6,11 +6,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+# Imported at collection: api.application adds middleware at import time, which
+# Starlette refuses once another test has started the shared api.server app.
+from api.application import app
 from api.rate_limit import (
     AUTH_LIMIT_ENV,
     GLOBAL_LIMIT_ENV,
     TRUSTED_PROXY_ENV,
     RateLimitMiddleware,
+    _TokenBucketTier,
     client_identifier,
 )
 
@@ -144,14 +148,107 @@ def test_forwarded_for_is_honored_with_trusted_proxy(monkeypatch) -> None:
     assert repeat.status_code == 429
 
 
-def test_client_identifier_uses_leftmost_forwarded_hop() -> None:
+def test_client_identifier_uses_rightmost_forwarded_hop() -> None:
+    # The proxy appends the peer it saw; anything left of that is client-supplied.
     scope = {
         "client": ("10.0.0.9", 5000),
         "headers": [(b"x-forwarded-for", b"203.0.113.7, 70.41.3.18")],
     }
 
-    assert client_identifier(scope, trust_proxy=True) == "203.0.113.7"
+    assert client_identifier(scope, trust_proxy=True) == "70.41.3.18"
     assert client_identifier(scope, trust_proxy=False) == "10.0.0.9"
+
+
+def test_client_identifier_reads_the_last_forwarded_header() -> None:
+    scope = {
+        "client": ("10.0.0.9", 5000),
+        "headers": [
+            (b"x-forwarded-for", b"1.1.1.1"),
+            (b"x-forwarded-for", b"198.51.100.4, "),
+        ],
+    }
+
+    assert client_identifier(scope, trust_proxy=True) == "198.51.100.4"
+
+
+def test_spoofed_leftmost_forwarded_entry_does_not_buy_budget(monkeypatch) -> None:
+    monkeypatch.setenv(TRUSTED_PROXY_ENV, "true")
+    client = _make_client(auth_per_minute=1, global_per_minute=0)
+
+    # Same real client (rightmost, appended by the proxy), forged prefixes.
+    first = client.post("/api/auth/login", headers={"X-Forwarded-For": "1.1.1.1, 203.0.113.7"})
+    second = client.post("/api/auth/login", headers={"X-Forwarded-For": "2.2.2.2, 203.0.113.7"})
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
+def test_refilled_buckets_are_pruned() -> None:
+    tier = _TokenBucketTier("global", 60)
+    for index in range(50):
+        assert tier.consume(f"client-{index}", 0.0).allowed
+
+    assert tier.tracked_clients() == 50
+
+    # Past the window every bucket is full again, so dropping them is lossless.
+    tier.consume("late", 61.0)
+
+    assert tier.tracked_clients() == 1
+
+
+def test_bucket_table_is_capped() -> None:
+    tier = _TokenBucketTier("global", 60, max_clients=100)
+    for index in range(1000):
+        tier.consume(f"client-{index}", index * 0.001)
+
+    assert tier.tracked_clients() <= 100
+
+
+def test_pruning_keeps_drained_buckets_within_the_window() -> None:
+    tier = _TokenBucketTier("auth", 1)
+    assert tier.consume("attacker", 0.0).allowed
+    for index in range(10):
+        tier.consume(f"other-{index}", 0.0)
+
+    # A forced prune must not hand the drained client a fresh bucket.
+    tier._prune(1.0)
+
+    assert not tier.consume("attacker", 1.0).allowed
+
+
+def test_cors_wraps_the_rate_limiter_in_the_served_app() -> None:
+    from fastapi.middleware.cors import CORSMiddleware
+
+    order = [middleware.cls for middleware in app.user_middleware]
+
+    # user_middleware[0] is outermost: CORS must decorate the limiter's 429s.
+    assert order.index(CORSMiddleware) < order.index(RateLimitMiddleware)
+
+
+def test_rate_limited_response_carries_cors_headers() -> None:
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app = FastAPI()
+
+    @app.get("/api/value-bets")
+    def value_bets() -> dict:
+        return {"ok": True}
+
+    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"])
+    app.add_middleware(RateLimitMiddleware, auth_per_minute=0, global_per_minute=1)
+    # Mirror api/application.py: move CORS outermost after adding the limiter.
+    cors = [m for m in app.user_middleware if m.cls is CORSMiddleware]
+    for middleware in cors:
+        app.user_middleware.remove(middleware)
+        app.user_middleware.insert(0, middleware)
+    client = TestClient(app)
+    origin = {"Origin": "http://localhost:3000"}
+
+    assert client.get("/api/value-bets", headers=origin).status_code == 200
+    blocked = client.get("/api/value-bets", headers=origin)
+
+    assert blocked.status_code == 429
+    assert blocked.headers["access-control-allow-origin"] == "http://localhost:3000"
 
 
 def test_non_integer_limit_fails_loud(monkeypatch) -> None:
