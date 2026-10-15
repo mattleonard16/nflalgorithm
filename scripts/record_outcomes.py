@@ -15,9 +15,8 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from config import config
 from utils.clv import STATUS_OK, compute_clv, resolve_closing_lines
-from utils.db import execute, executemany, get_backend, get_connection, read_dataframe
+from utils.db import execute, executemany, get_backend, read_dataframe
 from utils.game_completion import classify_games
 from utils.grading import (
     align_actuals_to_bets,
@@ -75,7 +74,7 @@ def grade_bets(season: int, week: int, include_unfinished: bool = False) -> List
         SELECT
             season, week, player_id, event_id, team, team_odds,
             market, sportsbook, line, price, side, mu, sigma, p_win,
-            edge_percentage, expected_roi, kelly_fraction, stake,
+            implied_prob, implied_prob_under, edge_percentage, expected_roi, kelly_fraction, stake,
             generated_at
         FROM materialized_value_view
         WHERE season = ? AND week = ?
@@ -221,6 +220,11 @@ def grade_bets(season: int, week: int, include_unfinished: bool = False) -> List
             # Carried for CLV only — not persisted to bet_outcomes.
             "mu": pred.get("mu"),
             "sigma": pred.get("sigma"),
+            # The de-vigged pair the bet was priced on. The view stores no under
+            # price, so without these utils.clv finds no entry market probability
+            # and every bet falls back to the model curve.
+            "implied_prob": pred.get("implied_prob"),
+            "implied_prob_under": pred.get("implied_prob_under"),
         }
 
         outcomes.append(outcome)
@@ -542,7 +546,8 @@ def save_outcomes(outcomes: List[Dict]) -> None:
     print(f"  Record: {wins}-{losses}-{pushes}")
     print(f"  Profit: {profit_units:.2f} units")
     print(f"  ROI: {roi_pct:.2f}%")
-    print(f"  Avg edge: {avg_edge:.2f}%")
+    # edge_at_placement is a fraction (see grade_bets); print it as a percent.
+    print(f"  Avg edge: {avg_edge * 100.0:.2f}%")
     print(f"  Avg CLV: {f'{clv_avg:.1f} bp' if clv_avg is not None else 'unavailable'}")
 
 

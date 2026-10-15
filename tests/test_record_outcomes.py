@@ -64,16 +64,23 @@ def _bet(
     price: int = -110,
     side: str = "over",
     edge: float = 0.10,
+    implied_prob: float | None = None,
+    implied_prob_under: float | None = None,
 ) -> None:
     execute(
         """
         INSERT INTO materialized_value_view (
             season, week, player_id, event_id, market, sportsbook, line, price, side,
-            mu, sigma, p_win, edge_percentage, expected_roi, kelly_fraction, stake,
-            generated_at
-        ) VALUES (?, ?, ?, ?, ?, 'DraftKings', ?, ?, ?, 70.0, 20.0, 0.55, ?, 0.05, 0.02, 20.0, ?)
+            mu, sigma, p_win, implied_prob, implied_prob_under,
+            edge_percentage, expected_roi, kelly_fraction, stake, generated_at
+        ) VALUES (
+            ?, ?, ?, ?, ?, 'DraftKings', ?, ?, ?, 70.0, 20.0, 0.55, ?, ?, ?, 0.05, 0.02, 20.0, ?
+        )
         """,
-        (SEASON, WEEK, player_id, event_id, market, line, price, side, edge, NOW.isoformat()),
+        (
+            SEASON, WEEK, player_id, event_id, market, line, price, side,
+            implied_prob, implied_prob_under, edge, NOW.isoformat(),
+        ),
     )
 
 
@@ -328,14 +335,6 @@ def test_the_weekly_clv_average_leaves_out_bets_without_a_close(final_game):
     assert average == pytest.approx(stored_bp)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "utils/clv.py compute_clv scores line movement with the sign inverted: an over "
-        "taken at 64.5 that closes at 67.5 holds the better number, but clv_points and "
-        "the model-curve clv_bp both come out negative"
-    ),
-)
 def test_an_over_taken_below_the_closing_line_beat_the_close(final_game):
     outcomes = _graded_receiver(line=64.5)
     _odds("BUF_receiver_a", 64.5, PAST_KICKOFF - timedelta(days=1))
@@ -350,6 +349,27 @@ def test_a_two_sided_close_records_clv_for_a_one_sided_entry(final_game):
     _odds("BUF_receiver_a", 64.5, PAST_KICKOFF - timedelta(hours=1), under_price=-110)
 
     assert compute_and_save_clv(SEASON, WEEK, outcomes) == 0.0
+
+
+def test_a_price_move_is_graded_off_the_stored_entry_market_probability(final_game):
+    """The view stores the de-vigged pair the bet was priced on and no under
+    price. grade_bets must carry that pair to CLV, or every bet falls back to
+    the model curve, which reads a pure price move at one line as 0."""
+    _bet("BUF_receiver_a", line=64.5, implied_prob=0.5, implied_prob_under=0.5)
+    _stat("BUF_receiver_a", "BUF", receiving_yards=71.0)
+    [outcome] = grade_bets(SEASON, WEEK)
+    _odds("BUF_receiver_a", 64.5, PAST_KICKOFF - timedelta(days=1), under_price=-110)
+    _odds(
+        "BUF_receiver_a", 64.5, PAST_KICKOFF - timedelta(hours=1),
+        price=-140, under_price=120,
+    )
+
+    average = compute_and_save_clv(SEASON, WEEK, [outcome])
+
+    raw_over, raw_under = 140 / 240, 100 / 220
+    expected_bp = (raw_over / (raw_over + raw_under) - 0.5) * 10_000
+    assert average == pytest.approx(expected_bp, abs=1e-2)
+    assert average > 0
 
 
 # ---------------------------------------------------------------------------
