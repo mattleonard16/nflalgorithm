@@ -48,6 +48,9 @@ class BacktestConfig:
     min_edge: float = 0.08
     markets: list[str] = field(default_factory=lambda: ["pts", "reb", "ast", "fg3m"])
     tiers: list[str] | None = None
+    # Not applied: the backtest grades rows already materialized in
+    # nba_materialized_value_view, so calibration / Monte Carlo are whatever
+    # the view was built with. Kept so existing callers still construct.
     use_calibrated: bool = False
     use_monte_carlo: bool = False
 
@@ -121,6 +124,18 @@ def _profit_for_bet(grade: str, kelly: float, price: int) -> float:
     return -kelly
 
 
+def _bet_price(row: dict, side: str) -> int:
+    """American odds for the side bet: under_price for unders, else over_price."""
+    if side == "under":
+        under = row.get("under_price")
+        if under is not None and not (isinstance(under, float) and math.isnan(under)):
+            return int(under)
+    over = row.get("over_price")
+    if over is None or (isinstance(over, float) and math.isnan(over)):
+        return -110
+    return int(over)
+
+
 def _date_range(start: str, end: str) -> list[str]:
     """Return list of ISO date strings from start to end inclusive."""
     start_dt = date.fromisoformat(start)
@@ -136,16 +151,21 @@ def _date_range(start: str, end: str) -> list[str]:
 
 
 def _load_value_bets_for_date(game_date: str, config: BacktestConfig) -> pd.DataFrame:
-    """Load pre-computed value bets from the materialized view."""
+    """Load pre-computed value bets from the materialized view.
+
+    Only rows with ``edge_percentage >= config.min_edge`` are returned, so the
+    recorded threshold is the one actually applied.
+    """
     placeholders = ",".join("?" for _ in config.markets)
     sql = f"""
         SELECT player_id, player_name, market, sportsbook, line, over_price,
-               kelly_fraction, confidence_tier, edge_percentage, side
+               under_price, kelly_fraction, confidence_tier, edge_percentage, side
         FROM nba_materialized_value_view
         WHERE game_date = ?
         AND market IN ({placeholders})
+        AND edge_percentage >= ?
     """
-    params = (game_date, *config.markets)
+    params = (game_date, *config.markets, config.min_edge)
     df = read_dataframe(sql, params)
 
     if df.empty:
@@ -238,6 +258,7 @@ def run_backtest(config: BacktestConfig) -> BacktestResult:
     losses = 0
     pushes = 0
     total_profit = 0.0
+    total_staked = 0.0
     bankroll = config.initial_bankroll
 
     daily_rows: list[dict] = []
@@ -272,7 +293,7 @@ def run_backtest(config: BacktestConfig) -> BacktestResult:
                 line = float(row["line"])
                 side = str(row.get("side", "over"))
                 kelly = float(row.get("kelly_fraction", 0.0) or 0.0)
-                price = int(row.get("over_price", -110) or -110)
+                price = _bet_price(row, side)
                 tier = str(row.get("confidence_tier", "C") or "C")
 
                 grade = _grade_bet(side, line, actual)
@@ -292,6 +313,7 @@ def run_backtest(config: BacktestConfig) -> BacktestResult:
                 day_bets += 1
                 daily_profit += profit
                 total_profit += profit
+                total_staked += kelly
 
                 bet_records.append(
                     {
@@ -334,8 +356,10 @@ def run_backtest(config: BacktestConfig) -> BacktestResult:
     daily_returns = daily_pnl["pnl"].tolist() if not daily_pnl.empty else []
     sharpe = _sharpe(daily_returns)
 
-    # ROI
-    roi_pct = (total_profit / total_bets * 100) if total_bets > 0 else 0.0
+    # ROI = profit / amount staked. Profit is in Kelly units (stake = kelly per
+    # bet), so dividing by the bet count mixed units and understated ROI by
+    # roughly the average Kelly fraction.
+    roi_pct = (total_profit / total_staked * 100) if total_staked > 0 else 0.0
 
     # Win rate
     win_rate = wins / total_bets if total_bets > 0 else 0.0
@@ -387,11 +411,13 @@ def _build_per_market(bet_records: list[dict]) -> pd.DataFrame:
             bets=("grade", "count"),
             wins=("grade", lambda x: (x == "win").sum()),
             total_profit=("profit", "sum"),
+            total_staked=("kelly", "sum"),
         )
         .reset_index()
     )
     grouped["roi_pct"] = grouped.apply(
-        lambda r: (r["total_profit"] / r["bets"] * 100) if r["bets"] > 0 else 0.0, axis=1
+        lambda r: (r["total_profit"] / r["total_staked"] * 100) if r["total_staked"] > 0 else 0.0,
+        axis=1,
     )
     return grouped[["market", "bets", "wins", "roi_pct"]]
 
@@ -410,10 +436,12 @@ def _build_per_tier(bet_records: list[dict]) -> pd.DataFrame:
             bets=("grade", "count"),
             wins=("grade", lambda x: (x == "win").sum()),
             total_profit=("profit", "sum"),
+            total_staked=("kelly", "sum"),
         )
         .reset_index()
     )
     grouped["roi_pct"] = grouped.apply(
-        lambda r: (r["total_profit"] / r["bets"] * 100) if r["bets"] > 0 else 0.0, axis=1
+        lambda r: (r["total_profit"] / r["total_staked"] * 100) if r["total_staked"] > 0 else 0.0,
+        axis=1,
     )
     return grouped[["tier", "bets", "wins", "roi_pct"]]

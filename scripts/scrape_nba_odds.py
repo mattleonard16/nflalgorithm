@@ -15,6 +15,7 @@ from datetime import datetime, date, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -30,6 +31,10 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api.the-odds-api.com/v4"
 SPORT_KEY = "basketball_nba"
 MAX_EVENTS = 15
+
+# NBA slates, box scores (nba_player_game_logs) and projections are all keyed
+# by the US Eastern calendar date of tip-off.
+NBA_SLATE_TZ = ZoneInfo("America/New_York")
 
 # Odds API market key -> internal market name
 MARKET_MAP: Dict[str, str] = {
@@ -294,6 +299,23 @@ def _get_with_retry(
 
 # ── Parsing ───────────────────────────────────────────────────────────────────
 
+def _slate_date(commence_time: str) -> str:
+    """Eastern-time calendar date (YYYY-MM-DD) of an Odds API ``commence_time``.
+
+    ``commence_time`` is UTC, so taking its date directly files a 7pm ET tip
+    (00:00Z) under the next day, where it never joins the ET-dated projections
+    and game logs. A naive timestamp is treated as UTC; an unparseable one
+    falls back to today's Eastern date.
+    """
+    try:
+        dt = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return datetime.now(NBA_SLATE_TZ).strftime("%Y-%m-%d")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(NBA_SLATE_TZ).strftime("%Y-%m-%d")
+
+
 def _parse_events(events: List[Dict], season: int) -> List[Dict]:
     """
     Parse raw Odds API event list into rows matching the nba_odds schema.
@@ -312,12 +334,7 @@ def _parse_events(events: List[Dict], season: int) -> List[Dict]:
         event_id = event.get("id", "")
         commence_time = event.get("commence_time", "")
 
-        try:
-            game_date = datetime.fromisoformat(
-                commence_time.replace("Z", "+00:00")
-            ).strftime("%Y-%m-%d")
-        except (ValueError, AttributeError):
-            game_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        game_date = _slate_date(commence_time)
 
         # Extract game teams from event for Tier 3 validation
         home_team_full = event.get("home_team", "")

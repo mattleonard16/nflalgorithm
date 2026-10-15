@@ -7,12 +7,16 @@ Usage:
 Options:
     --start-date    Start date (YYYY-MM-DD, required)
     --end-date      End date (YYYY-MM-DD, required)
-    --min-edge      Minimum edge threshold (default: 0.08)
+    --min-edge      Minimum edge threshold applied to stored value rows (default: 0.08)
     --markets       Comma-separated list of markets (default: pts,reb,ast,fg3m)
     --tiers         Comma-separated list of confidence tiers to include (default: all)
-    --calibrated    Use calibrated probabilities
-    --monte-carlo   Use Monte Carlo probabilities
+    --calibrated    Not applied (see below); accepted for compatibility
+    --monte-carlo   Not applied (see below); accepted for compatibility
     --output        Optional path to write JSON results
+
+The backtest grades rows already materialized in nba_materialized_value_view,
+so calibration and Monte Carlo are whatever that view was built with. Those two
+flags are therefore not recorded with the run.
 """
 
 from __future__ import annotations
@@ -27,7 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.nba_backtest import BacktestConfig, run_backtest
-from utils.db import executemany
+from utils.db import executemany, get_backend
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -52,14 +56,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--calibrated",
         action="store_true",
         default=False,
-        help="Use calibrated probabilities",
+        help="Not applied: the backtest grades stored value rows as materialized",
     )
     parser.add_argument(
         "--monte-carlo",
         action="store_true",
         default=False,
         dest="monte_carlo",
-        help="Use Monte Carlo probabilities",
+        help="Not applied: the backtest grades stored value rows as materialized",
     )
     parser.add_argument(
         "--output",
@@ -71,15 +75,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _save_to_db(run_id: str, config: BacktestConfig, result) -> None:
-    """Persist backtest run summary to nba_backtest_runs table."""
+    """Persist backtest run summary to nba_backtest_runs table.
+
+    Only knobs the backtest actually applies are recorded in config_json;
+    use_calibrated / use_monte_carlo are not, since run_backtest never reads them.
+    """
     config_dict = {
         "start_date": config.start_date,
         "end_date": config.end_date,
         "min_edge": config.min_edge,
         "markets": list(config.markets),
         "tiers": list(config.tiers) if config.tiers else None,
-        "use_calibrated": config.use_calibrated,
-        "use_monte_carlo": config.use_monte_carlo,
         "initial_bankroll": config.initial_bankroll,
     }
 
@@ -96,9 +102,11 @@ def _save_to_db(run_id: str, config: BacktestConfig, result) -> None:
         "clv_avg": result.clv_avg,
     }
 
+    # `INSERT OR IGNORE` is SQLite-only; MySQL spells it `INSERT IGNORE`.
+    insert_verb = "INSERT IGNORE" if get_backend() == "mysql" else "INSERT OR IGNORE"
     executemany(
-        """
-        INSERT OR IGNORE INTO nba_backtest_runs
+        f"""
+        {insert_verb} INTO nba_backtest_runs
         (run_id, start_date, end_date, config_json, results_json,
          total_bets, roi_pct, sharpe_ratio, max_drawdown, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -140,6 +148,13 @@ def main() -> None:
         use_calibrated=args.calibrated,
         use_monte_carlo=args.monte_carlo,
     )
+
+    if args.calibrated or args.monte_carlo:
+        print(
+            "Note: --calibrated/--monte-carlo are not applied; the backtest grades "
+            "nba_materialized_value_view as materialized.",
+            file=sys.stderr,
+        )
 
     print(f"Running NBA backtest: {config.start_date} → {config.end_date}")
     print(f"  Markets : {', '.join(config.markets)}")
