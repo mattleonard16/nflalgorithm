@@ -259,3 +259,59 @@ class TestNbaRiskPersistence:
 
         count = _persist_risk_assessments(pd.DataFrame(), "2026-02-11")
         assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# Monte Carlo pricing of the side actually bet
+# ---------------------------------------------------------------------------
+
+
+class TestNbaRiskBetPrice:
+    def _captured_odds(self, df, monkeypatch):
+        import nba_risk_manager
+
+        captured = {}
+
+        def fake_drawdown(kelly, win, odds, *args, **kwargs):
+            captured["odds"] = list(odds)
+            return {"mean_drawdown": 0.0, "max_drawdown": 0.0, "p95_drawdown": 0.0}
+
+        monkeypatch.setattr(nba_risk_manager, "monte_carlo_drawdown", fake_drawdown)
+        nba_risk_manager.assess_risk(df, bankroll=1000.0)
+        return captured["odds"]
+
+    def test_under_bet_simulated_at_under_price(self, monkeypatch):
+        df = pd.concat(
+            [
+                _make_value_df(side="over", over_price=-120, under_price=100),
+                _make_value_df(
+                    player_id=99, event_id="evt2", side="under", over_price=-200, under_price=150
+                ),
+            ],
+            ignore_index=True,
+        )
+        assert self._captured_odds(df, monkeypatch) == [-120.0, 150.0]
+
+    def test_under_without_under_price_falls_back_to_over(self, monkeypatch):
+        df = _make_value_df(side="under", over_price=-130, under_price=None)
+        assert self._captured_odds(df, monkeypatch) == [-130.0]
+
+    def test_missing_side_and_under_columns_use_over_price(self, monkeypatch):
+        df = _make_value_df(over_price=-140)
+        assert self._captured_odds(df, monkeypatch) == [-140.0]
+
+
+class TestNbaRiskUpsertDialect:
+    def test_mysql_uses_on_duplicate_key_update(self, monkeypatch):
+        import nba_risk_manager
+
+        captured = {}
+        monkeypatch.setattr(nba_risk_manager, "get_backend", lambda: "mysql")
+        monkeypatch.setattr(
+            nba_risk_manager, "executemany", lambda sql, params: captured.setdefault("sql", sql)
+        )
+        assessed = nba_risk_manager.assess_risk(_make_value_df(), bankroll=1000.0)
+        nba_risk_manager._persist_risk_assessments(assessed, "2026-02-11")
+
+        assert "ON DUPLICATE KEY UPDATE" in captured["sql"]
+        assert "OR REPLACE" not in captured["sql"]

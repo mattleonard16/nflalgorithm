@@ -19,6 +19,7 @@ import logging
 from typing import Dict, List, Tuple
 
 from utils.db import read_dataframe
+from utils.nba_sigma import get_sigma_or_default
 
 logger = logging.getLogger(__name__)
 
@@ -225,8 +226,11 @@ def apply_injury_adjustments(
         new_row["injury_boost_players"] = json.dumps(out_names) if out_names else None
 
         # When a boost is applied, inflate sigma to reflect increased uncertainty.
+        # This is the only place the injury inflation is applied: the value
+        # engine uses the returned sigma as-is. A missing sigma is resolved to
+        # the market default first so those rows are inflated exactly once too.
         if boost > 1.0:
-            base_sigma = float(new_row.get("sigma", 0.0) or 0.0)
+            base_sigma = get_sigma_or_default(new_row.get("sigma"), adj_mu, market=str(market))
             new_row = {**new_row, "sigma": base_sigma * (1 + SIGMA_INFLATION)}
 
         # Update the projection mu so downstream sigma/p_win use the adjusted value

@@ -858,3 +858,124 @@ class TestConfidenceInputWiring:
         assert len(results) >= 1
         assert results[0]["confidence_score"] is not None
         assert isinstance(results[0]["confidence_score"], (int, float))
+
+
+# ---------------------------------------------------------------------------
+# 11. min_edge re-applied after calibration; injury sigma applied once
+# ---------------------------------------------------------------------------
+
+
+def _seed_projection_with_sigma(projected_value: float, sigma: float | None) -> None:
+    executemany(
+        "INSERT INTO nba_projections "
+        "(player_id, player_name, team, season, game_date, game_id, market, "
+        "projected_value, confidence, sigma) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        [(PLAYER_ID, PLAYER_NAME, TEAM, SEASON, GAME_DATE, "0022500001", "pts",
+          projected_value, 0.85, sigma)],
+    )
+
+
+class _FixedCalibrator:
+    """Stand-in for NBACalibrator that maps every p_win to a fixed value."""
+
+    p_out = 0.5
+
+    def load(self, path):  # noqa: ARG002 - matches NBACalibrator.load
+        return None
+
+    def calibrate(self, p_win, market):  # noqa: ARG002
+        return self.p_out
+
+
+class TestCalibratedEdgeThreshold:
+    def _rank(self, p_out, monkeypatch):
+        import utils.nba_calibration as cal_mod
+
+        from nba_value_engine import rank_nba_value
+
+        calibrator = type("Cal", (_FixedCalibrator,), {"p_out": p_out})
+        monkeypatch.setattr(cal_mod, "NBACalibrator", calibrator)
+        return rank_nba_value(GAME_DATE, SEASON, min_edge=0.08, calibrated=True)
+
+    def test_bet_dropped_when_calibrated_edge_below_min_edge(self, db, monkeypatch):
+        """Raw edge clears 8%, but calibration pulls p_win to 0.55 (edge ~3%):
+        the row must not be persisted as a value bet."""
+        _seed_projections(projected_value=32.0)
+        _seed_odds(line=25.5, over_price=-110, under_price=-110)
+
+        assert rank_nba_value_uncalibrated(), "precondition: raw edge clears min_edge"
+        assert self._rank(0.55, monkeypatch) == []
+
+    def test_bet_kept_when_calibrated_edge_clears_min_edge(self, db, monkeypatch):
+        _seed_projections(projected_value=32.0)
+        _seed_odds(line=25.5, over_price=-110, under_price=-110)
+
+        results = self._rank(0.70, monkeypatch)
+        assert len(results) == 1
+        assert results[0]["calibrated"] is True
+        assert results[0]["edge_percentage"] >= 0.08
+
+
+def rank_nba_value_uncalibrated():
+    from nba_value_engine import rank_nba_value
+
+    return rank_nba_value(GAME_DATE, SEASON, min_edge=0.08)
+
+
+class TestInjurySigmaAppliedOnce:
+    def _boosted_sigma(self, sigma, monkeypatch):
+        import utils.nba_injury_adjustments as inj
+
+        from nba_value_engine import rank_nba_value
+
+        monkeypatch.setattr(
+            inj,
+            "compute_teammate_absence_boost",
+            lambda player_id, team, game_date, market, base_mu: (base_mu * 1.1, 1.1, ["Out Guy"]),
+        )
+        _seed_projection_with_sigma(projected_value=30.0, sigma=sigma)
+        _seed_odds(line=25.5, over_price=-110, under_price=-110)
+        results = rank_nba_value(GAME_DATE, SEASON, min_edge=0.0)
+        assert len(results) == 1
+        assert results[0]["injury_boost_multiplier"] == pytest.approx(1.1)
+        return results[0]["sigma"]
+
+    def test_player_sigma_inflated_once(self, db, monkeypatch):
+        from utils.nba_injury_adjustments import SIGMA_INFLATION
+
+        # 5.0 * 1.2 = 6.0, not 5.0 * 1.2 * 1.2 = 7.2
+        assert self._boosted_sigma(5.0, monkeypatch) == pytest.approx(5.0 * (1 + SIGMA_INFLATION))
+
+    def test_default_sigma_inflated_once(self, db, monkeypatch):
+        from utils.nba_injury_adjustments import SIGMA_INFLATION
+        from utils.nba_sigma import SIGMA_DEFAULTS
+
+        expected = SIGMA_DEFAULTS["pts"] * (1 + SIGMA_INFLATION)
+        assert self._boosted_sigma(None, monkeypatch) == pytest.approx(expected)
+
+    def test_no_boost_leaves_sigma_unchanged(self, db):
+        from nba_value_engine import rank_nba_value
+
+        _seed_projection_with_sigma(projected_value=30.0, sigma=5.0)
+        _seed_odds(line=25.5, over_price=-110, under_price=-110)
+        results = rank_nba_value(GAME_DATE, SEASON, min_edge=0.0)
+        assert results[0]["sigma"] == pytest.approx(5.0)
+
+
+class TestMaterializeUpsertDialect:
+    def test_mysql_uses_on_duplicate_key_update(self, db, monkeypatch):
+        import nba_value_engine
+
+        _seed_projections(projected_value=32.0)
+        _seed_odds(line=25.5, over_price=-110, under_price=-110)
+        captured = {}
+        monkeypatch.setattr(nba_value_engine, "get_backend", lambda: "mysql")
+        monkeypatch.setattr(
+            nba_value_engine, "executemany", lambda sql, params: captured.setdefault("sql", sql)
+        )
+        assert nba_value_engine.materialize_nba_value(GAME_DATE, SEASON, min_edge=0.05) > 0
+        sql = captured["sql"]
+        assert "ON DUPLICATE KEY UPDATE" in sql
+        assert "OR REPLACE" not in sql
+        assert "event_id=VALUES" not in sql  # key columns are not rewritten
+        assert "edge_percentage=VALUES(edge_percentage)" in sql

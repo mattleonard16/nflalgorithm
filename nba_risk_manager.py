@@ -23,7 +23,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import config
-from utils.db import executemany, read_dataframe
+from utils.db import executemany, get_backend, read_dataframe
 from utils.risk_utils import append_warning, monte_carlo_drawdown, risk_adjusted_kelly
 
 logger = logging.getLogger(__name__)
@@ -192,11 +192,27 @@ def compute_exposure(df: pd.DataFrame, bankroll: float) -> pd.DataFrame:
 
 # ── Integration entry point ─────────────────────────────────────────
 
+def _bet_price_array(df: pd.DataFrame) -> np.ndarray:
+    """American odds of the side actually bet, row by row.
+
+    Under bets pay at ``under_price``; using ``over_price`` for every row
+    mis-sized the simulated payout of every under. A row with no usable
+    under price (column absent or NULL) falls back to ``over_price``.
+    """
+    over = pd.to_numeric(df["over_price"], errors="coerce").to_numpy(dtype=float)
+    if "side" not in df.columns or "under_price" not in df.columns:
+        return over
+    under = pd.to_numeric(df["under_price"], errors="coerce").to_numpy(dtype=float)
+    is_under = (df["side"].astype("object") == "under").to_numpy()
+    return np.where(is_under & ~np.isnan(under), under, over)
+
+
 def assess_risk(df: pd.DataFrame, bankroll: Optional[float] = None) -> pd.DataFrame:
     """Full NBA risk pipeline: correlations + exposure + Monte Carlo.
 
     Expects a DataFrame with columns: kelly_fraction, p_win, over_price,
-    player_id, market, team, event_id, stake.
+    player_id, market, team, event_id, stake. Optional ``side`` and
+    ``under_price`` columns price under bets at the under odds.
 
     Returns a new DataFrame with added columns:
         - correlation_group (str | None)
@@ -223,7 +239,7 @@ def assess_risk(df: pd.DataFrame, bankroll: Optional[float] = None) -> pd.DataFr
 
     kelly_arr = result["kelly_fraction"].to_numpy(dtype=float)
     win_arr = result["p_win"].to_numpy(dtype=float)
-    odds_arr = result["over_price"].to_numpy(dtype=float)
+    odds_arr = _bet_price_array(result)
 
     dd_stats = monte_carlo_drawdown(kelly_arr, win_arr, odds_arr)
 
@@ -265,13 +281,28 @@ def _persist_risk_assessments(df: pd.DataFrame, game_date: str) -> int:
             now,
         ))
 
-    sql = """
-        INSERT OR REPLACE INTO nba_risk_assessments
+    columns = """
         (game_date, player_id, market, sportsbook, event_id,
          correlation_group, exposure_warning, risk_adjusted_kelly,
          mean_drawdown, max_drawdown, p95_drawdown, assessed_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
+    # `INSERT OR REPLACE` is SQLite-only syntax; MySQL gets the same overwrite
+    # on the (game_date, player_id, market, sportsbook, event_id) primary key.
+    if get_backend() == "mysql":
+        sql = f"""
+        INSERT INTO nba_risk_assessments {columns}
+        ON DUPLICATE KEY UPDATE
+            correlation_group=VALUES(correlation_group),
+            exposure_warning=VALUES(exposure_warning),
+            risk_adjusted_kelly=VALUES(risk_adjusted_kelly),
+            mean_drawdown=VALUES(mean_drawdown),
+            max_drawdown=VALUES(max_drawdown),
+            p95_drawdown=VALUES(p95_drawdown),
+            assessed_at=VALUES(assessed_at)
+        """
+    else:
+        sql = f"INSERT OR REPLACE INTO nba_risk_assessments {columns}"
     executemany(sql, params)
     return len(params)
 
