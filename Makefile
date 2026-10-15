@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto db-analyze nfl-backtest production-run health
+.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate requirements mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto db-analyze nfl-backtest production-run health
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -150,6 +150,7 @@ install-venv:
 	python3.13 -m venv venv; \
 	venv/bin/pip install --upgrade pip; \
 	venv/bin/pip install -r requirements.txt; \
+	venv/bin/pip install --group dev; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
 	echo "Creating directories..."; \
@@ -182,20 +183,24 @@ test:
 	fi; \
 	exit $$rc
 
-# Linting with environment detection
+# Linting with environment detection. ruff (pyflakes rules, the same check CI
+# blocks on) runs first; mypy runs even when ruff fails so one pass reports
+# both. Either failure fails the target.
 lint:
-	@echo "Running mypy type checking with $(ENV_TYPE)..."
+	@echo "Running ruff and mypy with $(ENV_TYPE)..."
 	@start_time=$$(date +%s); \
+	$(PYTHON) -m ruff check .; \
+	ruff_rc=$$?; \
 	$(PYTHON) -m mypy . --ignore-missing-imports; \
-	rc=$$?; \
+	mypy_rc=$$?; \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
-	if [ $$rc -eq 0 ]; then \
+	if [ $$ruff_rc -eq 0 ] && [ $$mypy_rc -eq 0 ]; then \
 		echo "Linting complete in $${duration}s!"; \
 	else \
-		echo "Linting FAILED (exit $$rc) after $${duration}s" >&2; \
-	fi; \
-	exit $$rc
+		echo "Linting FAILED after $${duration}s (ruff exit $$ruff_rc, mypy exit $$mypy_rc)" >&2; \
+		exit 1; \
+	fi
 
 # Code formatting with environment detection
 format:
@@ -719,10 +724,17 @@ add-dep:
 	if command -v uv >/dev/null 2>&1 && [ -f "pyproject.toml" ]; then \
 		echo "Adding $(PKG) with UV..."; \
 		uv add $(PKG); \
-		echo "Added $(PKG) to pyproject.toml and uv.lock"; \
+		$(MAKE) requirements; \
+		echo "Added $(PKG) to pyproject.toml, uv.lock, and requirements.txt"; \
 	else \
 		echo "Adding $(PKG) with pip..."; \
 		$(PIP_INSTALL) $(PKG); \
-		$(PYTHON) -m pip freeze > requirements.txt; \
-		echo "Added $(PKG) and updated requirements.txt"; \
+		echo "Installed $(PKG) into venv only. requirements.txt is generated from uv.lock:"; \
+		echo "add $(PKG) to pyproject.toml, then run 'uv lock && make requirements'."; \
 	fi
+
+# requirements.txt is an export of uv.lock (runtime deps only, pinned), used by
+# Dockerfile.api, the venv fallback, and pip-audit. Regenerate after any lock change.
+requirements:
+	uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements.txt \
+		-o requirements.txt

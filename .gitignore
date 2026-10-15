@@ -9,7 +9,8 @@ __pycache__/
 venv/
 env/
 ENV/
-.venv/          # UV virtual environment
+# UV virtual environment
+.venv/
 .env
 .env.*
 !.env.example
@@ -55,8 +56,10 @@ Thumbs.db
 # Development tools
 .context/
 .mypy_cache/
+.ruff_cache/
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 *.cover
 *.py,cover

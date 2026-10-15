@@ -2,6 +2,8 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+# requirements.txt is the pinned export of uv.lock (`make requirements`):
+# runtime dependencies only, so test/lint tooling never ships in the image.
 COPY requirements.txt pyproject.toml ./
 RUN pip install --no-cache-dir -r requirements.txt
 
