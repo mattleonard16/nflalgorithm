@@ -42,7 +42,11 @@ def _same_game(row_a: pd.Series, row_b: pd.Series) -> bool:
         eid_b = row_b.get("event_id")
         if pd.notna(eid_a) and pd.notna(eid_b) and eid_a == eid_b:
             return True
-    return row_a.get("team") == row_b.get("team")
+    # A missing team identifies nothing: None == None must not stack two
+    # unrelated rows into one game.
+    team_a = row_a.get("team")
+    team_b = row_b.get("team")
+    return pd.notna(team_a) and pd.notna(team_b) and team_a == team_b
 
 
 # ── Correlation detection ──────────────────────────────────────────────

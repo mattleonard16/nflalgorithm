@@ -85,7 +85,9 @@ def pair_two_sided_prices(
     """Resolve ``outcome`` into ``(line, over_price, under_price)``.
 
     Returns ``None`` when the quote is unusable: an unrecognized side, a
-    missing price, or no opposite side at the same line. Callers skip those
+    missing price or line, or no opposite side at the same line. A quote with
+    no line is not a line of 0.0, and storing it as one would grade every
+    stat against zero. Callers skip those
     rows — a one-sided quote cannot have its vig removed, and guessing the
     other side would invent a market that was never offered.
     """
@@ -95,7 +97,7 @@ def pair_two_sided_prices(
 
     price = outcome.get("price")
     point = _point(outcome)
-    if price is None:
+    if price is None or point is None:
         return None
 
     opposite = find_opposite_side(
@@ -111,6 +113,6 @@ def pair_two_sided_prices(
     under_price = opposite["price"] if side == OVER else price
 
     try:
-        return (float(point if point is not None else 0.0), int(over_price), int(under_price))
+        return (point, int(over_price), int(under_price))
     except (TypeError, ValueError):
         return None
