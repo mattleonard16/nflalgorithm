@@ -106,3 +106,26 @@ def test_insufficient_sportsbook_breadth_is_rejected() -> None:
     assert result["reason_code"] == "sportsbook_coverage"
     assert result["sportsbook_qualified_event_markets"] == 5
     assert result["sportsbook_coverage"] == 5 / 6
+
+
+def test_started_games_are_reported_but_not_in_the_denominator() -> None:
+    # Saturday: the Thursday game has started, so the scraper reports the two
+    # remaining games as the denominator and the started one separately.
+    observed = complete_observation()
+    observed["started_events"] = 1
+
+    result = validate_odds_snapshot(observed, requirements=REQUIREMENTS)
+
+    assert result["valid"] is True
+    assert result["event_coverage"] == 1.0
+    assert result["started_events"] == 1
+
+
+def test_fully_started_week_fails_closed_with_its_own_reason() -> None:
+    observed = complete_observation()
+    observed.update(scheduled_events=0, started_events=16, covered_events=0)
+
+    result = validate_odds_snapshot(observed, requirements=REQUIREMENTS)
+
+    assert result["valid"] is False
+    assert result["reason_code"] == "no_upcoming_events"
