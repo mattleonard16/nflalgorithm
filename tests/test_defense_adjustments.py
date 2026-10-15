@@ -431,25 +431,75 @@ class TestErrorMessagesCarryOffendingNames:
 class TestScheduleLoading:
     """_load_schedule fallbacks; cache cleared so stubs never leak."""
 
+    def test_failure_is_not_cached(self, monkeypatch):
+        calls = []
+
+        class Flaky:
+            def load_schedules(self, seasons):
+                calls.append(seasons)
+                if len(calls) == 1:
+                    raise RuntimeError("feed down")
+                return Frame()
+
+        class Frame:
+            def to_pandas(self):
+                return pd.DataFrame(
+                    {"week": [1], "home_team": ["LA"], "away_team": ["SF"]}
+                )
+
+        da._fetch_schedule.cache_clear()
+        monkeypatch.setattr(da, "nfl", Flaky())
+        try:
+            assert da._load_schedule(1904).empty
+            # The outage must not be pinned for the process lifetime.
+            recovered = da._load_schedule(1904)
+            assert not recovered.empty
+            # And the success is cached.
+            assert da._load_schedule(1904) is recovered
+            assert len(calls) == 2
+        finally:
+            da._fetch_schedule.cache_clear()
+
+    def test_schedule_team_codes_are_canonicalized(self, monkeypatch):
+        class Frame:
+            def to_pandas(self):
+                return pd.DataFrame(
+                    {"week": [1, 2], "home_team": ["LA", "KC"],
+                     "away_team": ["SF", "LAC"]}
+                )
+
+        class Stub:
+            def load_schedules(self, seasons):
+                return Frame()
+
+        da._fetch_schedule.cache_clear()
+        monkeypatch.setattr(da, "nfl", Stub())
+        try:
+            out = da._load_schedule(1905)
+            assert out["home_team"].tolist() == ["LAR", "KC"]
+            assert out["away_team"].tolist() == ["SF", "LAC"]
+        finally:
+            da._fetch_schedule.cache_clear()
+
     def test_no_nflreadpy_returns_empty(self, monkeypatch):
-        da._load_schedule.cache_clear()
+        da._fetch_schedule.cache_clear()
         monkeypatch.setattr(da, "nfl", None)
         try:
             assert da._load_schedule(1901).empty
         finally:
-            da._load_schedule.cache_clear()
+            da._fetch_schedule.cache_clear()
 
     def test_loader_error_returns_empty(self, monkeypatch):
         class Boom:
             def load_schedules(self, seasons):
                 raise RuntimeError("feed down")
 
-        da._load_schedule.cache_clear()
+        da._fetch_schedule.cache_clear()
         monkeypatch.setattr(da, "nfl", Boom())
         try:
             assert da._load_schedule(1902).empty
         finally:
-            da._load_schedule.cache_clear()
+            da._fetch_schedule.cache_clear()
 
     def test_schedule_columns_selected(self, monkeypatch):
         class Frame:
@@ -463,13 +513,13 @@ class TestScheduleLoading:
             def load_schedules(self, seasons):
                 return Frame()
 
-        da._load_schedule.cache_clear()
+        da._fetch_schedule.cache_clear()
         monkeypatch.setattr(da, "nfl", Stub())
         try:
             out = da._load_schedule(1903)
             assert list(out.columns) == ["week", "home_team", "away_team"]
         finally:
-            da._load_schedule.cache_clear()
+            da._fetch_schedule.cache_clear()
 
 
 class TestDbEntryPoint:
@@ -522,6 +572,22 @@ class TestDbEntryPoint:
             lambda query: pd.DataFrame(self._stats_rows("XXX", "YYY")),
         )
         assert da.compute_defense_vs_position_multipliers(2025, 4) == {}
+
+    def test_rams_la_schedule_code_maps_to_lar_stats(self, monkeypatch):
+        # Raw nflverse schedule spells the Rams "LA"; stats use "LAR". Before
+        # canonicalization every Rams row lost its opponent and was dropped.
+        schedule = pd.DataFrame(
+            [{"week": w, "home_team": "LA", "away_team": "SF"} for w in range(1, 5)]
+        )
+        monkeypatch.setattr(da, "_load_schedule", lambda season: schedule)
+        monkeypatch.setattr(
+            da,
+            "read_dataframe",
+            lambda query: pd.DataFrame(self._stats_rows("LAR", "SF")),
+        )
+        mults = da.compute_defense_vs_position_multipliers(2025, 4)
+        assert ("LAR", "RB", "rushing_yards") in mults
+        assert ("SF", "RB", "rushing_yards") in mults
 
     def test_missing_schedule_returns_empty(self, monkeypatch):
         monkeypatch.setattr(da, "_load_schedule", lambda season: pd.DataFrame())
