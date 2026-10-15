@@ -979,3 +979,25 @@ class TestMaterializeUpsertDialect:
         assert "OR REPLACE" not in sql
         assert "event_id=VALUES" not in sql  # key columns are not rewritten
         assert "edge_percentage=VALUES(edge_percentage)" in sql
+
+
+class TestInvalidPrices:
+    def test_invalid_over_price_skips_row_instead_of_aborting(self, db):
+        """A stored over price of 0 is a bad cell, not a slate-wide crash."""
+        _seed_projections(projected_value=28.5)
+        _seed_odds(line=25.5, over_price=0, under_price=-105)
+
+        from nba_value_engine import rank_nba_value
+
+        assert rank_nba_value(GAME_DATE, SEASON, min_edge=0.0) == []
+
+    def test_invalid_under_price_prices_the_over_one_sided(self, db):
+        """A bad under cell drops to one-sided pricing; the over still ranks."""
+        _seed_projections(projected_value=28.5)
+        _seed_odds(line=25.5, over_price=-115, under_price=50)
+
+        from nba_value_engine import rank_nba_value
+
+        results = rank_nba_value(GAME_DATE, SEASON, min_edge=0.05)
+        assert results
+        assert all(r["side"] == "over" for r in results)

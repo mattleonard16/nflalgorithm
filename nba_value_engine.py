@@ -296,6 +296,11 @@ def rank_nba_value(
             over_price = int(over_price_raw)
         except (TypeError, ValueError):
             continue
+        # American odds never fall strictly between -100 and +100. A 0 or 50
+        # here is a bad cell; implied_probability refuses it, so skip the row
+        # rather than abort the whole slate.
+        if -100 < over_price < 100:
+            continue
 
         # Injury fields from apply_injury_adjustments
         base_mu = row.get("base_mu")
@@ -386,6 +391,9 @@ def rank_nba_value(
             isinstance(under_price_raw, float) and math.isnan(under_price_raw)
         ):
             under_price_val = int(under_price_raw)
+            if -100 < under_price_val < 100:
+                # Bad cell: price the over one-sided rather than de-vig against it.
+                under_price_val = None
 
         if not use_monte_carlo_row:
             if market_str == "fg3m":
