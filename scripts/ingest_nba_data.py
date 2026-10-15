@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 
-from utils.db import executemany, read_dataframe
+from utils.db import executemany, get_backend, read_dataframe
 
 logging.basicConfig(
     level=logging.INFO,
@@ -63,12 +63,10 @@ def _fetch_with_retry(fetch_fn: Any, label: str) -> pd.DataFrame:
     """
     import requests.exceptions
 
-    last_exc: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
         try:
             return fetch_fn()
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
-            last_exc = exc
             if attempt < MAX_RETRIES:
                 delay = RETRY_BASE_DELAY_SECONDS ** (attempt + 1)
                 log.warning(
@@ -159,23 +157,36 @@ def _transform(df: pd.DataFrame, season_year: int) -> list[dict[str, Any]]:
     return renamed.to_dict("records")
 
 
+def _upsert_sql(table: str, columns: tuple[str, ...], key_columns: tuple[str, ...]) -> str:
+    """Build an insert of ``columns`` that upserts on ``key_columns``.
+
+    ``INSERT OR REPLACE`` is SQLite-only and a syntax error on the MySQL
+    production backend. Placeholders follow ``columns`` order.
+    """
+    value_columns = [c for c in columns if c not in key_columns]
+    placeholders = ", ".join("?" for _ in columns)
+    if get_backend() == "mysql":
+        updates = ", ".join(f"{c} = VALUES({c})" for c in value_columns)
+        conflict = f"ON DUPLICATE KEY UPDATE {updates}"
+    else:
+        updates = ", ".join(f"{c} = excluded.{c}" for c in value_columns)
+        conflict = f"ON CONFLICT({', '.join(key_columns)}) DO UPDATE SET {updates}"
+    return f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders}) {conflict}"
+
+
 def _upsert_rows(rows: list[dict[str, Any]]) -> int:
     """Upsert rows into nba_player_game_logs. Returns count inserted."""
     if not rows:
         return 0
 
-    sql = """
-        INSERT OR REPLACE INTO nba_player_game_logs (
-            player_id, player_name, team_abbreviation, season,
-            game_id, game_date, matchup, wl, min,
-            pts, reb, ast, fg3m, fgm, fga, ftm, fta,
-            stl, blk, tov, plus_minus
-        ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?
-        )
-    """
+    # Column order must match the params tuple below.
+    columns = (
+        "player_id", "player_name", "team_abbreviation", "season",
+        "game_id", "game_date", "matchup", "wl", "min",
+        "pts", "reb", "ast", "fg3m", "fgm", "fga", "ftm", "fta",
+        "stl", "blk", "tov", "plus_minus",
+    )  # fmt: skip
+    sql = _upsert_sql("nba_player_game_logs", columns, ("player_id", "game_id"))
 
     params = [
         (
@@ -298,10 +309,11 @@ def ingest_defensive_stats(seasons: list[int] = DEFAULT_SEASONS) -> None:
         ]
         rows = [tuple(row) for row in df[cols].values]
         executemany(
-            "INSERT OR REPLACE INTO nba_team_defensive_stats "
-            "(team_abbreviation, season, as_of_date, def_rating, opp_pts_per100, "
-            "opp_reb_per100, opp_ast_per100, opp_fg3m_per100, games_played, opp_pace) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            _upsert_sql(
+                "nba_team_defensive_stats",
+                tuple(cols),
+                ("team_abbreviation", "season", "as_of_date"),
+            ),
             rows,
         )
         log.info("Stored defensive stats for %d teams (season %d)", len(rows), season)
