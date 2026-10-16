@@ -99,17 +99,6 @@ class NFLPropScraper:
             "Washington Commanders": "WAS",
         }
 
-        # Position mapping for common names
-        self.position_mapping = {
-            "Running Back": "RB",
-            "Wide Receiver": "WR",
-            "Tight End": "TE",
-            "Quarterback": "QB",
-            "RB": "RB",
-            "WR": "WR",
-            "TE": "TE",
-            "QB": "QB",
-        }
 
     @staticmethod
     def _save_snapshot(path: Path, snapshot: Dict) -> None:

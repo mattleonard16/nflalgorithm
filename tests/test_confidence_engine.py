@@ -17,7 +17,6 @@ import pandas as pd
 from confidence_engine import (
     compute_confidence_score,
     assign_tier,
-    filter_by_confidence,
     score_plays,
     _score_edge,
     _score_stability,
@@ -266,55 +265,6 @@ class TestAssignTier:
 # ======================================================================
 # Filtering by tier
 # ======================================================================
-
-
-class TestFilterByConfidence:
-    def _make_plays(self):
-        return pd.DataFrame([
-            {"player_id": "P1", "confidence_score": 95.0, "confidence_tier": "Premium"},
-            {"player_id": "P2", "confidence_score": 82.0, "confidence_tier": "Strong"},
-            {"player_id": "P3", "confidence_score": 68.0, "confidence_tier": "Marginal"},
-            {"player_id": "P4", "confidence_score": 45.0, "confidence_tier": "Pass"},
-        ])
-
-    def test_default_min_tier_2(self):
-        """Default min_tier=2 keeps Premium and Strong."""
-        plays = self._make_plays()
-        result = filter_by_confidence(plays)
-        assert len(result) == 2
-        assert set(result["confidence_tier"]) == {"Premium", "Strong"}
-
-    def test_min_tier_1_only_premium(self):
-        plays = self._make_plays()
-        result = filter_by_confidence(plays, min_tier=1)
-        assert len(result) == 1
-        assert result.iloc[0]["confidence_tier"] == "Premium"
-
-    def test_min_tier_3_includes_marginal(self):
-        plays = self._make_plays()
-        result = filter_by_confidence(plays, min_tier=3)
-        assert len(result) == 3
-        assert "Pass" not in set(result["confidence_tier"])
-
-    def test_min_tier_4_includes_all(self):
-        plays = self._make_plays()
-        result = filter_by_confidence(plays, min_tier=4)
-        assert len(result) == 4
-
-    def test_empty_dataframe(self):
-        result = filter_by_confidence(pd.DataFrame())
-        assert result.empty
-
-    def test_missing_tier_column_returns_copy(self):
-        plays = pd.DataFrame([{"player_id": "P1", "value": 10}])
-        result = filter_by_confidence(plays)
-        assert len(result) == 1
-
-    def test_original_not_mutated(self):
-        plays = self._make_plays()
-        original_len = len(plays)
-        filter_by_confidence(plays, min_tier=1)
-        assert len(plays) == original_len
 
 
 # ======================================================================

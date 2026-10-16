@@ -6,7 +6,6 @@ Covers:
 - min_share calculation, pre-game only
 - no same-game leakage: a row's shares never use that row's box score
 - usage_delta (L5 - L10 trend)
-- is_usage_spike() with threshold detection
 - Edge cases: no team data, single game, zero FGA
 """
 
@@ -200,50 +199,6 @@ class TestComputeUsageFeatures:
         p1_rows = result[result["player_id"] == 1].sort_values("game_date")
         last_delta = p1_rows.iloc[-1]["usage_delta"]
         assert last_delta > 0.0
-
-
-# ---------------------------------------------------------------------------
-# is_usage_spike
-# ---------------------------------------------------------------------------
-
-
-class TestIsUsageSpike:
-    """Test spike detection for sudden usage changes."""
-
-    def test_spike_detected_when_above_threshold(self):
-        from utils.nba_usage import is_usage_spike
-
-        # L5 avg = 0.30, L10 avg = 0.20 → delta = 0.10 > 0.08 threshold
-        assert is_usage_spike(fga_share_l5=0.30, fga_share_l10=0.20, threshold=0.08)
-
-    def test_no_spike_when_below_threshold(self):
-        from utils.nba_usage import is_usage_spike
-
-        # L5 avg = 0.22, L10 avg = 0.20 → delta = 0.02 < 0.15 threshold
-        assert not is_usage_spike(fga_share_l5=0.22, fga_share_l10=0.20, threshold=0.15)
-
-    def test_no_spike_when_none_l5(self):
-        from utils.nba_usage import is_usage_spike
-
-        assert not is_usage_spike(fga_share_l5=None, fga_share_l10=0.20)
-
-    def test_no_spike_when_none_l10(self):
-        from utils.nba_usage import is_usage_spike
-
-        assert not is_usage_spike(fga_share_l5=0.30, fga_share_l10=None)
-
-    def test_default_threshold_used(self):
-        """Default threshold is 0.15."""
-        from utils.nba_usage import is_usage_spike
-
-        # Delta = 0.20 > 0.15 default threshold
-        assert is_usage_spike(fga_share_l5=0.40, fga_share_l10=0.20)
-
-    def test_exact_threshold_not_spike(self):
-        """Equality is not a spike (strictly greater than)."""
-        from utils.nba_usage import is_usage_spike
-
-        assert not is_usage_spike(fga_share_l5=0.35, fga_share_l10=0.20, threshold=0.15)
 
 
 # ---------------------------------------------------------------------------

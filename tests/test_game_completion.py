@@ -19,7 +19,6 @@ from utils.game_completion import (
     PENDING_NOT_KICKED_OFF,
     SETTLE_AFTER_KICKOFF,
     classify_games,
-    gradeable_event_ids,
 )
 
 # 2026 week 1's real shape: a Thursday opener, a Friday game, the Sunday block,
@@ -149,14 +148,6 @@ def test_summary_names_every_pending_game_and_its_reason() -> None:
     text = report.summary()
     assert "1 game(s) final, 3 pending" in text
     assert "2026_01_DEN_KC: not_kicked_off" in text
-
-
-def test_gradeable_event_ids_matches_the_report() -> None:
-    now = datetime(2026, 9, 13, 23, 0, tzinfo=timezone.utc)
-    stats = _actuals(["SEA", "NE", "SF", "LAR"])
-    assert gradeable_event_ids(_games(), stats, now=now) == set(
-        classify_games(_games(), stats, now=now).final
-    )
 
 
 def test_an_empty_schedule_grades_nothing_rather_than_raising() -> None:

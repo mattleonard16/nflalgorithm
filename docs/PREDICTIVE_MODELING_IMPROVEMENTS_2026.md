@@ -174,7 +174,6 @@ In 2024–2025 actuals, an average starting alpha wide receiver averaged ~58 yar
   - `config.py`: `IntegrationConfig.role_priors`
   - `config/runtime.py`: `integration.role_priors`
   - `data_pipeline.py`: `WR_ROLE_PRIORS` and `_wr_role_prior()` (normalized snap percentages between 0.0 and 1.0)
-  - `scripts/ingest_real_nfl_data.py`: `assign_wr_role_prior()`
 
 #### Files Modified
 - `utils/season_priors.py`

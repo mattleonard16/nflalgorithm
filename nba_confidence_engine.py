@@ -154,54 +154,7 @@ def assign_nba_tier(score: float) -> str:
 # -- Filtering ---------------------------------------------------------------
 
 
-def filter_by_nba_confidence(
-    plays_df: pd.DataFrame,
-    min_tier: int = 2,
-) -> pd.DataFrame:
-    """Filter plays by minimum confidence tier.
-
-    Parameters
-    ----------
-    plays_df : DataFrame
-        Must contain ``confidence_score`` and ``confidence_tier`` columns.
-    min_tier : int
-        Minimum tier rank to include (1=Premium, 2=Strong, 3=Marginal).
-
-    Returns
-    -------
-    DataFrame
-        Filtered copy -- original is never mutated.
-    """
-    if plays_df.empty:
-        return plays_df.copy()
-
-    if "confidence_tier" not in plays_df.columns:
-        return plays_df.copy()
-
-    ranks = plays_df["confidence_tier"].map(_tier_rank)
-    return plays_df[ranks <= min_tier].copy()
-
-
 # -- Bulk scoring -------------------------------------------------------------
-
-
-def score_nba_plays(df: pd.DataFrame) -> pd.DataFrame:
-    """Add ``confidence_score`` and ``confidence_tier`` columns to a DataFrame.
-
-    Returns a new DataFrame -- the original is never mutated.
-    """
-    if df.empty:
-        result = df.copy()
-        result["confidence_score"] = pd.Series(dtype="float64")
-        result["confidence_tier"] = pd.Series(dtype="object")
-        return result
-
-    scores = df.apply(
-        lambda r: compute_nba_confidence_score(r), axis=1
-    )
-    tiers = scores.map(assign_nba_tier)
-
-    return df.assign(confidence_score=scores, confidence_tier=tiers)
 
 
 # -- Helpers ------------------------------------------------------------------

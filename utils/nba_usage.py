@@ -86,26 +86,3 @@ def compute_usage_features(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def is_usage_spike(
-    fga_share_l5: float,
-    fga_share_l10: float,
-    threshold: float = 0.15,
-) -> bool:
-    """Flag an unusual usage increase.
-
-    Returns True when the recent (L5) FGA share exceeds the longer-term
-    (L10) share by more than *threshold* (absolute difference).
-
-    Parameters
-    ----------
-    fga_share_l5 : float
-        Last-5-game average FGA share.
-    fga_share_l10 : float
-        Last-10-game average FGA share.
-    threshold : float
-        Minimum absolute increase to flag as a spike.
-    """
-    if fga_share_l5 is None or fga_share_l10 is None:
-        return False
-
-    return (fga_share_l5 - fga_share_l10) > threshold

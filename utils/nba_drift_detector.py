@@ -184,37 +184,6 @@ def detect_prediction_drift(
 # ---------------------------------------------------------------------------
 
 
-def detect_feature_drift(
-    market: str,
-    feature_name: str,
-    window_days: int = 14,
-    reference_days: int = 30,
-) -> dict[str, Any]:
-    """Compute PSI for a specific feature column over recent vs reference windows.
-
-    Loads from ``nba_projections`` if the column exists there, otherwise
-    returns stable with an explanation.  In practice, feature-level drift
-    should be computed against the raw game-log data; this stub enables the
-    interface contract.
-    """
-    # Feature drift requires raw feature data — not currently stored per-row.
-    # Return stable with explanation so the pipeline is non-blocking.
-    return {
-        "market": market,
-        "check_type": f"feature:{feature_name}",
-        "psi": 0.0,
-        "alert_level": "stable",
-        "window_days": window_days,
-        "reference_days": reference_days,
-        "n_recent": 0,
-        "n_reference": 0,
-        "explanation": (
-            f"feature drift for '{feature_name}' not computed — "
-            "raw feature history not stored per-prediction row"
-        ),
-    }
-
-
 # ---------------------------------------------------------------------------
 # Run all checks
 # ---------------------------------------------------------------------------
