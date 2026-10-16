@@ -132,7 +132,11 @@ def _seed_projection(
             is_starter=is_starter,
             expected_rushing_attempts=12.0 if market == "rushing_yards" else 0.0,
             expected_targets=7.0 if market == "receiving_yards" else 0.0,
-            expected_passing_attempts=34.0 if market == "passing_yards" else 0.0,
+            # A starter's volume; a backup's is a few garbage-time throws, and
+            # slate eligibility reads that difference.
+            expected_passing_attempts=(
+                (34.0 if is_starter else 4.0) if market == "passing_yards" else 0.0
+            ),
         )
 
 
