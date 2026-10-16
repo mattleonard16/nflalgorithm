@@ -903,6 +903,9 @@ def upsert_player_stats(df: pd.DataFrame) -> int:
         return inserted
 
 
+GAME_TYPES_KEPT = frozenset({"REG", "WC", "DIV", "CON", "SB", "POST"})
+
+
 def create_games_from_schedule(
     schedule: pd.DataFrame, through_week: int, *, through_week_season: Optional[int] = None
 ) -> pd.DataFrame:
@@ -920,7 +923,10 @@ def create_games_from_schedule(
 
     games = schedule.copy()
     if "game_type" in games.columns:
-        games = games[games["game_type"].isin(["REG", "POST"])].copy()
+        # nflverse labels playoff rounds WC/DIV/CON/SB, never "POST"; filtering
+        # on POST alone left every postseason week without a games row, so its
+        # odds had no kickoff to resolve against. Preseason stays out.
+        games = games[games["game_type"].isin(GAME_TYPES_KEPT)].copy()
     games["week"] = pd.to_numeric(games["week"], errors="coerce")
     week_cap = pd.Series(through_week, index=games.index)
     if through_week_season is not None:

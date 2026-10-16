@@ -394,6 +394,29 @@ def test_through_week_caps_only_the_named_season() -> None:
     assert sorted(zip(games["season"], games["week"])) == [(2025, 7), (2025, 15), (2026, 6)]
 
 
+def test_games_keep_nflverse_playoff_rounds_and_drop_preseason() -> None:
+    # nflverse never writes "POST": playoff rounds are WC/DIV/CON/SB.
+    schedule = pd.DataFrame(
+        {
+            "season": [2025] * 6,
+            "week": [18, 19, 20, 21, 22, 1],
+            "game_type": ["REG", "WC", "DIV", "CON", "SB", "PRE"],
+            "home_team": ["BUF", "CAR", "DEN", "SEA", "SEA", "KC"],
+            "away_team": ["NYJ", "LA", "BUF", "LA", "NE", "ARI"],
+            "gameday": [
+                "2026-01-04", "2026-01-10", "2026-01-17",
+                "2026-01-25", "2026-02-08", "2025-08-09",
+            ],
+        }
+    )
+
+    games = ingest.create_games_from_schedule(schedule, through_week=22)
+
+    assert sorted(games["week"]) == [18, 19, 20, 21, 22]
+    # The playoff Rams row canonicalizes like any other.
+    assert "LAR" in set(games["away_team"])
+
+
 def test_ingest_keeps_history_weeks_past_through_week(monkeypatch) -> None:
     weekly = pd.DataFrame(
         {"season": [2025, 2025, 2026, 2026], "week": [6, 12, 6, 7], "marker": list("abcd")}
