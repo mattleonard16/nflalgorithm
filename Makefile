@@ -24,7 +24,10 @@ SEASON_PHASE ?= pre-run
 NFL_SEASONS ?=
 HISTORY_SEASONS ?=
 REFRESH_HISTORY ?= 0
-THROUGH_WEEK ?= 18
+# ingest-nfl only: last week of the newest season in NFL_SEASONS. Earlier
+# seasons are always ingested in full, matching prepare_nfl_week's history
+# refresh (through week 22); 22 here means "everything published".
+THROUGH_WEEK ?= 22
 MIGRATION_BACKUP_DIR ?= migration_backup
 
 # Guard used by weekly targets — fails loud if SEASON or WEEK is empty.

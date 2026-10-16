@@ -363,7 +363,48 @@ def _normalize_name_for_merge(name: str) -> str:
     return normalize_name(str(name)).replace(" ", "")
 
 
-def _merge_snap_counts(df: pd.DataFrame, snaps: pd.DataFrame) -> pd.DataFrame:
+def _snap_counts_by_gsis(
+    snaps_norm: pd.DataFrame, snaps: pd.DataFrame, rosters: Optional[pd.DataFrame]
+) -> pd.DataFrame:
+    """Aggregate snap counts per (gsis_id, season, week) through PFR ids.
+
+    Returns columns gsis_id, season, week, _id_snaps, _id_pct, or an empty
+    frame when either feed lacks the PFR id.
+    """
+    if (
+        rosters is None
+        or rosters.empty
+        or "pfr_player_id" not in snaps.columns
+        or not {"pfr_id", "gsis_id"}.issubset(rosters.columns)
+    ):
+        return pd.DataFrame()
+    bridge = rosters[["pfr_id", "gsis_id"]].dropna()
+    bridge = bridge.assign(
+        pfr_id=bridge["pfr_id"].astype(str).str.strip(),
+        gsis_id=bridge["gsis_id"].astype(str).str.strip(),
+    )
+    bridge = bridge[(bridge["pfr_id"] != "") & (bridge["gsis_id"] != "")].drop_duplicates()
+    # A PFR id that maps to two gsis ids is ambiguous; leave it to the name merge.
+    bridge = bridge[~bridge["pfr_id"].duplicated(keep=False)]
+    if bridge.empty:
+        return pd.DataFrame()
+    gsis_by_pfr = dict(zip(bridge["pfr_id"], bridge["gsis_id"]))
+    keyed = snaps_norm.assign(
+        gsis_id=snaps.loc[snaps_norm.index, "pfr_player_id"]
+        .astype("string")
+        .str.strip()
+        .map(gsis_by_pfr)
+    ).dropna(subset=["gsis_id"])
+    if keyed.empty:
+        return pd.DataFrame()
+    return keyed.groupby(["gsis_id", "season", "week"], as_index=False).agg(
+        _id_snaps=("offense_snaps", "sum"), _id_pct=("offense_pct", "max")
+    )
+
+
+def _merge_snap_counts(
+    df: pd.DataFrame, snaps: pd.DataFrame, rosters: Optional[pd.DataFrame] = None
+) -> pd.DataFrame:
     """Left-join snap counts into stats df.
 
     Keys on (normalized full name, season, week, team) using
@@ -371,6 +412,9 @@ def _merge_snap_counts(df: pd.DataFrame, snaps: pd.DataFrame) -> pd.DataFrame:
     Stats `player_display_name` (preferred) or `player_name` is matched
     against snap_counts `player`. Aggregates per key with
     sum(offense_snaps) and max(offense_pct) to absorb duplicate rows.
+    When ``rosters`` is given and both feeds carry PFR ids, a match through
+    ``pfr_player_id`` -> roster ``pfr_id`` -> ``gsis_id`` overrides the name
+    match; the name merge remains the fallback.
 
     Returns df with ``snap_count`` and ``snap_percentage`` (0–100).
     Unmatched rows fall back to 0 — the schema declares both NOT NULL
@@ -418,6 +462,17 @@ def _merge_snap_counts(df: pd.DataFrame, snaps: pd.DataFrame) -> pd.DataFrame:
     merged["snap_count"] = merged["offense_snaps"].fillna(0.0)
     merged["snap_percentage"] = merged["offense_pct"].fillna(0.0)
     merged = merged.drop(columns=["offense_snaps", "offense_pct", "_name_key"])
+
+    # Names miss nickname vs legal name ("Chig" vs "Chigoziem" Okonkwo, "Bam"
+    # vs "Zonovan" Knight). When both feeds carry PFR ids, key snaps on
+    # pfr_player_id -> roster pfr_id -> gsis_id and let that win.
+    by_id = _snap_counts_by_gsis(snaps_norm, snaps, rosters)
+    if not by_id.empty and "gsis_id" in merged.columns:
+        merged = merged.merge(by_id, how="left", on=["gsis_id", "season", "week"])
+        id_matched = merged["_id_snaps"].notna()
+        merged.loc[id_matched, "snap_count"] = merged.loc[id_matched, "_id_snaps"]
+        merged.loc[id_matched, "snap_percentage"] = merged.loc[id_matched, "_id_pct"]
+        merged = merged.drop(columns=["_id_snaps", "_id_pct"])
 
     matched = (merged["snap_percentage"] > 0).sum()
     logger.info(
@@ -697,7 +752,7 @@ def transform_to_enhanced_stats(
     )
     df["yac_yards"] = df[yac_col].fillna(0).astype(float) if yac_col in df.columns else 0.0
 
-    df = _merge_snap_counts(df, snaps)
+    df = _merge_snap_counts(df, snaps, rosters)
 
     # Real game_date from schedules (T0 #6) — must precede age so the age
     # calculation uses the actual kickoff day.
@@ -707,9 +762,20 @@ def transform_to_enhanced_stats(
     # missing (schema is NOT NULL).
     df = _merge_age_from_rosters(df, rosters if rosters is not None else pd.DataFrame())
 
-    # Compute games played per player up to each week
-    df = df.sort_values(["player_id", "season", "week"])
-    df["games_played"] = df.groupby(["player_id", "season"]).cumcount() + 1
+    # Regular-season games played per player up to each week. Keyed on gsis_id
+    # because player_id embeds the team and restarts the count after a trade
+    # (Davante Adams, NYJ 2024 W7: 1). Postseason rows carry the season total.
+    gsis_key = df["gsis_id"].astype("string").str.strip()
+    df["_games_key"] = gsis_key.where(gsis_key.notna() & (gsis_key != ""), df["player_id"])
+    if "season_type" in df.columns:
+        is_regular = df["season_type"].astype("string").str.upper().eq("REG").fillna(False)
+    else:
+        is_regular = _is_regular_season_week(df["season"], df["week"])
+    df = df.sort_values(["_games_key", "season", "week"])
+    df["games_played"] = (
+        is_regular.loc[df.index].astype(int).groupby([df["_games_key"], df["season"]]).cumsum()
+    )
+    df = df.drop(columns=["_games_key"])
 
     # Synthetic red_zone_touches stays as the fallback. If pbp_rz provided,
     # _merge_red_zone_from_pbp overrides it with the real count.
@@ -837,8 +903,14 @@ def upsert_player_stats(df: pd.DataFrame) -> int:
         return inserted
 
 
-def create_games_from_schedule(schedule: pd.DataFrame, through_week: int) -> pd.DataFrame:
-    """Normalize published nflverse schedule rows for the ``games`` table."""
+def create_games_from_schedule(
+    schedule: pd.DataFrame, through_week: int, *, through_week_season: Optional[int] = None
+) -> pd.DataFrame:
+    """Normalize published nflverse schedule rows for the ``games`` table.
+
+    ``through_week`` caps every season unless ``through_week_season`` names
+    the one season it applies to; the others then keep weeks 1-22.
+    """
     required = {"season", "week", "home_team", "away_team", "gameday"}
     if schedule is None or schedule.empty:
         return pd.DataFrame(columns=GAME_COLUMNS)
@@ -850,7 +922,11 @@ def create_games_from_schedule(schedule: pd.DataFrame, through_week: int) -> pd.
     if "game_type" in games.columns:
         games = games[games["game_type"].isin(["REG", "POST"])].copy()
     games["week"] = pd.to_numeric(games["week"], errors="coerce")
-    games = games[games["week"].between(1, through_week)].copy()
+    week_cap = pd.Series(through_week, index=games.index)
+    if through_week_season is not None:
+        seasons = pd.to_numeric(games["season"], errors="coerce")
+        week_cap = week_cap.where(seasons == through_week_season, 22)
+    games = games[(games["week"] >= 1) & (games["week"] <= week_cap)].copy()
     games = games.dropna(subset=["season", "week", "home_team", "away_team", "gameday"])
     if games.empty:
         return pd.DataFrame(columns=GAME_COLUMNS)
@@ -1188,6 +1264,64 @@ CONTEXT_SNAPSHOT_COLUMNS = (
 )
 
 
+# Offensive skill slots on the nflverse depth chart. Special-teams slots
+# (KR/PR/H) also carry a pos_rank and must not decide a player's offensive role.
+SKILL_DEPTH_POSITIONS = frozenset({"QB", "RB", "WR", "TE", "FB"})
+
+# A game whose snap share is under this fraction of the player's own recent
+# median is a partial game (week-18 rest, early injury exit, blowout pull).
+# 0.6 rather than 0.5: Dak Prescott's 2025 week-18 rest half was 51% of a 100%
+# median and CeeDee Lamb's 45% of 85%, both of which 0.5 keeps.
+PARTIAL_GAME_SNAP_RATIO = 0.6
+PARTIAL_GAME_MEDIAN_WINDOW = 8
+PARTIAL_GAME_MIN_MEDIAN_SNAP = 60.0
+
+# Statuses that take a player off the game-day depth chart. Doubtful counts:
+# the club plans around the next player up.
+UNAVAILABLE_INJURY_STATUSES = frozenset({"OUT", "INJURED RESERVE", "IR", "DOUBTFUL"})
+AVAILABLE_ROSTER_STATUSES = frozenset({"ACT"})
+
+
+def regular_season_last_week(season: int) -> int:
+    """Last regular-season week number: 18 from 2021 on, 17 before."""
+    return 18 if int(season) >= 2021 else 17
+
+
+def _is_regular_season_week(seasons: pd.Series, weeks: pd.Series) -> pd.Series:
+    season_values = pd.to_numeric(seasons, errors="coerce")
+    week_values = pd.to_numeric(weeks, errors="coerce")
+    last_week = season_values.map(
+        lambda value: regular_season_last_week(int(value)) if pd.notna(value) else 0
+    )
+    return week_values.notna() & (week_values >= 1) & (week_values <= last_week)
+
+
+def _volume_history(player_history: pd.DataFrame) -> pd.DataFrame:
+    """Return the games that represent a player's normal workload.
+
+    Postseason weeks and partial games (week-18 rest, an early exit) drag the
+    short EWM toward zero, so a week-1 prior built from them undershoots a
+    starter's real volume. Rows without measured snaps are kept: an unmatched
+    snap merge stores 0, and dropping those would erase whole careers. Falls
+    back to the unfiltered history rather than to the position prior.
+    """
+    if player_history.empty:
+        return player_history
+    regular = player_history[
+        _is_regular_season_week(player_history["season"], player_history["week"])
+    ]
+    if not regular.empty and "snap_percentage" in regular.columns:
+        snaps = pd.to_numeric(regular["snap_percentage"], errors="coerce")
+        measured = snaps > 0
+        recent = snaps[measured].tail(PARTIAL_GAME_MEDIAN_WINDOW)
+        # Only an every-down player has a "partial" game: a rotational back's
+        # low-snap week is ordinary variance, and dropping it inflates his prior.
+        if not recent.empty and float(recent.median()) >= PARTIAL_GAME_MIN_MEDIAN_SNAP:
+            partial = measured & (snaps < PARTIAL_GAME_SNAP_RATIO * float(recent.median()))
+            regular = regular[~partial]
+    return regular if not regular.empty else player_history
+
+
 def _latest_ewm(history: pd.DataFrame, column: str, default: float) -> float:
     if history.empty or column not in history.columns:
         return default
@@ -1219,6 +1353,70 @@ def _availability_adjustment(
     if "LIMITED" in practice:
         return 0.90, 1.15
     return 1.0, 1.0
+
+
+def _effective_depth_ranks(
+    base: pd.DataFrame,
+    depth_by_player: dict[tuple[int, str], dict[str, Any]],
+    injury_by_player: dict[tuple[int, str], dict[str, Any]],
+    status_col: str,
+) -> dict[tuple[int, str], int]:
+    """Re-rank each depth-chart slot around players who are unavailable this week.
+
+    nflverse charts often still list an Out or reserve-listed starter at rank
+    1, which left the real starter at rank 2 (2025: 58 of 533 starting-QB
+    games). An available player moves up one rank for every unavailable player
+    listed above him at the same (season, team, position). nflverse pos_rank
+    counts across the whole position, not per slot (WR ranks run 1..n over the
+    X/Z/slot columns), so the slot is not part of the key. An unavailable
+    player keeps his chart rank. Only evidence of absence promotes anyone: a
+    slot whose rank-1 player is simply missing from the feeds stays as charted.
+    Unavailable means a target-week report of Out/IR/Doubtful or a roster
+    status other than active.
+    """
+    roster_by_key = {
+        (int(row["season"]), str(row["gsis_id"])): row for _, row in base.iterrows()
+    }
+
+    def _clean(value: Any) -> str:
+        return "" if value is None or pd.isna(value) else str(value).strip().upper()
+
+    entries: list[dict[str, Any]] = []
+    for key, depth_row in depth_by_player.items():
+        raw_rank = pd.to_numeric(pd.Series([depth_row.get("pos_rank")]), errors="coerce").iloc[0]
+        if pd.isna(raw_rank):
+            continue
+        roster_row = roster_by_key.get(key)
+        chart_team = _clean(depth_row.get("team")) or _clean(depth_row.get("club_code"))
+        team = canonicalize_team(chart_team) if chart_team else ""
+        if not team and roster_row is not None:
+            team = str(roster_row["team"])
+        slot_position = _clean(depth_row.get("pos_abb")) or _clean(depth_row.get("position"))
+        report = _clean(injury_by_player.get(key, {}).get("report_status"))
+        status = _clean(roster_row.get(status_col)) if roster_row is not None else ""
+        entries.append(
+            {
+                "key": key,
+                "group": (key[0], team, slot_position),
+                "raw_rank": int(raw_rank),
+                "available": report not in UNAVAILABLE_INJURY_STATUSES
+                and (not status or status in AVAILABLE_ROSTER_STATUSES),
+            }
+        )
+
+    unavailable_ranks: dict[tuple[Any, ...], list[int]] = {}
+    for entry in entries:
+        if not entry["available"]:
+            unavailable_ranks.setdefault(entry["group"], []).append(entry["raw_rank"])
+
+    effective: dict[tuple[int, str], int] = {}
+    for entry in entries:
+        rank = entry["raw_rank"]
+        if entry["available"]:
+            ahead = sum(other < rank for other in unavailable_ranks.get(entry["group"], []))
+            rank = max(1, rank - ahead)
+        effective[entry["key"]] = rank
+    return effective
 
 
 def build_player_context_snapshots(
@@ -1267,19 +1465,45 @@ def build_player_context_snapshots(
         depth = depth_charts.copy()
         if "season" not in depth.columns:
             raise ValueError("Depth chart context must include season")
+        depth = depth.dropna(subset=["season", "gsis_id"])
+        # Only offensive skill slots define a role; a KR/PR rank-2 row must not
+        # demote a starting RB or WR.
+        slot = pd.Series(pd.NA, index=depth.index, dtype=object)
+        for slot_col in ("pos_abb", "position"):
+            if slot_col in depth.columns:
+                slot = slot.fillna(depth[slot_col])
+        if slot.notna().any():
+            depth = depth[slot.astype(str).str.strip().str.upper().isin(SKILL_DEPTH_POSITIONS)]
         if "dt" in depth.columns:
             depth["_depth_as_of"] = pd.to_datetime(depth["dt"], errors="coerce", utc=True)
             if target_cutoffs:
                 cutoff_by_row = pd.to_datetime(
                     depth["season"].map(target_cutoffs), errors="coerce", utc=True
                 )
+                # A season with no known kickoff has no causal bound; its chart
+                # can run into the offseason (2025 rows are dated March 2026),
+                # so keeping every row would leak later moves into the week.
                 depth = depth[
-                    cutoff_by_row.isna()
-                    | (depth["_depth_as_of"].notna() & (depth["_depth_as_of"] < cutoff_by_row))
+                    cutoff_by_row.notna()
+                    & depth["_depth_as_of"].notna()
+                    & (depth["_depth_as_of"] < cutoff_by_row)
                 ]
-            depth = depth.sort_values("_depth_as_of")
-        depth = depth.dropna(subset=["season", "gsis_id"]).drop_duplicates(
-            ["season", "gsis_id"], keep="last"
+            # Keep only the player's latest chart, then his best skill slot on it.
+            latest_as_of = depth.groupby(["season", "gsis_id"])["_depth_as_of"].transform("max")
+            depth = depth[latest_as_of.isna() | (depth["_depth_as_of"] == latest_as_of)]
+        sort_cols = ["season", "gsis_id"]
+        depth = depth.copy()
+        depth["_raw_rank"] = (
+            pd.to_numeric(depth["pos_rank"], errors="coerce")
+            if "pos_rank" in depth.columns
+            else float("nan")
+        )
+        sort_cols.append("_raw_rank")
+        if "pos_slot" in depth.columns:
+            depth["_raw_slot"] = pd.to_numeric(depth["pos_slot"], errors="coerce")
+            sort_cols.append("_raw_slot")
+        depth = depth.sort_values(sort_cols, kind="mergesort", na_position="last").drop_duplicates(
+            ["season", "gsis_id"], keep="first"
         )
         depth_by_player = {
             (int(row["season"]), str(row["gsis_id"])): row.to_dict() for _, row in depth.iterrows()
@@ -1289,8 +1513,11 @@ def build_player_context_snapshots(
     if injuries is not None and not injuries.empty and "gsis_id" in injuries:
         injury = injuries.copy()
         injury["week"] = pd.to_numeric(injury["week"], errors="coerce").fillna(0).astype(int)
-        injury = injury[injury["week"] <= target_week]
-        injury = injury.dropna(subset=["season", "gsis_id"]).sort_values("week")
+        # nflverse reports list only listed players: no row this week means
+        # healthy, not "whatever an earlier week said". Carrying the last row
+        # forward kept week-3 Outs on players who were playing in week 12.
+        injury = injury[injury["week"] == target_week]
+        injury = injury.dropna(subset=["season", "gsis_id"])
         injury = injury.drop_duplicates(["season", "gsis_id"], keep="last")
         injury_by_player = {
             (int(row["season"]), str(row["gsis_id"])): row.to_dict() for _, row in injury.iterrows()
@@ -1330,6 +1557,7 @@ def build_player_context_snapshots(
                         continue
 
     status_col = "status" if "status" in base.columns else "roster_status"
+    effective_ranks = _effective_depth_ranks(base, depth_by_player, injury_by_player, status_col)
     records: list[dict[str, Any]] = []
     for _, roster_row in base.iterrows():
         season = int(roster_row["season"])
@@ -1359,10 +1587,9 @@ def build_player_context_snapshots(
         )
 
         depth_row = depth_by_player.get((season, gsis_id), {})
-        raw_depth_rank = pd.to_numeric(
-            pd.Series([depth_row.get("pos_rank")]), errors="coerce"
-        ).iloc[0]
-        depth_rank = int(raw_depth_rank) if pd.notna(raw_depth_rank) else None
+        # Effective rank: the chart rank re-counted over players available
+        # this week, so a QB2 behind an Out QB1 is the starter.
+        depth_rank = effective_ranks.get((season, gsis_id))
         depth_position = depth_row.get("pos_abb") or depth_row.get("pos_name")
         role_factor = _depth_factor(depth_rank)
 
@@ -1384,13 +1611,15 @@ def build_player_context_snapshots(
         elif is_new_team:
             prior_source = "new_team_history"
 
+        volume_history = _volume_history(player_history)
+
         def expected(column: str) -> float:
             # History already reflects role. Multiplying it by depth_rank
             # double-penalizes WR2/WR3s and drops them under usage floors.
-            if player_history.empty:
+            if volume_history.empty:
                 value = prior[column] * role_factor
             else:
-                value = _latest_ewm(player_history, column, prior[column])
+                value = _latest_ewm(volume_history, column, prior[column])
             return max(0.0, value * new_team_factor * availability_factor)
 
         expected_snap_percentage = expected("snap_percentage")
@@ -1551,7 +1780,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--season", type=int, help="Single season to fetch (use --seasons for multiple)"
     )
-    parser.add_argument("--through-week", type=int, default=18, help="Fetch through this week")
+    parser.add_argument(
+        "--through-week",
+        type=int,
+        default=22,
+        help=(
+            "Last week of the newest requested season to ingest; earlier seasons are "
+            "always ingested in full (default 22: everything published)"
+        ),
+    )
     parser.add_argument(
         "--seasons",
         type=str,
@@ -1598,7 +1835,12 @@ def ingest_seasons(
     depth_charts = fetch_depth_charts(seasons)
     injuries = fetch_injuries(seasons)
     schedule = fetch_schedules(seasons)
-    games = create_games_from_schedule(schedule, through_week=through_week)
+    # through_week scopes the newest season only. History seasons are always
+    # complete; cutting them at the target week starved every prior of weeks 7+.
+    target_season = max(seasons)
+    games = create_games_from_schedule(
+        schedule, through_week=through_week, through_week_season=target_season
+    )
     game_count = upsert_games(games)
     roster_context = (
         pd.concat([rosters, weekly_rosters], ignore_index=True, sort=False)
@@ -1623,8 +1865,16 @@ def ingest_seasons(
     if "week" not in weekly.columns:
         raise ValueError("NFL weekly player data is missing the required 'week' column")
 
-    weekly = weekly[weekly["week"] <= stats_through_week]
-    logger.info("Filtered player stats to weeks 1-%s: %s rows", stats_through_week, len(weekly))
+    in_scope = weekly["week"] <= stats_through_week
+    if "season" in weekly.columns:
+        in_scope |= pd.to_numeric(weekly["season"], errors="coerce") != target_season
+    weekly = weekly[in_scope]
+    logger.info(
+        "Filtered %s player stats to weeks 1-%s (earlier seasons complete): %s rows",
+        target_season,
+        stats_through_week,
+        len(weekly),
+    )
     if weekly.empty:
         logger.warning("No weekly player data exists through week %s", stats_through_week)
         _refresh_context_and_log(roster_context, depth_charts, injuries, through_week)
@@ -1777,7 +2027,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     count = ingest_seasons(seasons, through_week=args.through_week)
     logger.info(f"Ingested {count} player stat rows")
-    logger.info(f"Ready for Week {args.through_week + 1} predictions")
+    if args.through_week < 22:
+        logger.info(f"Ready for Week {args.through_week + 1} predictions")
 
 
 if __name__ == "__main__":

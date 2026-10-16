@@ -119,3 +119,19 @@ class TestPopulatePlayerDim:
         df = read_dataframe("SELECT * FROM player_dim ORDER BY player_id")
         assert len(df) == 3
         assert set(df["position"]) == {"QB", "TE", "RB"}
+
+    def test_traded_player_gets_one_row_keyed_by_gsis(self, db):
+        """player_id embeds the team; partitioning on it kept a row per club."""
+        for player_id, team, week in (("LV_d_adams", "LV", 5), ("NYJ_d_adams", "NYJ", 7)):
+            _seed_player(db, player_id, "Davante Adams", "WR", team, 2024, week)
+            execute(
+                "UPDATE player_stats_enhanced SET gsis_id = ? WHERE player_id = ?",
+                params=("00-0031381", player_id),
+            )
+        _seed_player(db, "BUF_j_allen", "Josh Allen", "QB", "BUF", 2024, 7)
+
+        assert populate_player_dim() == 2
+
+        df = read_dataframe("SELECT player_id, gsis_id, team FROM player_dim ORDER BY player_id")
+        assert df["player_id"].tolist() == ["BUF_j_allen", "NYJ_d_adams"]
+        assert df.set_index("player_id").loc["NYJ_d_adams", "gsis_id"] == "00-0031381"

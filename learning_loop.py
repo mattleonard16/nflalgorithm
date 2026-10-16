@@ -22,6 +22,20 @@ logger = logging.getLogger(__name__)
 
 # ── Market-to-stat mapping ───────────────────────────────────────────
 
+# Projections carry the roster-form player_id ("DAL_ceedee_lamb") while stats
+# carry the abbreviated form ("DAL_c_lamb"), so joining on player_id alone
+# matches almost nothing. Bridge through nfl_roster_players' gsis_id, the same
+# key utils.grading.align_actuals_to_bets uses for bet grading. An id that maps
+# to more than one gsis_id in a season is ambiguous and falls back to a direct
+# player_id match, as does an id the roster does not know.
+_ROSTER_GSIS_BRIDGE = """
+    SELECT season, player_id, MIN(gsis_id) AS gsis_id
+    FROM nfl_roster_players
+    WHERE gsis_id IS NOT NULL AND gsis_id <> ''
+    GROUP BY season, player_id
+    HAVING COUNT(DISTINCT gsis_id) = 1
+"""
+
 # ── Outcome attribution ─────────────────────────────────────────────
 
 
@@ -500,10 +514,15 @@ def _model_accuracy_trends(
            AVG(ABS(p.mu - {stat_expr})) as mae,
            COUNT(*) as n
     FROM weekly_projections p
+    LEFT JOIN ({bridge}) r
+        ON r.season = p.season AND r.player_id = p.player_id
     INNER JOIN player_stats_enhanced s
-        ON p.player_id = s.player_id
-        AND p.season = s.season
+        ON p.season = s.season
         AND p.week = s.week
+        AND (
+            s.gsis_id = r.gsis_id
+            OR (r.gsis_id IS NULL AND s.player_id = p.player_id)
+        )
     WHERE p.season = ? AND p.week BETWEEN ? AND ?
     GROUP BY p.week, p.market
     ORDER BY p.week, p.market
@@ -516,7 +535,7 @@ def _model_accuracy_trends(
             stat_expr = "(COALESCE(s.rushing_tds, 0) + COALESCE(s.receiving_tds, 0))"
         else:
             stat_expr = f"s.{stat_col}"
-        formatted_query = query.format(stat_expr=stat_expr)
+        formatted_query = query.format(stat_expr=stat_expr, bridge=_ROSTER_GSIS_BRIDGE)
         try:
             df = read_dataframe(formatted_query, params=(season, week_start, week_end))
             for _, row in df.iterrows():
@@ -608,12 +627,20 @@ def _load_actual_stat(
         select_expr = stat_col
         result_col = stat_col
 
+    # Same gsis bridge as _model_accuracy_trends: the projection's player_id is
+    # the roster form, the stats row's is not.
     query = f"""
-    SELECT {select_expr} FROM player_stats_enhanced
-    WHERE season = ? AND week = ? AND player_id = ?
+    SELECT {select_expr} FROM player_stats_enhanced s
+    LEFT JOIN ({_ROSTER_GSIS_BRIDGE}) r
+        ON r.season = s.season AND r.player_id = ?
+    WHERE s.season = ? AND s.week = ?
+      AND (
+          s.gsis_id = r.gsis_id
+          OR (r.gsis_id IS NULL AND s.player_id = ?)
+      )
     """
     try:
-        df = read_dataframe(query, params=(season, week, player_id))
+        df = read_dataframe(query, params=(player_id, season, week, player_id))
         if df.empty:
             return None
         val = df.iloc[0][result_col]
