@@ -472,6 +472,14 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     `uv run python -m scripts.run_nfl_backtest compare logs/metrics/bt-2025-off.json
     logs/metrics/bt-2025-on.json`. If MAE does not improve, drop the `NFL_FEATURE_CONTEXT_FACTORS=1`
     from `week-auto`. The `--off` report is also the `BASELINE` for item 25's gate.
+    **Partial answer (2026-10, public checkout)**: `make context-eval` scores each component on
+    3,398 core-player games (2024-25 QB passing, RB1 rushing, WR/TE receiving) against a
+    prior-games-only EWMA baseline. The usage trend raised MAE in every run, by +0.61 yds
+    (95% CI +0.33..+0.89) at a 4-game half-life and +1.12 at 2, so it is now reported but kept
+    out of the composite (`ContextParams.apply_usage_trend=False`). Game script helped slightly
+    (about -0.07 overall, -0.14..-0.30 rushing) and matchup history was neutral. With the trend
+    out, the composite is about -0.07, i.e. neutral-to-slightly-positive. The private-model
+    backtest above is still the deciding run; this narrows what it should find.
 32. **The private wiring for context factors is not in `docs/DEPLOYMENT_MANIFEST.md`'s verified
     set.** What the tracked code expects of `weekly.py` is recorded there now; verify it on the
     production checkout before week 1.
