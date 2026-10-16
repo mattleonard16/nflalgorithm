@@ -13,6 +13,20 @@ from urllib3 import HTTPResponse as U3HTTPResponse
 
 from scripts.simple_cache import SimpleCachedClient, redact_api_key
 
+_FROZEN_NOW = datetime(2026, 9, 10, 17, 0, tzinfo=timezone.utc)
+
+
+def _freeze_cache_clock(monkeypatch, now: datetime = _FROZEN_NOW) -> datetime:
+    """Pin the clock the cache module reads so TTL boundaries are exact."""
+
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: D102 - mirrors datetime.now
+            return now if tz is None else now.astimezone(tz)
+
+    monkeypatch.setattr("scripts.simple_cache.datetime", _FrozenDatetime)
+    return now
+
 
 def test_cache_provenance_includes_source_timestamp_and_age() -> None:
     response = requests.Response()
@@ -32,10 +46,9 @@ def test_cache_provenance_includes_source_timestamp_and_age() -> None:
 def test_odds_cache_expiry_uses_odds_specific_ttl(monkeypatch) -> None:
     client = SimpleCachedClient.__new__(SimpleCachedClient)
     monkeypatch.setattr("scripts.simple_cache.config.pipeline.odds_max_age_seconds", 300)
+    now = _freeze_cache_clock(monkeypatch)
     response = requests.Response()
-    response.headers["X-Cache-Created-At"] = (
-        datetime.now(timezone.utc) - timedelta(seconds=301)
-    ).isoformat()
+    response.headers["X-Cache-Created-At"] = (now - timedelta(seconds=301)).isoformat()
 
     assert client._is_cache_expired(response, "odds") is True
 
@@ -50,10 +63,11 @@ def test_odds_cache_ttl_uses_validation_max_age_seconds(monkeypatch) -> None:
 def test_odds_cache_inside_validation_window_is_fresh(monkeypatch) -> None:
     client = SimpleCachedClient.__new__(SimpleCachedClient)
     monkeypatch.setattr("scripts.simple_cache.config.pipeline.odds_max_age_seconds", 300)
+    # Frozen clock: with the real clock this sat 1s from the TTL boundary and a
+    # slow runner could tip it over.
+    now = _freeze_cache_clock(monkeypatch)
     response = requests.Response()
-    response.headers["X-Cache-Created-At"] = (
-        datetime.now(timezone.utc) - timedelta(seconds=299)
-    ).isoformat()
+    response.headers["X-Cache-Created-At"] = (now - timedelta(seconds=299)).isoformat()
 
     assert client._is_cache_expired(response, "odds") is False
 

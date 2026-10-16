@@ -171,6 +171,45 @@ Both files must match. If `weekly.py` has no call site, the flag is inert: the c
 are unadjusted and `make nfl-backtest CONTEXT_FACTORS=on` measures nothing (its report will still
 say `"features": {"context_factors_enabled": true}` — that records the flag, not the wiring).
 
+### Context snapshot semantics (`nfl_player_context_snapshots`) — changed 2026-10-16
+
+Tracked: `scripts/ingest_real_nfl_data.build_player_context_snapshots`. No column was added,
+renamed or removed, so a private `weekly.py` that reads this table needs no code change, but the
+values it reads now mean something slightly different. Check anything in `weekly.py` that was
+tuned against the old values (QB starter gating on `depth_rank > 1` in particular).
+
+- **`depth_rank` / `is_starter` are the effective rank for the target week.** The chart's
+  `pos_rank` is re-counted around unavailable players: an available player moves up one rank for
+  each player at the same (season, team, position) who is listed above him and is unavailable
+  (target-week report Out/IR/Doubtful, or a roster status other than `ACT`). An unavailable
+  player keeps his chart rank. So a QB2 behind an Out QB1 now reads `depth_rank = 1`,
+  `is_starter = 1`, where he used to read 2/0 and get `p_start = 0.02`. The raw chart rank is not
+  persisted (it would need a schema column). Only offensive skill slots (QB/RB/WR/TE/FB) count, so
+  a KR/PR row no longer demotes a starter, and only the player's latest chart before the
+  season's kickoff cutoff is used. A season with no cutoff in `target_cutoffs` gets no depth rows.
+- **`injury_status`, `practice_status`, `primary_injury` are the target week's report only.**
+  No row that week means healthy (NULL), where the last report ever filed used to carry forward.
+- **`expected_*` volumes exclude postseason weeks and partial games** (snap share under 0.6 of the
+  player's median over his last 8 regular-season games, applied only when that median is at least
+  60%). Week-1 priors no longer collapse onto a week-18 rest game.
+
+Not changed, pending a coordinated private change: `expected_*` volumes are still multiplied by
+the availability factor (Questionable 0.75, Doubtful 0.25). Props void when a player sits, so the
+pricing mean should be conditional on playing, but the snapshot has no column that carries the
+play probability separately. Removing the scaling needs a new column (for example
+`play_probability`) plus `weekly.py` reading it, so it was left alone.
+
+Verify after an ingest:
+```bash
+DB_BACKEND=sqlite SQLITE_DB_PATH=nfl_data.db uv run python -c "
+from utils.db import read_dataframe
+print(read_dataframe('''SELECT team, COUNT(*) n FROM nfl_player_context_snapshots
+WHERE season = 2026 AND week = 7 AND position = 'QB' AND is_starter = 1 GROUP BY team HAVING n > 1'''))
+"
+```
+A club listed there has a starter ruled out and a promoted backup; both rows read
+`is_starter = 1`, and the ruled-out one carries the Out/Doubtful status.
+
 ### Trained model artifacts
 
 `models/weekly/{passing,receiving,rushing}_yards_model.joblib` are **also gitignored** (`.gitignore`

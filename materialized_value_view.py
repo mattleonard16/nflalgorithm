@@ -14,9 +14,18 @@ from config import config
 from confidence_engine import score_plays
 from risk_manager import normalize_portfolio_stakes
 from utils.db import _get_backend, execute, executemany, get_connection
+from utils.nfl_markets import GAMMA_MARKETS
 from value_betting_engine import rank_weekly_value
 
 logger = logging.getLogger(__name__)
+
+# Below these means a yardage row whose sigma >= mu is a missing history, not a
+# volatile player: a starter's projected volume clears them comfortably.
+UNGROUNDED_MU_CEILING = {
+    "receiving_yards": 15.0,
+    "rushing_yards": 15.0,
+    "passing_yards": 100.0,
+}
 
 
 def materialize_week(
@@ -73,8 +82,13 @@ def materialize_week(
         
         payload['generated_at'] = datetime.now(timezone.utc).isoformat()
 
-        # Sanity filters: drop obviously broken probabilities/edges before persisting
-        payload['sigma'] = payload['sigma'].astype(float).clip(lower=7.5)
+        # Sanity filters: drop obviously broken probabilities/edges before persisting.
+        # The 7.5 sigma floor is in yards. Applied to a count market it swamps
+        # the mean (receptions mu ~5.5, anytime-TD mu < 1) and the ungrounded
+        # screen below then drops every such row, so floor yardage only.
+        is_yardage = payload['market'].isin(GAMMA_MARKETS)
+        payload['sigma'] = payload['sigma'].astype(float)
+        payload.loc[is_yardage, 'sigma'] = payload.loc[is_yardage, 'sigma'].clip(lower=7.5)
         payload['p_win'] = payload['p_win'].clip(0.01, 0.99)
 
         large_gap_mask = (
@@ -95,20 +109,30 @@ def materialize_week(
         # manufacture an edge from noise. On the 2026 W1 slate this shape
         # covers 556 of 1,396 rows.
         #
-        # sigma >= mu is the observable signature: for a genuine skill-position
-        # projection the mean exceeds the spread. This lives here, in the
-        # tracked materialization path, rather than in the model, because every
-        # card passes through this chokepoint regardless of which producer
-        # generated it — including deployments whose private model code differs
-        # from this machine's.
+        # The signature is a collapsed mean under a spread at least as wide:
+        # sigma >= mu with mu below a small per-market ceiling. sigma >= mu
+        # alone also matched real starters -- a boom-or-bust receiver's spread
+        # routinely exceeds his mean -- and on 2024-25 core players it dropped
+        # 32% of RB1 receiving rows and 17-18% of starting WR/TE rows, every one
+        # with full history. Above the ceiling the model has clearly projected
+        # volume; below it, sigma >= mu is the no-history shape. Count markets
+        # are exempt: an anytime-TD mean below 1 always sits under its spread,
+        # and that is the shape of the stat, not a missing history. This lives
+        # here, in the tracked materialization path, rather than in the model,
+        # because every card passes through this chokepoint regardless of
+        # which producer generated it — including deployments whose private
+        # model code differs from this machine's.
+        mu_values = payload['mu'].astype(float)
         ungrounded_mask = (
-            payload['mu'].notna()
+            payload['market'].isin(GAMMA_MARKETS)
+            & payload['mu'].notna()
             & payload['sigma'].notna()
-            & (payload['sigma'].astype(float) >= payload['mu'].astype(float))
+            & (payload['sigma'].astype(float) >= mu_values)
+            & (mu_values < payload['market'].map(UNGROUNDED_MU_CEILING).astype(float))
         )
         if ungrounded_mask.any():
             logger.warning(
-                "Dropping %d of %d rows whose sigma >= mu (no usable history)",
+                "Dropping %d of %d rows with a collapsed mu under sigma (no usable history)",
                 int(ungrounded_mask.sum()),
                 len(payload),
             )

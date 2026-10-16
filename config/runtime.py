@@ -105,6 +105,15 @@ pipeline = SimpleNamespace(
         ).split(",")
         if value.strip()
     ),
+    # Fetched and stored alongside the required markets but never counted in
+    # coverage: many books quote anytime TD one-sided (Yes only), which cannot
+    # be de-vigged, so requiring it would fail closed on breadth most weeks.
+    # One extra Odds API credit per event per scrape (~16 per full week).
+    odds_optional_markets=tuple(
+        value.strip()
+        for value in os.getenv("NFL_ODDS_OPTIONAL_MARKETS", "player_anytime_td").split(",")
+        if value.strip()
+    ),
 )
 
 integration = SimpleNamespace(

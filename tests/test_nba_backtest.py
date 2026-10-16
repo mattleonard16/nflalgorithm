@@ -12,7 +12,9 @@ Covers:
 7.  Empty date range → zero bets result
 8.  Walk-forward: day N projections never used for day N-1 grading
 9.  Per-market breakdown sums to total
-10. roi_pct == total_profit_units / total_bets * 100
+10. roi_pct == total_profit_units / total Kelly units staked * 100
+11. Under bets are paid at under_price
+12. config.min_edge filters stored value rows
 """
 
 from __future__ import annotations
@@ -65,6 +67,7 @@ def _seed_value_view(
     sportsbook: str = "FanDuel",
     event_id: str = "EVT001",
     player_name: str = "Test Player",
+    under_price: int = -110,
 ) -> None:
     executemany(
         """
@@ -86,7 +89,7 @@ def _seed_value_view(
                 sportsbook,
                 line,
                 over_price,
-                -110,
+                under_price,
                 line + 2.0,  # mu slightly above line
                 5.0,
                 p_win,
@@ -418,13 +421,14 @@ class TestPerMarketBreakdown:
 
 
 # ---------------------------------------------------------------------------
-# 10. roi_pct == total_profit_units / total_bets * 100
+# 10. roi_pct == total_profit_units / total Kelly units staked * 100
 # ---------------------------------------------------------------------------
 
 
 class TestRoiFormula:
     def test_roi_formula_is_correct(self, db):
-        """roi_pct should equal total_profit_units / total_bets * 100."""
+        """roi_pct is profit over amount staked (both in Kelly units), not
+        profit per bet: with kelly=0.05 per bet, per-bet ROI understated it 20x."""
         from utils.nba_backtest import BacktestConfig, run_backtest
 
         game_date = "2026-01-30"
@@ -460,6 +464,71 @@ class TestRoiFormula:
         config = BacktestConfig(start_date=game_date, end_date=game_date)
         result = run_backtest(config)
 
-        assert result.total_bets >= 1
-        expected_roi = (result.total_profit_units / result.total_bets) * 100
+        assert result.total_bets == 2
+        total_staked = 0.05 + 0.05
+        expected_roi = (result.total_profit_units / total_staked) * 100
         assert result.roi_pct == pytest.approx(expected_roi, abs=1e-6)
+        # win at -110 pays 0.05 * 100/110, loss costs 0.05
+        assert result.roi_pct == pytest.approx((100 / 110 - 1) / 2 * 100, abs=1e-6)
+        per_market_roi = dict(zip(result.per_market["market"], result.per_market["roi_pct"]))
+        assert per_market_roi["pts"] == pytest.approx(100 / 110 * 100, abs=1e-6)
+        assert per_market_roi["reb"] == pytest.approx(-100.0, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# 11. Under bets pay at under_price
+# ---------------------------------------------------------------------------
+
+
+class TestUnderPricing:
+    def test_under_win_paid_at_under_price(self, db):
+        from utils.nba_backtest import BacktestConfig, run_backtest
+
+        game_date = "2026-02-02"
+        _seed_value_view(
+            game_date=game_date,
+            player_id=_PLAYER_ID,
+            market="pts",
+            line=25.0,
+            over_price=-200,
+            under_price=150,
+            p_win=0.6,
+            kelly=0.04,
+            edge_pct=0.10,
+            side="under",
+        )
+        _seed_game_log(game_date=game_date, player_id=_PLAYER_ID, pts=20)
+
+        result = run_backtest(BacktestConfig(start_date=game_date, end_date=game_date))
+
+        assert result.wins == 1
+        # +150 pays 1.5x the stake; the over price (-200) would have paid 0.5x
+        assert result.total_profit_units == pytest.approx(0.04 * 1.5)
+
+
+# ---------------------------------------------------------------------------
+# 12. min_edge is applied
+# ---------------------------------------------------------------------------
+
+
+class TestMinEdgeFilter:
+    def test_rows_below_min_edge_are_not_graded(self, db):
+        from utils.nba_backtest import BacktestConfig, run_backtest
+
+        game_date = "2026-02-03"
+        _seed_value_view(
+            game_date=game_date, player_id=4001, market="pts", line=20.0, over_price=-110,
+            p_win=0.6, kelly=0.05, edge_pct=0.06, event_id="EVT_LOW", player_name="Low",
+        )
+        _seed_value_view(
+            game_date=game_date, player_id=4002, market="pts", line=20.0, over_price=-110,
+            p_win=0.6, kelly=0.05, edge_pct=0.12, event_id="EVT_HIGH", player_name="High",
+        )
+        _seed_game_log(game_date=game_date, player_id=4001, pts=30, player_name="Low")
+        _seed_game_log(game_date=game_date, player_id=4002, pts=30, player_name="High")
+
+        strict = run_backtest(BacktestConfig(start_date=game_date, end_date=game_date, min_edge=0.08))
+        loose = run_backtest(BacktestConfig(start_date=game_date, end_date=game_date, min_edge=0.05))
+
+        assert strict.total_bets == 1
+        assert loose.total_bets == 2

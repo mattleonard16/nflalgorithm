@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckCircle2, XCircle, MinusCircle } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, normaliseResult, sideLabel } from "@/lib/utils";
 import {
   getPerformance,
   getOutcomes,
@@ -41,16 +41,6 @@ const RESULT_FILTERS: { value: ResultFilter; label: string }[] = [
   { value: "LOSS", label: "Losses" },
   { value: "PUSH", label: "Pushes" },
 ];
-
-// Normalise result strings to canonical form
-function normaliseResult(r: string | null): string | null {
-  if (!r) return null;
-  const u = r.toUpperCase();
-  if (u === "WIN" || u === "W") return "WIN";
-  if (u === "LOSS" || u === "L") return "LOSS";
-  if (u === "PUSH" || u === "P") return "PUSH";
-  return u;
-}
 
 // ─── Shared UI pieces ────────────────────────────────────────────────────────
 
@@ -247,13 +237,21 @@ function MySlipTab() {
     load();
   }, [load]);
 
-  const pending = userBets.filter((b) => b.result === null || b.result === undefined || b.result === "");
-  const settled = userBets.filter((b) => b.result !== null && b.result !== undefined && b.result !== "");
+  const pending = userBets.filter((b) => normaliseResult(b.outcome) === null);
+  const settled = userBets.filter((b) => normaliseResult(b.outcome) !== null);
 
   const filteredSettled = settled.filter((b) => {
     if (resultFilter === "all") return true;
-    return normaliseResult(b.result) === resultFilter;
+    return normaliseResult(b.outcome) === resultFilter;
   });
+
+  // Rates over graded bets only: /api/user/stats counts pending bets in
+  // total_bets (and its ROI divides by that count), which drags both toward 0.
+  const decided = stats ? stats.wins + stats.losses : 0;
+  const winRate = stats && decided > 0 ? stats.wins / decided : null;
+  const settledStake = settled.reduce((sum, b) => sum + (b.stake_units ?? 0), 0);
+  const settledProfit = settled.reduce((sum, b) => sum + (b.profit_units ?? 0), 0);
+  const roi = settledStake > 0 ? (settledProfit / settledStake) * 100 : null;
 
   if (loading) return <LoadingSkeleton />;
 
@@ -273,8 +271,15 @@ function MySlipTab() {
           <StatCard title="Total Bets" value={String(stats.total_bets)} />
           <StatCard
             title="Win Rate"
-            value={stats.total_bets > 0 ? `${((stats.wins / stats.total_bets) * 100).toFixed(1)}%` : "—"}
-            colorClass={stats.wins / Math.max(stats.total_bets, 1) >= 0.5 ? "text-emerald-400" : "text-red-400"}
+            value={winRate !== null ? `${(winRate * 100).toFixed(1)}%` : "—"}
+            subtitle={`${stats.wins}-${stats.losses}${stats.pushes > 0 ? `-${stats.pushes}` : ""} graded`}
+            colorClass={
+              winRate === null
+                ? "text-slate-100"
+                : winRate >= 0.5
+                  ? "text-emerald-400"
+                  : "text-red-400"
+            }
           />
           <StatCard
             title="Total P/L"
@@ -283,8 +288,11 @@ function MySlipTab() {
           />
           <StatCard
             title="ROI"
-            value={`${stats.roi >= 0 ? "+" : ""}${stats.roi.toFixed(1)}%`}
-            colorClass={stats.roi >= 0 ? "text-emerald-400" : "text-red-400"}
+            value={roi !== null ? `${roi >= 0 ? "+" : ""}${roi.toFixed(1)}%` : "—"}
+            subtitle={roi !== null ? "per unit staked, graded bets" : undefined}
+            colorClass={
+              roi === null ? "text-slate-100" : roi >= 0 ? "text-emerald-400" : "text-red-400"
+            }
           />
         </div>
       )}
@@ -340,6 +348,7 @@ function UserBetsTable({ bets, showResult }: { bets: UserBet[]; showResult: bool
           <tr className="border-b border-slate-800/50">
             {showResult && <th className="w-10 px-4 py-3" />}
             <th className="text-left px-4 py-3 text-xs font-medium text-slate-600 uppercase tracking-wider">Placed</th>
+            <th className="text-left px-4 py-3 text-xs font-medium text-slate-600 uppercase tracking-wider">Player</th>
             <th className="text-left px-4 py-3 text-xs font-medium text-slate-600 uppercase tracking-wider">Market</th>
             <th className="text-left px-4 py-3 text-xs font-medium text-slate-600 uppercase tracking-wider">Book</th>
             <th className="text-right px-4 py-3 text-xs font-medium text-slate-600 uppercase tracking-wider">Line</th>
@@ -355,7 +364,7 @@ function UserBetsTable({ bets, showResult }: { bets: UserBet[]; showResult: bool
         </thead>
         <tbody>
           {bets.map((bet) => {
-            const norm = normaliseResult(bet.result);
+            const norm = normaliseResult(bet.outcome);
             const dateStr = bet.placed_at ? new Date(bet.placed_at).toLocaleDateString() : "—";
             return (
               <tr
@@ -368,17 +377,22 @@ function UserBetsTable({ bets, showResult }: { bets: UserBet[]; showResult: bool
                   </td>
                 )}
                 <td className="px-4 py-3 font-mono text-xs text-slate-500">{dateStr}</td>
+                <td className="px-4 py-3 font-medium text-slate-200">{bet.player_name ?? bet.player_id}</td>
                 <td className="px-4 py-3">
                   <span className="text-xs font-mono text-slate-300 bg-slate-800 px-2 py-0.5 rounded uppercase">
                     {bet.market}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-xs text-slate-500">{bet.sportsbook}</td>
-                <td className="px-4 py-3 text-right font-mono text-slate-300">O {bet.line?.toFixed(1)}</td>
+                <td className="px-4 py-3 text-right font-mono text-slate-300">
+                  {sideLabel(bet.side)} {bet.line?.toFixed(1)}
+                </td>
                 <td className="px-4 py-3 text-right font-mono text-slate-400">
                   {bet.price > 0 ? `+${bet.price}` : bet.price}
                 </td>
-                <td className="px-4 py-3 text-right font-mono text-slate-300">{bet.stake?.toFixed(2)}u</td>
+                <td className="px-4 py-3 text-right font-mono text-slate-300">
+                  {bet.stake_units != null ? `${bet.stake_units.toFixed(2)}u` : "—"}
+                </td>
                 {showResult && (
                   <>
                     <td className="px-4 py-3 text-right font-mono font-bold text-slate-100">
@@ -444,18 +458,23 @@ function NflHistoryTab() {
 
   useEffect(() => {
     if (!selectedWeek) return;
+    const activeWeek = selectedWeek;
+    let cancelled = false;
     async function loadOutcomes() {
       setOutcomesLoading(true);
       try {
-        const data = await getOutcomes(selectedWeek!.season, selectedWeek!.week);
-        setOutcomes(data);
+        const data = await getOutcomes(activeWeek.season, activeWeek.week);
+        if (!cancelled) setOutcomes(data);
       } catch {
-        setOutcomes([]);
+        if (!cancelled) setOutcomes([]);
       } finally {
-        setOutcomesLoading(false);
+        if (!cancelled) setOutcomesLoading(false);
       }
     }
     loadOutcomes();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedWeek]);
 
   const filteredOutcomes = outcomes.filter((o) => {
@@ -579,18 +598,23 @@ function NbaHistoryTab() {
 
   useEffect(() => {
     if (!selectedDate) return;
+    const activeDate = selectedDate;
+    let cancelled = false;
     async function loadOutcomes() {
       setOutcomesLoading(true);
       try {
-        const data = await getNbaOutcomes(selectedDate!);
-        setOutcomes(data);
+        const data = await getNbaOutcomes(activeDate);
+        if (!cancelled) setOutcomes(data);
       } catch {
-        setOutcomes([]);
+        if (!cancelled) setOutcomes([]);
       } finally {
-        setOutcomesLoading(false);
+        if (!cancelled) setOutcomesLoading(false);
       }
     }
     loadOutcomes();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedDate]);
 
   const filteredOutcomes = outcomes.filter((o) => {
@@ -706,7 +730,7 @@ function GradedOutcomesTable({ outcomes }: { outcomes: BetOutcome[] }) {
                     {bet.market}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-right font-mono text-slate-300">O {bet.line}</td>
+                <td className="px-4 py-3 text-right font-mono text-slate-300">{sideLabel(bet.side)} {bet.line}</td>
                 <td className="px-4 py-3 text-right font-mono font-bold text-slate-100">
                   {bet.actual_result?.toFixed(0) ?? "—"}
                 </td>
@@ -759,7 +783,7 @@ function NbaOutcomesTable({ outcomes }: { outcomes: NbaBetOutcome[] }) {
                     {bet.market}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-right font-mono text-slate-300">O {bet.line}</td>
+                <td className="px-4 py-3 text-right font-mono text-slate-300">{sideLabel(bet.side)} {bet.line}</td>
                 <td className="px-4 py-3 text-right font-mono font-bold text-slate-100">
                   {bet.actual_result?.toFixed(0) ?? "—"}
                 </td>

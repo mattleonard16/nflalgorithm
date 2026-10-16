@@ -22,8 +22,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import pandas as pd
 
 from nba_confidence_engine import compute_nba_confidence_score, assign_nba_tier
-from utils.db import executemany, read_dataframe
-from utils.nba_injury_adjustments import apply_injury_adjustments, SIGMA_INFLATION
+from utils.db import executemany, get_backend, read_dataframe
+from utils.nba_injury_adjustments import apply_injury_adjustments
 from utils.nba_sigma import get_sigma_or_default
 from utils.odds_math import american_to_decimal, implied_probability, implied_probability_no_vig
 import logging
@@ -296,6 +296,11 @@ def rank_nba_value(
             over_price = int(over_price_raw)
         except (TypeError, ValueError):
             continue
+        # American odds never fall strictly between -100 and +100. A 0 or 50
+        # here is a bad cell; implied_probability refuses it, so skip the row
+        # rather than abort the whole slate.
+        if -100 < over_price < 100:
+            continue
 
         # Injury fields from apply_injury_adjustments
         base_mu = row.get("base_mu")
@@ -321,11 +326,9 @@ def rank_nba_value(
         # Use player-specific sigma from projections (Phase 1)
         sigma_raw = row.get("sigma") if "sigma" in row.index else None
         market_str = str(row["market"])
+        # Injury-boosted rows already carry sigma inflated by SIGMA_INFLATION
+        # from apply_injury_adjustments; inflating again here compounded it.
         sigma = get_sigma_or_default(sigma_raw, projected_value, market=market_str)
-
-        # Inflate sigma when injury boost is applied — less certainty
-        if injury_boost > 1.0:
-            sigma *= (1.0 + SIGMA_INFLATION)
 
         # --- Over / Under evaluation ---
         # Optionally use Monte Carlo simulation instead of analytic CDF.
@@ -388,6 +391,9 @@ def rank_nba_value(
             isinstance(under_price_raw, float) and math.isnan(under_price_raw)
         ):
             under_price_val = int(under_price_raw)
+            if -100 < under_price_val < 100:
+                # Bad cell: price the over one-sided rather than de-vig against it.
+                under_price_val = None
 
         if not use_monte_carlo_row:
             if market_str == "fg3m":
@@ -439,6 +445,10 @@ def rank_nba_value(
             else:
                 edge_pct = p_win - (implied_prob_under if implied_prob_under is not None else implied_probability(price_used))
             is_calibrated = True
+            # Side selection used the raw edge; calibration usually shrinks
+            # p_win, so re-apply the threshold to the edge that gets persisted.
+            if edge_pct < min_edge:
+                continue
 
         roi = expected_roi(p_win, price_used)
         kelly = kelly_fraction(p_win, price_used)
@@ -533,23 +543,37 @@ def materialize_nba_value(
     if not rows:
         return 0
 
-    sql = """
-        INSERT OR REPLACE INTO nba_materialized_value_view (
+    columns = """
             season, game_date, player_id, player_name, team,
             event_id, market, sportsbook, line, over_price, under_price,
             mu, sigma, p_win, edge_percentage, expected_roi, kelly_fraction,
             confidence, confidence_score, confidence_tier, generated_at,
             base_mu, injury_adjusted_mu, injury_boost_multiplier, injury_boost_players,
             side, p_win_raw, calibrated
-        ) VALUES (
+    """
+    placeholders = """
             ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?
-        )
     """
+    # `INSERT OR REPLACE` is SQLite-only syntax; MySQL gets the same overwrite
+    # on the (game_date, player_id, market, sportsbook, event_id) primary key.
+    if get_backend() == "mysql":
+        key_cols = {"game_date", "player_id", "market", "sportsbook", "event_id"}
+        updates = ", ".join(
+            f"{c}=VALUES({c})"
+            for c in (col.strip() for col in columns.split(","))
+            if c not in key_cols
+        )
+        sql = (
+            f"INSERT INTO nba_materialized_value_view ({columns}) VALUES ({placeholders}) "
+            f"ON DUPLICATE KEY UPDATE {updates}"
+        )
+    else:
+        sql = f"INSERT OR REPLACE INTO nba_materialized_value_view ({columns}) VALUES ({placeholders})"
 
     params = [
         (

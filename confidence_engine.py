@@ -137,35 +137,6 @@ def assign_tier(score: float) -> str:
 
 # ── Filtering ─────────────────────────────────────────────────────────
 
-def filter_by_confidence(
-    plays_df: pd.DataFrame,
-    min_tier: int = 2,
-) -> pd.DataFrame:
-    """Filter plays by minimum confidence tier.
-
-    Parameters
-    ----------
-    plays_df : DataFrame
-        Must contain ``confidence_score`` and ``confidence_tier`` columns.
-    min_tier : int
-        Minimum tier rank to include (1=Premium, 2=Strong, 3=Marginal).
-        Default 2 includes Premium and Strong.
-
-    Returns
-    -------
-    DataFrame
-        Filtered copy -- original is never mutated.
-    """
-    if plays_df.empty:
-        return plays_df.copy()
-
-    if "confidence_tier" not in plays_df.columns:
-        return plays_df.copy()
-
-    ranks = plays_df["confidence_tier"].map(_tier_rank)
-    return plays_df[ranks <= min_tier].copy()
-
-
 # ── Bulk scoring ──────────────────────────────────────────────────────
 
 def score_plays(df: pd.DataFrame) -> pd.DataFrame:

@@ -85,6 +85,9 @@ make ingest-nfl
 
 # Run tests
 make test
+make lint        # ruff pyflakes rules; CI blocks on this
+make typecheck   # mypy; known backlog, not yet a gate
+make requirements  # regenerate requirements.txt from uv.lock (CI checks it is current)
 
 # Weekly workflow (local/manual — see docs/OPERATIONS.md for the production run)
 make week-predict SEASON=2025 WEEK=13
@@ -202,6 +205,13 @@ joins to `games` find no kickoff for those weeks and `make mae-gate` fails loud 
 empty of 1,396), so the gate becomes verifiable on real data once 2026 actuals land. Do not
 re-run `make week-refresh` for a past 2025 week to "fix" those rows — it would overwrite pregame
 evidence (and the pre-kickoff guard refuses anyway).
+
+**Id bridge (2026-10)**: projection ids are minted from the roster (`CIN_ja_marr_chase`) and stats ids
+from the abbreviated box-score name (`CIN_j_chase`), so a plain `player_id` join matched 0 of 503
+2026 stat ids. `scripts/evaluate_nfl_projections.py` and grading now re-key actuals through
+`gsis_id` via `utils.grading.align_actuals_to_bets`, preferring the graded week's
+`nfl_player_context_snapshots` id so a player traded after his bet still grades. Join on `gsis_id`,
+never on the team-embedded `player_id`, anywhere a player's history must survive a trade.
 
 ### Verify Data
 ```bash
@@ -381,7 +391,9 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     EWMA multiplier, floors/defaults scaled by the same factor. Result: overall 1-sigma coverage
     66.3% -> 68.2%; QB passing (previously unvalidated, 58.2%) landed at 68.5%. Factors are
     in-sample for 2025 — validate against 2026 walk-forward before re-tuning, via
-    `make nfl-backtest` + `compare`. The unread config knobs (`config.integration.ewma_decay` in
+    `make nfl-backtest` + `compare`. Players with 1-5 games now get `max(flat default, CV x their
+    mean)` (`SIGMA_SHORT_HISTORY_CV`) instead of one flat default: on 2024-25 core players that
+    path covered 44-55% at +/-1 sigma, and now 62-73% (QB unchanged). The unread config knobs (`config.integration.ewma_decay` in
     both `config/runtime.py` and `config.py` — zero readers, confirmed by grep) have been
     removed; do not reintroduce a config knob for `_compute_market_mu`'s constant, since nothing
     in production reads it.
@@ -399,14 +411,20 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     rather than a version table; recovery from any partial run is `make migrate` again. Crash
     safety of the PK-widening rebuilds is covered by `tests/test_migration_crash_recovery.py`. See
     docs/OPERATIONS.md "Migrations: re-run forward, no rollback".
-19. [Documented non-blocker] Opening vs closing line: opening is derivable as the first stored
-    snapshot (`MIN(as_of)` per key, `scripts/backfill_line_accuracy.py:load_opening_lines`,
-    consumed by `make backfill-accuracy`), bounded by scrape cadence rather than true market-open.
-    CLV (`utils/clv.py`) intentionally grades entry-vs-close, not open-vs-close — that is by
-    design, not a gap. `backfill_line_accuracy.py` compares `as_of` as SQLite TEXT (lexical, not
-    chronological) — fine for consistently-formatted UTC timestamps but unlike `utils/clv.py` and
-    `utils/matching.py`, which parse with pandas for true chronological ordering. Latent gap, not
-    fixed here.
+19. [RESOLVED] Opening vs closing line: opening is derivable as the first stored snapshot
+    (`scripts/backfill_line_accuracy.py:load_opening_lines`, consumed by `make backfill-accuracy`),
+    bounded by scrape cadence rather than true market-open. CLV (`utils/clv.py`) intentionally
+    grades entry-vs-close, not open-vs-close — by design, not a gap. The backfill now picks
+    open/close by `as_of` parsed as UTC (chronological, like `utils/clv.py`) rather than TEXT
+    `MIN`/`MAX`, and screens odds through `utils/odds_quality.filter_gradeable_odds` so SimBook
+    lines never feed hit rates.
+    **CLV sign (fixed 2026-10)**: points CLV is `close - entry` for an over (negated for an
+    under), so an over taken at 50.5 that closes at 54.5 is +4. It was previously inverted, as was
+    the model-fallback `clv_bp`; any `clv_weekly` / `weekly_performance.clv_avg` rows written
+    before the fix carry the opposite sign. When the line moved, the market branch prices the
+    entry line on the close-implied mean instead of comparing fair probabilities at two lines.
+    `scripts/record_outcomes.py` now carries `implied_prob`/`implied_prob_under` into CLV, so a
+    pure price move is graded off the market rather than the model.
 20. [RESOLVED] Tier-3 name-only match: position-guarded via `utils/matching.positions_compatible`
     at both tier-3 paths (`prop_integration.py:276-277`, `:315-316`) and the tier-3b fuzzy path;
     suffix handling is non-destructive (`utils/matching.py:91-132`, roster-verified tier 2.5 at
@@ -425,7 +443,9 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     error responses (`utils/api_exceptions.py`, `tests/test_api_exception_handler.py`).
 
 ### Tier 3 — LOWER (polish)
-24. Property tests for Kelly/edge/vig math.
+24. [RESOLVED] Property tests for Kelly/edge/vig math — `tests/test_betting_math_properties.py`
+    (seeded samples + boundaries; hypothesis is not installed). The only tracked Kelly is
+    `nba_value_engine.kelly_fraction`; the NFL Kelly lives in the private engine.
 25. [RESOLVED] CI gate on per-position MAE — `check_position_mae` in
     `scripts/evaluate_nfl_projections.py`, exposed as the `mae-gate` subcommand and `make mae-gate`.
     Two ways to set the ceilings, and both survive in the merged code.
@@ -461,6 +481,14 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     `uv run python -m scripts.run_nfl_backtest compare logs/metrics/bt-2025-off.json
     logs/metrics/bt-2025-on.json`. If MAE does not improve, drop the `NFL_FEATURE_CONTEXT_FACTORS=1`
     from `week-auto`. The `--off` report is also the `BASELINE` for item 25's gate.
+    **Partial answer (2026-10, public checkout)**: `make context-eval` scores each component on
+    3,398 core-player games (2024-25 QB passing, RB1 rushing, WR/TE receiving) against a
+    prior-games-only EWMA baseline. The usage trend raised MAE in every run, by +0.61 yds
+    (95% CI +0.33..+0.89) at a 4-game half-life and +1.12 at 2, so it is now reported but kept
+    out of the composite (`ContextParams.apply_usage_trend=False`). Game script helped slightly
+    (about -0.07 overall, -0.14..-0.30 rushing) and matchup history was neutral. With the trend
+    out, the composite is about -0.07, i.e. neutral-to-slightly-positive. The private-model
+    backtest above is still the deciding run; this narrows what it should find.
 32. **The private wiring for context factors is not in `docs/DEPLOYMENT_MANIFEST.md`'s verified
     set.** What the tracked code expects of `weekly.py` is recorded there now; verify it on the
     production checkout before week 1.

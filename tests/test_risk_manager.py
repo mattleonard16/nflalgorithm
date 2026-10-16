@@ -64,14 +64,90 @@ class TestCorrelationDetection:
         assert "pos_corr" in groups[0]
 
     def test_negative_correlation(self):
+        """Pass-heavy script: QB passing over + his RB's rushing under."""
         df = _make_value_df([
             {"player_id": "QB1", "market": "passing_yards", "team": "KC", "event_id": "G1"},
-            {"player_id": "RB1", "market": "rushing_yards", "team": "KC", "event_id": "G1"},
+            {"player_id": "RB1", "market": "rushing_yards", "team": "KC", "event_id": "G1",
+             "side": "under"},
         ])
         result = detect_correlations(df)
         groups = result["correlation_group"].dropna().unique()
         assert len(groups) == 1
         assert "neg_corr" in groups[0]
+
+    def test_negatively_correlated_same_side_bets_offset(self):
+        """QB passing over + RB rushing over hedge each other: not neg_corr."""
+        df = _make_value_df([
+            {"player_id": "QB1", "market": "passing_yards", "team": "KC", "event_id": "G1"},
+            {"player_id": "RB1", "market": "rushing_yards", "team": "KC", "event_id": "G1",
+             "side": "over"},
+        ])
+        result = detect_correlations(df)
+        assert result["correlation_group"].isna().all()
+
+    def test_positively_correlated_opposite_sides_offset(self):
+        df = _make_value_df([
+            {"player_id": "QB1", "market": "passing_yards", "team": "KC", "event_id": "G1"},
+            {"player_id": "WR1", "market": "receiving_yards", "team": "KC", "event_id": "G1",
+             "side": "under"},
+        ])
+        result = detect_correlations(df)
+        assert result["correlation_group"].isna().all()
+
+    def test_same_player_at_two_books_is_not_correlation(self):
+        df = _make_value_df([
+            {"player_id": "QB1", "market": "passing_yards", "team": "KC", "event_id": "G1",
+             "sportsbook": "DraftKings"},
+            {"player_id": "QB1", "market": "passing_yards", "team": "KC", "event_id": "G1",
+             "sportsbook": "FanDuel"},
+        ])
+        result = detect_correlations(df)
+        assert result["correlation_group"].isna().all()
+
+    def test_opposing_players_are_not_a_qb_stack(self):
+        """The reported defect: one QB at two books, the opposing WR's under
+        and the opposing RB's over all merged into one group and every row
+        was REJECTed."""
+        df = _make_value_df([
+            {"player_id": "KC_QB", "market": "passing_yards", "team": "KC", "event_id": "G1",
+             "sportsbook": "DraftKings"},
+            {"player_id": "KC_QB", "market": "passing_yards", "team": "KC", "event_id": "G1",
+             "sportsbook": "FanDuel"},
+            {"player_id": "BUF_WR", "market": "receiving_yards", "team": "BUF",
+             "event_id": "G1", "side": "under"},
+            {"player_id": "BUF_RB", "market": "rushing_yards", "team": "BUF",
+             "event_id": "G1", "side": "over"},
+        ])
+        result = detect_correlations(df)
+        groups = result["correlation_group"]
+        assert groups.iloc[:2].isna().all(), "the KC QB alone is not correlated"
+        # The two BUF bets are teammates on one card: a same-team stack only.
+        assert groups.iloc[2] == groups.iloc[3]
+        assert groups.iloc[2].startswith("same_team")
+
+    def test_group_label_lists_every_pair_type_strongest_first(self):
+        df = _make_value_df([
+            {"player_id": "QB1", "market": "passing_yards", "team": "KC", "event_id": "G1"},
+            {"player_id": "WR1", "market": "receiving_yards", "team": "KC", "event_id": "G1"},
+            {"player_id": "RB1", "market": "rushing_yards", "team": "KC", "event_id": "G1",
+             "side": "under"},
+            {"player_id": "QB9", "market": "passing_yards", "team": "BUF", "event_id": "G1"},
+            {"player_id": "WR9", "market": "receiving_yards", "team": "BUF", "event_id": "G1"},
+        ])
+        result = detect_correlations(df)
+        groups = result["correlation_group"].tolist()
+        assert groups[:3] == ["pos_corr+neg_corr+same_team_1"] * 3
+        assert groups[3:] == ["pos_corr_2"] * 2
+
+    def test_missing_side_defaults_to_over(self):
+        df = _make_value_df([
+            {"player_id": "QB1", "market": "passing_yards", "team": "KC", "event_id": "G1",
+             "side": None},
+            {"player_id": "WR1", "market": "receiving_yards", "team": "KC", "event_id": "G1",
+             "side": "OVER"},
+        ])
+        result = detect_correlations(df)
+        assert result["correlation_group"].iloc[0] == "pos_corr_1"
 
     def test_uncorrelated_different_games(self):
         df = _make_value_df([
@@ -112,12 +188,12 @@ class TestCorrelationDetection:
         assert groups.nunique() == 1, "chained pairs must share one group label"
 
     def test_join_through_already_grouped_j_side(self):
-        """Pair order is (0,1),(0,2),(0,3),(1,2),(1,3),(2,3): the group forms
-        at (1,3); (2,3) then matches with only the j side grouped."""
+        """Pair order is (0,1),(0,2),(0,3),(1,2),(1,3),(2,3): (1,3) and (2,3)
+        each link through row 3, and union-find merges all three."""
         df = _make_value_df([
             {"player_id": "X0", "market": "rushing_yards", "team": "SEA", "event_id": "G0"},
             {"player_id": "QB1", "market": "passing_yards", "team": "KC", "event_id": "G2"},
-            {"player_id": "WR9", "market": "receiving_tds", "team": "BUF", "event_id": "G2"},
+            {"player_id": "WR9", "market": "receiving_tds", "team": "KC", "event_id": "G2"},
             {"player_id": "QB2", "market": "passing_tds", "team": "KC", "event_id": "G2"},
         ])
         result = detect_correlations(df)
@@ -125,11 +201,36 @@ class TestCorrelationDetection:
         assert pd.isna(groups.iloc[0])
         assert groups.iloc[1] == groups.iloc[2] == groups.iloc[3]
 
+    def test_chain_through_offsetting_pairs_is_one_group(self):
+        """A-C offset (QB over vs his WR under) and is not an edge, but A-B
+        and B-C still link C into A's group."""
+        df = _make_value_df([
+            {"player_id": "A", "market": "passing_yards", "team": "KC", "event_id": "G1"},
+            {"player_id": "B", "market": "receiving_yards", "team": "KC", "event_id": "G1"},
+            {"player_id": "C", "market": "receiving_yards", "team": "KC", "event_id": "G1",
+             "side": "under"},
+            {"player_id": "D", "market": "rushing_yards", "team": "KC", "event_id": "G1",
+             "side": "under"},
+        ])
+        result = detect_correlations(df)
+        assert result["correlation_group"].nunique() == 1
+        assert result["correlation_group"].notna().all()
+
     def test_same_game_unrelated_markets_not_grouped(self):
         """Same event, different teams, no market pair → no correlation."""
         df = _make_value_df([
             {"player_id": "WR1", "market": "receiving_yards", "team": "KC", "event_id": "G1"},
             {"player_id": "WR2", "market": "receiving_yards", "team": "BUF", "event_id": "G1"},
+        ])
+        result = detect_correlations(df)
+        assert result["correlation_group"].isna().all()
+
+    @pytest.mark.parametrize("missing", [None, np.nan])
+    def test_missing_team_never_matches_another_missing_team(self, missing):
+        """Two rows in different games with no team are not one game."""
+        df = _make_value_df([
+            {"player_id": "QB1", "market": "passing_yards", "team": missing, "event_id": "G1"},
+            {"player_id": "WR1", "market": "receiving_yards", "team": missing, "event_id": "G2"},
         ])
         result = detect_correlations(df)
         assert result["correlation_group"].isna().all()

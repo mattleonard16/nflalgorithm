@@ -195,8 +195,8 @@ def test_join_matches_by_normalized_name(tmp_path: Path) -> None:
     assert row['practice_participation'] == "LIMITED"
 
 
-def test_join_matches_by_fuzzy_name_with_team_mismatch(tmp_path: Path) -> None:
-    """Test fuzzy matching with team mismatch - uses SimBook for tier 3 allowance."""
+def test_join_matches_by_fuzzy_name_on_the_same_team(tmp_path: Path) -> None:
+    """Fuzzy (typo) matching still works when the teams agree."""
     db_path = tmp_path / "fuzzy.db"
     with sqlite3.connect(db_path) as conn:
         _init_tables(conn)
@@ -223,7 +223,7 @@ def test_join_matches_by_fuzzy_name_with_team_mismatch(tmp_path: Path) -> None:
                 "evt2",
                 2024,
                 1,
-                "DEN_mecole_hardmn",  # Typo to trigger fuzzy match
+                "KC_mecole_hardmn",  # Typo to trigger fuzzy match
                 "receiving_yards",
                 "SimBook",  # Synthetic allows tier 3
                 52.5,
@@ -257,11 +257,10 @@ def test_join_matches_by_fuzzy_name_with_team_mismatch(tmp_path: Path) -> None:
     with use_database(db_path):
         result = join_odds_projections(2024, 1)
 
-    # WR with team mismatch + SimBook (tier 3 allowed) should survive
     assert not result.empty
     row = result.loc[result['player_id'] == "KC_mecole_hardman"].iloc[0]
     assert row['match_type'] == 'fuzzy_name'
-    assert row['player_id_odds'] == "DEN_mecole_hardmn"
+    assert row['player_id_odds'] == "KC_mecole_hardmn"
     assert row['match_tier'] == 3  # Fuzzy is tier 3
     assert row['match_score'] >= 0.82  # Fuzzy + team penalty
     assert row['match_confidence'] >= 0.82
@@ -597,3 +596,180 @@ def test_join_blocks_suffix_conflict_but_matches_dropped_suffix(tmp_path: Path) 
     pittman = result.loc[result["player_id"] == "IND_michael_pittman"]
     assert not pittman.empty
     assert pittman.iloc[0]["player_id_odds"] == "HOU_michael_pittman"
+
+
+def _insert_projection(conn: sqlite3.Connection, player_id: str, team: str) -> None:
+    conn.execute(
+        "INSERT INTO weekly_projections VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (2024, 1, player_id, team, "OPP", "receiving_yards", 60.0, 12.0,
+         "v1", "hash", "2024-09-01T00:00:00Z"),
+    )
+
+
+def _insert_odds(conn: sqlite3.Connection, player_id: str, book: str = "DraftKings") -> None:
+    conn.execute(
+        "INSERT INTO weekly_odds VALUES (?,?,?,?,?,?,?,?,?)",
+        ("evt", 2024, 1, player_id, "receiving_yards", book, 62.5, -110,
+         "2024-09-01T12:00:00Z"),
+    )
+
+
+def test_fuzzy_match_rejects_disagreeing_known_teams(tmp_path: Path) -> None:
+    """A typo plus a different club is two strikes: not the same player."""
+    db_path = tmp_path / "fuzzy_team.db"
+    with sqlite3.connect(db_path) as conn:
+        _init_tables(conn)
+        _insert_projection(conn, "KC_mecole_hardman", "KC")
+        _insert_odds(conn, "DEN_mecole_hardmn")
+        conn.commit()
+
+    with use_database(db_path):
+        result = join_odds_projections(2024, 1)
+
+    assert result.empty
+
+
+def test_fuzzy_odds_quote_matches_at_most_one_projection(tmp_path: Path) -> None:
+    """TB_chris_godwin and NYJ_chris_rodwin both scored 0.85+ against the
+    quote TB_chris_godwinn and both used to claim it. Only the best-scoring
+    projection on the same club may, and each book's quote is consumed once."""
+    db_path = tmp_path / "fuzzy_consume.db"
+    with sqlite3.connect(db_path) as conn:
+        _init_tables(conn)
+        _insert_projection(conn, "NYJ_chris_rodwin", "NYJ")
+        _insert_projection(conn, "TB_chris_godwin", "TB")
+        _insert_odds(conn, "TB_chris_godwinn", "DraftKings")
+        _insert_odds(conn, "TB_chris_godwinn", "FanDuel")
+        conn.commit()
+
+    with use_database(db_path):
+        result = join_odds_projections(2024, 1)
+
+    assert result["player_id"].tolist() == ["TB_chris_godwin"]
+    assert result["player_id_odds"].tolist() == ["TB_chris_godwinn"]
+
+
+def test_fuzzy_best_score_wins_when_teams_unknown(tmp_path: Path) -> None:
+    """With no team to separate them, the closer name takes the quote and the
+    weaker candidate stays unmatched rather than sharing it."""
+    db_path = tmp_path / "fuzzy_best.db"
+    with sqlite3.connect(db_path) as conn:
+        _init_tables(conn)
+        # Listed first so a first-come assignment would hand it the quote.
+        _insert_projection(conn, "chris_rodwinn", "")
+        _insert_projection(conn, "chris_godwin", "")
+        _insert_odds(conn, "chris_godwinn")
+        conn.commit()
+
+    with use_database(db_path):
+        result = join_odds_projections(2024, 1)
+
+    assert result["player_id"].tolist() == ["chris_godwin"]
+
+
+# ---------------------------------------------------------------------------
+# Book spelling variants and guessed odds teams
+# ---------------------------------------------------------------------------
+
+
+def _roster(conn: sqlite3.Connection, pid: str, name: str, team: str, position: str) -> None:
+    _insert_roster(
+        conn, season=2024, gsis_id=f"g-{pid}", player_id=pid, player_name=name,
+        team=team, position=position,
+    )
+
+
+def test_apostrophe_spelling_matches_under_a_guessed_home_team(tmp_path: Path) -> None:
+    """Legacy quote "JaMarr Chase" stored under the home club the scraper
+    guessed (BAL) still meets the roster's Ja'Marr Chase (CIN)."""
+    db_path = tmp_path / "apostrophe.db"
+    with sqlite3.connect(db_path) as conn:
+        _init_tables(conn)
+        _roster(conn, "CIN_ja_marr_chase", "Ja'Marr Chase", "CIN", "WR")
+        _insert_projection(conn, "CIN_ja_marr_chase", "CIN")
+        _insert_odds(conn, "BAL_jamarr_chase")
+        conn.commit()
+
+    with use_database(db_path):
+        result = join_odds_projections(2024, 1)
+
+    assert result["player_id"].tolist() == ["CIN_ja_marr_chase"]
+    assert result["player_id_odds"].tolist() == ["BAL_jamarr_chase"]
+
+
+def test_first_name_alias_matches_by_name_and_team(tmp_path: Path) -> None:
+    db_path = tmp_path / "alias.db"
+    with sqlite3.connect(db_path) as conn:
+        _init_tables(conn)
+        _roster(conn, "KC_marquise_brown", "Marquise Brown", "KC", "WR")
+        _insert_projection(conn, "KC_marquise_brown", "KC")
+        _insert_odds(conn, "KC_hollywood_brown")
+        conn.commit()
+
+    with use_database(db_path):
+        result = join_odds_projections(2024, 1)
+
+    assert result["player_id_odds"].tolist() == ["KC_hollywood_brown"]
+    assert result["match_type"].tolist() == ["normalized_name_team"]
+
+
+def test_fuzzy_match_ignores_a_guessed_odds_team(tmp_path: Path) -> None:
+    """A typo'd away player stored under the guessed home club: the guessed
+    team is not evidence, so it no longer blocks the fuzzy match."""
+    db_path = tmp_path / "fuzzy_guessed.db"
+    with sqlite3.connect(db_path) as conn:
+        _init_tables(conn)
+        _roster(conn, "DEN_courtland_sutton", "Courtland Sutton", "DEN", "WR")
+        _insert_projection(conn, "DEN_courtland_sutton", "DEN")
+        _insert_odds(conn, "KC_courtland_suton")  # not a rostered pid
+        conn.commit()
+
+    with use_database(db_path):
+        result = join_odds_projections(2024, 1)
+
+    assert result["player_id_odds"].tolist() == ["KC_courtland_suton"]
+    assert result["match_type"].iloc[0].startswith("fuzzy_name")
+
+
+def test_fuzzy_match_still_rejects_a_rostered_odds_team(tmp_path: Path) -> None:
+    """An odds pid on the roster was resolved, not guessed: a disagreeing
+    club still blocks a typo-level match."""
+    db_path = tmp_path / "fuzzy_rostered.db"
+    with sqlite3.connect(db_path) as conn:
+        _init_tables(conn)
+        _roster(conn, "KC_mecole_hardman", "Mecole Hardman", "KC", "WR")
+        _roster(conn, "DEN_mecole_hardmn", "Mecole Hardmn", "DEN", "WR")
+        _insert_projection(conn, "KC_mecole_hardman", "KC")
+        _insert_odds(conn, "DEN_mecole_hardmn")
+        conn.commit()
+
+    with use_database(db_path):
+        result = join_odds_projections(2024, 1)
+
+    assert result.empty
+
+
+def test_same_name_different_position_never_cross_matches(tmp_path: Path) -> None:
+    """Michael Carter (ARI RB) vs Michael Carter II (PHI DB): the loose key
+    collides, the roster positions keep them apart."""
+    db_path = tmp_path / "carter.db"
+    with sqlite3.connect(db_path) as conn:
+        _init_tables(conn)
+        _roster(conn, "ARI_michael_carter", "Michael Carter", "ARI", "RB")
+        _roster(conn, "PHI_michael_carter", "Michael Carter II", "PHI", "DB")
+        conn.execute(
+            "INSERT INTO weekly_projections VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (2024, 1, "ARI_michael_carter", "ARI", "PHI", "rushing_yards", 40.0, 12.0,
+             "v1", "hash", "2024-09-01T00:00:00Z"),
+        )
+        conn.execute(
+            "INSERT INTO weekly_odds VALUES (?,?,?,?,?,?,?,?,?)",
+            ("evt", 2024, 1, "PHI_michael_carter", "rushing_yards", "Book", 35.5, -110,
+             "2024-09-01T12:00:00Z"),
+        )
+        conn.commit()
+
+    with use_database(db_path):
+        result = join_odds_projections(2024, 1)
+
+    assert result.empty

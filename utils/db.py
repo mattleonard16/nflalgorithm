@@ -56,14 +56,23 @@ def validate_mysql_server_version(version: str) -> tuple[int, int, int]:
     return parsed
 
 
-def _normalize_sql_for_backend(sql: str, backend: str) -> str:
+def _normalize_sql_for_backend(sql: str, backend: str, *, formats_params: bool = True) -> str:
     """Convert SQL parameter placeholders based on backend.
 
     SQLite uses '?' placeholders
     MySQL uses '%s'
+
+    PyMySQL interpolates with Python's ``%`` operator whenever ``args`` is not
+    None, so a literal ``%`` (``LIKE '%vs.%'``) must be doubled first or the
+    query fails with "not enough arguments for format string". When the
+    driver will not format (``args is None``) the SQL is sent verbatim, so
+    escaping then would leave a literal ``%%`` in the query; callers pass
+    ``formats_params=False`` for that case.
     """
     if backend == "mysql":
         # MySQL (PyMySQL) use %s
+        if formats_params:
+            sql = sql.replace("%", "%%")
         return sql.replace("?", "%s")
     return sql
 
@@ -179,7 +188,8 @@ def read_dataframe(
 ) -> pd.DataFrame:
     """Run a SELECT and return a DataFrame."""
     backend = _get_backend()
-    normalized_sql = _normalize_sql_for_backend(sql, backend)
+    # pandas calls cursor.execute(sql) without args when params is None.
+    normalized_sql = _normalize_sql_for_backend(sql, backend, formats_params=params is not None)
 
     if conn is not None:
         return pd.read_sql_query(normalized_sql, conn, params=params)

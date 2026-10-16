@@ -17,7 +17,6 @@ from __future__ import annotations
 
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from schema_migrations import MigrationManager
@@ -309,66 +308,9 @@ class TestReproducibility:
 # ---------------------------------------------------------------------------
 
 
-class TestCorrelationMatrixPSD:
-    """All eigenvalues of the returned correlation matrix must be >= 0."""
-
-    def test_psd_with_sufficient_data(self):
-        from utils.nba_monte_carlo import build_correlation_matrix
-
-        rng = np.random.default_rng(0)
-        n_rows = 50
-        df = pd.DataFrame({
-            "pts": rng.normal(25, 5, n_rows),
-            "reb": rng.normal(7, 2, n_rows),
-            "ast": rng.normal(5, 2, n_rows),
-        })
-        corr = build_correlation_matrix(df, markets=["pts", "reb", "ast"], min_games=20)
-        eigenvalues = np.linalg.eigvalsh(corr)
-        assert np.all(eigenvalues >= -1e-8), (
-            f"Correlation matrix has negative eigenvalue(s): {eigenvalues[eigenvalues < 0]}"
-        )
-
-    def test_psd_identity_fallback(self):
-        from utils.nba_monte_carlo import build_correlation_matrix
-
-        # Insufficient data → identity
-        df = pd.DataFrame({"pts": [1.0], "reb": [2.0], "ast": [3.0]})
-        corr = build_correlation_matrix(df, min_games=20)
-        eigenvalues = np.linalg.eigvalsh(corr)
-        assert np.all(eigenvalues >= -1e-8)
-
-
 # ---------------------------------------------------------------------------
 # Test 9: Identity matrix returned with insufficient data
 # ---------------------------------------------------------------------------
-
-
-class TestIdentityFallback:
-    """build_correlation_matrix returns identity when data < min_games."""
-
-    def test_insufficient_rows_returns_identity(self):
-        from utils.nba_monte_carlo import build_correlation_matrix
-
-        rng = np.random.default_rng(7)
-        df = pd.DataFrame({
-            "pts": rng.normal(25, 5, 10),  # only 10 rows < min_games=20
-            "reb": rng.normal(7, 2, 10),
-            "ast": rng.normal(5, 2, 10),
-        })
-        corr = build_correlation_matrix(df, markets=["pts", "reb", "ast"], min_games=20)
-        np.testing.assert_array_equal(corr, np.eye(3))
-
-    def test_missing_column_returns_identity(self):
-        from utils.nba_monte_carlo import build_correlation_matrix
-
-        rng = np.random.default_rng(8)
-        df = pd.DataFrame({
-            "pts": rng.normal(25, 5, 50),
-            "reb": rng.normal(7, 2, 50),
-            # "ast" column missing
-        })
-        corr = build_correlation_matrix(df, markets=["pts", "reb", "ast"], min_games=20)
-        np.testing.assert_array_equal(corr, np.eye(3))
 
 
 # ---------------------------------------------------------------------------
@@ -385,10 +327,9 @@ class TestMonteCarloIntegration:
 
         from nba_value_engine import rank_nba_value
 
-        results_default = rank_nba_value(GAME_DATE, SEASON, min_edge=0.0)
         results_mc = rank_nba_value(GAME_DATE, SEASON, min_edge=0.0, use_monte_carlo=True)
 
-        # Both should return results for the same player
+        # The Monte Carlo path should still return results
         assert len(results_mc) > 0, "No results with use_monte_carlo=True"
 
         required_keys = {
@@ -422,3 +363,32 @@ class TestMonteCarloIntegration:
         assert len(results) > 0
         for row in results:
             assert row.get("mc_p_win") is None
+
+
+
+class TestDeterministicDefaultSeed:
+    def test_monte_carlo_prob_repeatable_without_rng(self):
+        from utils.nba_monte_carlo import monte_carlo_prob
+
+        a = monte_carlo_prob(25.0, 6.0, 24.5, "pts", n_sims=2_000)
+        b = monte_carlo_prob(25.0, 6.0, 24.5, "pts", n_sims=2_000)
+        assert a == b
+
+    def test_monte_carlo_prob_seed_changes_draws(self):
+        from utils.nba_monte_carlo import monte_carlo_prob
+
+        a = monte_carlo_prob(25.0, 6.0, 24.5, "pts", n_sims=2_000, seed=1)
+        b = monte_carlo_prob(25.0, 6.0, 24.5, "pts", n_sims=2_000, seed=2)
+        assert a != b
+
+    def test_explicit_rng_takes_precedence_over_seed(self):
+        import numpy as np
+
+        from utils.nba_monte_carlo import monte_carlo_prob
+
+        a = monte_carlo_prob(25.0, 6.0, 24.5, "pts", n_sims=2_000, rng=np.random.default_rng(7))
+        b = monte_carlo_prob(
+            25.0, 6.0, 24.5, "pts", n_sims=2_000, rng=np.random.default_rng(7), seed=99
+        )
+        assert a == b
+

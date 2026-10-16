@@ -46,6 +46,7 @@ except ImportError:
     nfl = None
 
 from utils.db import read_dataframe
+from utils.player_id_utils import canonicalize_team
 
 logger = logging.getLogger(__name__)
 
@@ -103,14 +104,39 @@ SUPPORTED_MATCHUPS: FrozenSet[Tuple[str, str]] = COMPUTED_MATCHUPS | NEUTRAL_MAT
 _STAT_COLUMNS = tuple(sorted({stat for _, stat in COMPUTED_MATCHUPS}))
 
 
+def _canonical_team(team: object) -> object:
+    """Canonical club code, so schedule and stats spell every club alike.
+
+    Raw nflverse schedules call the Rams ``LA`` while player_stats_enhanced
+    uses ``LAR``; uncanonicalized, every Rams row lost its opponent and the
+    Rams defense was never graded. An unrecognized code passes through as-is.
+    """
+    if team is None or (isinstance(team, float) and pd.isna(team)):
+        return None
+    return canonicalize_team(str(team)) or str(team)
+
+
 @lru_cache(maxsize=1)
+def _fetch_schedule(season: int) -> pd.DataFrame:
+    """Fetch and canonicalize one season's schedule. Raises on failure.
+
+    Only successes are cached: a failure raises out of the cache, so a
+    transient feed outage is retried on the next call instead of pinning an
+    empty schedule for the life of the process.
+    """
+    schedule = nfl.load_schedules([season]).to_pandas()
+    schedule = schedule[['week', 'home_team', 'away_team']].copy()
+    for column in ('home_team', 'away_team'):
+        schedule[column] = schedule[column].map(_canonical_team)
+    return schedule
+
+
 def _load_schedule(season: int) -> pd.DataFrame:
-    """Load NFL schedule for opponent mapping."""
+    """Load NFL schedule for opponent mapping; empty when unavailable."""
     if nfl is None:
         return pd.DataFrame()
     try:
-        schedule = nfl.load_schedules([season]).to_pandas()
-        return schedule[['week', 'home_team', 'away_team']].copy()
+        return _fetch_schedule(season)
     except Exception as e:
         logger.warning(f"Could not load schedule: {e}")
         return pd.DataFrame()
@@ -259,16 +285,23 @@ def compute_defense_vs_position_multipliers(
     if stats.empty:
         return {}
 
-    # Add opponent
+    # Add opponent. Both sides canonicalized: the schedule's ``LA`` and the
+    # stats table's ``LAR`` are the same club.
+    schedule = schedule.assign(
+        home_team=schedule['home_team'].map(_canonical_team),
+        away_team=schedule['away_team'].map(_canonical_team),
+    )
+
     def _get_opp(row):
+        team = _canonical_team(row['team'])
         game = schedule[
             (schedule['week'] == row['week']) &
-            ((schedule['home_team'] == row['team']) | (schedule['away_team'] == row['team']))
+            ((schedule['home_team'] == team) | (schedule['away_team'] == team))
         ]
         if game.empty:
             return None
         r = game.iloc[0]
-        return r['away_team'] if r['home_team'] == row['team'] else r['home_team']
+        return r['away_team'] if r['home_team'] == team else r['home_team']
 
     stats['opponent'] = stats.apply(_get_opp, axis=1)
     stats = stats.dropna(subset=['opponent'])

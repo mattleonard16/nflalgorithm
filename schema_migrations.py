@@ -1499,8 +1499,9 @@ class MigrationManager:
         new_cols = [
             r[1] for r in cursor.execute("PRAGMA table_info(materialized_value_view)").fetchall()
         ]
-        # Preserve any columns the old table had that weren't in our new
-        # CREATE — survives mid-migration column additions from other branches.
+        # Copy only the columns both tables have. A column present solely on
+        # the old table is DROPPED with it; a column only the new CREATE has
+        # takes its default. Add any new column to the CREATE above first.
         shared = [c for c in new_cols if c in old_cols]
         col_list = ", ".join(shared)
         cursor.execute(
@@ -1613,6 +1614,134 @@ class MigrationManager:
                 ),
                 ("bet_outcomes", "idx_bet_outcomes_week", "season, week"),
                 ("weekly_performance", "idx_weekly_performance_lookup", "season, week"),
+                # The rest of the SQLite list below, which the MySQL branch
+                # previously skipped. Column types are from the MySQL DDL
+                # (_mysql_compatible_ddl): key TEXT columns become VARCHAR, so
+                # only the remaining unbounded TEXT columns need prefix lengths
+                # (sized as in _MYSQL_KEY_LENGTHS). `position` is backticked
+                # for the reason given above.
+                ("feed_freshness", "idx_feed_freshness_week", "season, week"),
+                ("player_stats_enhanced", "idx_player_stats_gsis", "gsis_id, season, week"),
+                # SQLite declares season/week DESC; MySQL scans an ascending
+                # index backward just as well, and the comparator above sees
+                # bare column names, so a DESC spelling would rebuild every run.
+                (
+                    "player_stats_enhanced",
+                    "idx_player_stats_latest",
+                    "player_id, season, week",
+                ),
+                (
+                    "nfl_roster_players",
+                    "idx_roster_players_team",
+                    "season, team, `position`",
+                ),
+                (
+                    "nfl_player_context_snapshots",
+                    "idx_nfl_context_team",
+                    "season, week, team, `position`",
+                ),
+                (
+                    "nfl_player_context_snapshots",
+                    "idx_nfl_context_freshness",
+                    "season, week, captured_at",
+                ),
+                ("injury_data", "idx_injury_data_lookup", "season, week, player_id"),
+                (
+                    "line_accuracy_history",
+                    "idx_line_accuracy_history_lookup",
+                    "season, week, market",
+                ),
+                ("risk_assessments", "idx_risk_assessments_lookup", "season, week"),
+                ("agent_decisions", "idx_agent_decisions_lookup", "season, week"),
+                (
+                    "agent_performance",
+                    "idx_agent_performance_lookup",
+                    "season, week, agent_name",
+                ),
+                ("player_dim", "idx_player_dim_team", "`team`(8)"),
+                (
+                    "nba_player_game_logs",
+                    "idx_nba_game_logs_player",
+                    "player_id, `game_date`(40)",
+                ),
+                (
+                    "nba_player_game_logs",
+                    "idx_nba_game_logs_season",
+                    "season, `game_date`(40)",
+                ),
+                (
+                    "nba_projections",
+                    "idx_nba_projections_lookup",
+                    "`game_date`(40), market",
+                ),
+                (
+                    "nba_player_game_logs",
+                    "idx_nba_game_logs_team",
+                    "`team_abbreviation`(16), season",
+                ),
+                (
+                    "nba_odds",
+                    "idx_nba_odds_lookup",
+                    "`game_date`(40), market, sportsbook",
+                ),
+                (
+                    "nba_materialized_value_view",
+                    "idx_nba_value_lookup",
+                    "season, game_date, market",
+                ),
+                (
+                    "nba_bet_outcomes",
+                    "idx_nba_bet_outcomes_date",
+                    "season, `game_date`(40)",
+                ),
+                (
+                    "nba_daily_performance",
+                    "idx_nba_daily_performance_lookup",
+                    "season, game_date",
+                ),
+                ("nba_risk_assessments", "idx_nba_risk_game_date", "game_date, market"),
+                ("nba_agent_decisions", "idx_nba_agent_game_date", "game_date, market"),
+                (
+                    "nba_odds",
+                    "idx_nba_odds_snapshot",
+                    "`game_date`(40), player_id, market, as_of",
+                ),
+                ("nba_injuries", "idx_nba_injuries_date", "game_date"),
+                ("nba_injuries", "idx_nba_injuries_player", "player_id, game_date"),
+                ("nba_clv", "idx_nba_clv_date", "`game_date`(40)"),
+                ("nba_clv", "idx_nba_clv_player", "player_id, `game_date`(40)"),
+                ("nba_agent_performance", "idx_nba_agent_perf_date", "game_date"),
+                (
+                    "nba_agent_performance",
+                    "idx_nba_agent_perf_agent",
+                    "agent_name, game_date",
+                ),
+                (
+                    "nba_team_defensive_stats",
+                    "idx_nba_def_stats_lookup",
+                    "team_abbreviation, season",
+                ),
+                (
+                    "nba_line_accuracy_history",
+                    "idx_nba_line_accuracy_lookup",
+                    "season, game_date, market",
+                ),
+                (
+                    "nba_calibration_history",
+                    "idx_nba_calibration_history",
+                    "market, trained_at",
+                ),
+                (
+                    "nba_feature_importance_history",
+                    "idx_nba_importance_lookup",
+                    "game_date, market",
+                ),
+                ("nba_drift_alerts", "idx_nba_drift_lookup", "game_date, market"),
+                (
+                    "nba_backtest_runs",
+                    "idx_nba_backtest_runs_dates",
+                    "`start_date`(40), `end_date`(40)",
+                ),
             ):
                 # Existence is keyed on index name, so an index whose column set
                 # was widened later would otherwise keep its stale definition

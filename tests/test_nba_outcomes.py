@@ -5,8 +5,10 @@ Covers:
 - TestSaveNbaOutcomes: persistence to nba_bet_outcomes and nba_daily_performance,
   idempotency (no duplicates on repeated calls)
 - TestNbaMarketMapping: all 4 markets (pts, reb, ast, fg3m) grade correctly
-- TestEdgeCases: player with no actuals (push), no bets found (empty list),
-  unknown market (skipped), missing game logs for date
+- TestEdgeCases: player with no actuals (left ungraded, not a push), no bets
+  found (empty list), unknown market (skipped), missing game logs for date
+- TestRegradeIdempotency: deterministic bet_id, re-grading keeps row counts
+- TestNbaClv: side-aware CLV sign, chronological closing snapshot
 """
 
 from __future__ import annotations
@@ -65,7 +67,8 @@ def _seed_value_view(
     mu: float = 28.5,
     sigma: float = 5.7,
     p_win: float = 0.65,
-    edge_percentage: float = 12.0,
+    # The view stores edge as a fraction (p_win - implied probability).
+    edge_percentage: float = 0.12,
     expected_roi: float = 0.08,
     kelly_fraction: float = 0.05,
     confidence: float = 0.85,
@@ -337,8 +340,8 @@ class TestGradeNbaBets:
         assert outcomes[0]["sportsbook"] == SPORTSBOOK
 
     def test_confidence_tier_high_for_large_edge(self, db):
-        """edge_percentage >= 15.0 should yield HIGH confidence tier."""
-        _seed_value_view(market="pts", line=25.5, edge_percentage=18.5)
+        """A stored edge fraction >= 0.15 (15%) should yield HIGH confidence tier."""
+        _seed_value_view(market="pts", line=25.5, edge_percentage=0.185)
         _seed_game_log(pts=31)
 
         from scripts.record_nba_outcomes import grade_nba_bets
@@ -347,14 +350,25 @@ class TestGradeNbaBets:
         assert outcomes[0]["confidence_tier"] == "HIGH"
 
     def test_confidence_tier_medium_for_mid_edge(self, db):
-        """edge_percentage between 8 and 15 should yield MEDIUM tier."""
-        _seed_value_view(market="pts", line=25.5, edge_percentage=10.0)
+        """A stored edge fraction between 0.08 and 0.15 should yield MEDIUM tier."""
+        _seed_value_view(market="pts", line=25.5, edge_percentage=0.10)
         _seed_game_log(pts=31)
 
         from scripts.record_nba_outcomes import grade_nba_bets
 
         outcomes = grade_nba_bets(GAME_DATE)
         assert outcomes[0]["confidence_tier"] == "MEDIUM"
+
+    def test_confidence_tier_low_for_small_fractional_edge(self, db):
+        """A 5% edge (0.05 fraction) is LOW, not MINIMAL: the fraction is
+        scaled to percent before tiering."""
+        _seed_value_view(market="pts", line=25.5, edge_percentage=0.05)
+        _seed_game_log(pts=31)
+
+        from scripts.record_nba_outcomes import grade_nba_bets
+
+        outcomes = grade_nba_bets(GAME_DATE)
+        assert outcomes[0]["confidence_tier"] == "LOW"
 
     def test_multiple_players_multiple_outcomes(self, db):
         """Two players seeded -> two outcomes returned."""
@@ -381,7 +395,7 @@ class TestGradeNbaBets:
         assert len(outcomes) == 2
 
     def test_each_outcome_has_unique_bet_id(self, db):
-        """Each outcome must have a distinct UUID bet_id."""
+        """Distinct bets must get distinct bet_ids."""
         _seed_value_view(
             player_id=PLAYER_ID,
             player_name=PLAYER_NAME,
@@ -493,8 +507,7 @@ class TestSaveNbaOutcomes:
 
     def test_idempotency_no_duplicate_bet_outcomes(self, db):
         """Calling save_nba_outcomes twice must not create duplicate rows
-        in nba_bet_outcomes because bet_ids are unique UUIDs and the table
-        uses INSERT OR REPLACE with bet_id as PK."""
+        in nba_bet_outcomes: bet_id is the table's PK and the write upserts."""
         _seed_value_view(market="pts", line=25.5)
         _seed_game_log(pts=31)
 
@@ -685,9 +698,9 @@ class TestNbaMarketMapping:
 
 
 class TestEdgeCases:
-    def test_no_actuals_for_player_gives_push(self, db):
+    def test_no_actuals_for_player_leaves_bet_ungraded(self, db):
         """When nba_player_game_logs has no row for the player on the game date,
-        the bet is graded as a push with profit_units = 0.0."""
+        the outcome is unknown: the bet is skipped, not stored as a push."""
         _seed_value_view(market="pts", line=25.5)
         # Intentionally no game log seeded
 
@@ -695,10 +708,7 @@ class TestEdgeCases:
 
         outcomes = grade_nba_bets(GAME_DATE)
 
-        assert len(outcomes) == 1
-        assert outcomes[0]["result"] == "push"
-        assert outcomes[0]["actual_result"] is None
-        assert outcomes[0]["profit_units"] == 0.0
+        assert outcomes == []
 
     def test_no_bets_found_returns_empty_list(self, db):
         """When nba_materialized_value_view has no rows for the date,
@@ -738,22 +748,25 @@ class TestEdgeCases:
         assert len(outcomes) == 1
         assert outcomes[0]["market"] == "pts"
 
-    def test_no_game_logs_for_date_all_push(self, db):
+    def test_no_game_logs_for_date_leaves_all_ungraded(self, db):
         """When game logs exist for a different date but not the target date,
-        all bets on the target date should be graded as pushes."""
+        nothing is graded (box scores not ingested yet), and saving the empty
+        result writes no pushes."""
         _seed_value_view(market="pts", line=25.5)
         _seed_game_log(pts=31, game_date="2026-02-16")  # different date
 
-        from scripts.record_nba_outcomes import grade_nba_bets
+        from scripts.record_nba_outcomes import grade_nba_bets, save_nba_outcomes
 
         outcomes = grade_nba_bets(GAME_DATE)
 
-        assert len(outcomes) == 1
-        assert outcomes[0]["result"] == "push"
+        assert outcomes == []
+        save_nba_outcomes(outcomes)
+        rows = read_dataframe("SELECT * FROM nba_bet_outcomes WHERE game_date = ?", (GAME_DATE,))
+        assert rows.empty
 
-    def test_wrong_player_in_game_logs_gives_push(self, db):
+    def test_wrong_player_in_game_logs_leaves_bet_ungraded(self, db):
         """When game logs contain a different player_id for the same date,
-        the target player is not found and bet is a push."""
+        the target player is not found and the bet is skipped (not a push)."""
         _seed_value_view(player_id=PLAYER_ID, player_name=PLAYER_NAME, market="pts", line=25.5)
         _seed_game_log(
             player_id=9999999,
@@ -766,9 +779,22 @@ class TestEdgeCases:
 
         outcomes = grade_nba_bets(GAME_DATE)
 
-        assert len(outcomes) == 1
-        assert outcomes[0]["result"] == "push"
-        assert outcomes[0]["actual_result"] is None
+        assert outcomes == []
+
+    def test_graded_and_missing_players_mixed(self, db):
+        """Only the player with a box score is graded; the other is skipped."""
+        _seed_value_view(player_id=PLAYER_ID, market="pts", line=25.5, event_id="evt_a")
+        _seed_value_view(
+            player_id=1628384, player_name="Jaylen Brown", market="pts", line=22.5, event_id="evt_b"
+        )
+        _seed_game_log(player_id=PLAYER_ID, pts=31)
+
+        from scripts.record_nba_outcomes import grade_nba_bets
+
+        outcomes = grade_nba_bets(GAME_DATE)
+
+        assert [o["player_id"] for o in outcomes] == [PLAYER_ID]
+        assert outcomes[0]["result"] == "win"
 
     def test_grade_different_date_returns_empty(self, db):
         """Grading a date with no predictions must return an empty list."""
@@ -803,3 +829,153 @@ class TestEdgeCases:
         outcomes = grade_nba_bets(GAME_DATE)
 
         assert outcomes[0]["game_date"] == GAME_DATE
+
+
+# ---------------------------------------------------------------------------
+# 5. TestRegradeIdempotency
+# ---------------------------------------------------------------------------
+
+
+def _seed_odds_snapshot(
+    market: str,
+    line: float,
+    as_of: str,
+    player_id: int = PLAYER_ID,
+    sportsbook: str = SPORTSBOOK,
+) -> None:
+    executemany(
+        """
+        INSERT INTO nba_odds (
+            event_id, season, game_date, player_id, player_name, team, market,
+            sportsbook, line, over_price, under_price, as_of
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                EVENT_ID, SEASON, GAME_DATE, player_id, PLAYER_NAME, TEAM, market,
+                sportsbook, line, -110, -110, as_of,
+            )
+        ],
+    )
+
+
+class TestRegradeIdempotency:
+    def test_bet_id_is_deterministic_across_runs(self, db):
+        _seed_value_view(market="pts", line=25.5)
+        _seed_game_log(pts=31)
+
+        from scripts.record_nba_outcomes import grade_nba_bets
+
+        first = grade_nba_bets(GAME_DATE)
+        second = grade_nba_bets(GAME_DATE)
+        assert [o["bet_id"] for o in first] == [o["bet_id"] for o in second]
+
+    def test_make_nba_bet_id_varies_with_natural_key(self):
+        from scripts.record_nba_outcomes import make_nba_bet_id
+
+        base = make_nba_bet_id(SEASON, GAME_DATE, PLAYER_ID, "pts", SPORTSBOOK, "over", 25.5)
+        assert base == make_nba_bet_id(SEASON, GAME_DATE, PLAYER_ID, "pts", SPORTSBOOK, "over", 25.50)
+        assert base != make_nba_bet_id(SEASON, GAME_DATE, PLAYER_ID, "pts", SPORTSBOOK, "under", 25.5)
+        assert base != make_nba_bet_id(SEASON, GAME_DATE, PLAYER_ID, "pts", SPORTSBOOK, "over", 26.5)
+        assert base != make_nba_bet_id(SEASON, "2026-02-18", PLAYER_ID, "pts", SPORTSBOOK, "over", 25.5)
+
+    def test_regrade_keeps_row_counts_stable(self, db):
+        """Grading and saving the same day twice (a re-grade) must not append a
+        second copy of the day to nba_bet_outcomes or nba_clv."""
+        _seed_value_view(market="pts", line=25.5, event_id="evt_a")
+        _seed_value_view(market="reb", line=6.5, event_id="evt_b")
+        _seed_game_log(pts=31, reb=8)
+        _seed_odds_snapshot("pts", 25.5, "2026-02-17T15:00:00+00:00")
+        _seed_odds_snapshot("pts", 26.5, "2026-02-17T23:00:00+00:00")
+
+        from scripts.record_nba_outcomes import grade_nba_bets, save_nba_outcomes
+
+        save_nba_outcomes(grade_nba_bets(GAME_DATE))
+        counts_first = (
+            len(read_dataframe("SELECT bet_id FROM nba_bet_outcomes")),
+            len(read_dataframe("SELECT bet_id FROM nba_clv")),
+        )
+        save_nba_outcomes(grade_nba_bets(GAME_DATE))
+        counts_second = (
+            len(read_dataframe("SELECT bet_id FROM nba_bet_outcomes")),
+            len(read_dataframe("SELECT bet_id FROM nba_clv")),
+        )
+
+        assert counts_first == (2, 1)
+        assert counts_second == counts_first
+
+
+# ---------------------------------------------------------------------------
+# 6. TestNbaClv
+# ---------------------------------------------------------------------------
+
+
+def _clv_for_side(side: str, entry: float, close: float) -> dict:
+    _seed_value_view(market="pts", line=entry, side=side)
+    _seed_game_log(pts=31)
+    _seed_odds_snapshot("pts", entry, "2026-02-17T15:00:00+00:00")
+    _seed_odds_snapshot("pts", close, "2026-02-17T23:00:00+00:00")
+
+    from scripts.record_nba_outcomes import grade_nba_bets, save_nba_outcomes
+
+    save_nba_outcomes(grade_nba_bets(GAME_DATE))
+    rows = read_dataframe("SELECT * FROM nba_clv WHERE game_date = ?", (GAME_DATE,))
+    assert len(rows) == 1
+    return rows.iloc[0].to_dict()
+
+
+class TestNbaClv:
+    def test_over_beats_close_when_line_rises(self, db):
+        row = _clv_for_side("over", entry=25.5, close=27.5)
+        assert row["clv_points"] == pytest.approx(2.0)
+        assert row["clv_pct"] == pytest.approx(2.0 / 25.5 * 100, abs=1e-3)
+
+    def test_over_loses_close_when_line_falls(self, db):
+        row = _clv_for_side("over", entry=25.5, close=24.5)
+        assert row["clv_points"] == pytest.approx(-1.0)
+
+    def test_under_beats_close_when_line_falls(self, db):
+        row = _clv_for_side("under", entry=25.5, close=23.5)
+        assert row["clv_points"] == pytest.approx(2.0)
+
+    def test_under_loses_close_when_line_rises(self, db):
+        row = _clv_for_side("under", entry=25.5, close=26.5)
+        assert row["clv_points"] == pytest.approx(-1.0)
+
+    def test_close_is_latest_snapshot_chronologically(self, db):
+        """Mixed as_of formats sort wrong lexically: "2026-02-17 23:00:00"
+        < "2026-02-17T20:00:00+00:00" as text, but 23:00 is the later quote."""
+        _seed_value_view(market="pts", line=25.5, side="over")
+        _seed_game_log(pts=31)
+        _seed_odds_snapshot("pts", 25.5, "2026-02-17T15:00:00+00:00")
+        _seed_odds_snapshot("pts", 26.0, "2026-02-17T20:00:00+00:00")
+        _seed_odds_snapshot("pts", 28.0, "2026-02-17 23:00:00")
+
+        from scripts.record_nba_outcomes import grade_nba_bets, save_nba_outcomes
+
+        save_nba_outcomes(grade_nba_bets(GAME_DATE))
+        row = read_dataframe("SELECT * FROM nba_clv WHERE game_date = ?", (GAME_DATE,)).iloc[0]
+        assert row["close_line"] == pytest.approx(28.0)
+        assert row["clv_points"] == pytest.approx(2.5)
+
+
+
+class TestUpsertDialect:
+    def test_sqlite_keeps_insert_or_replace(self, monkeypatch):
+        import scripts.record_nba_outcomes as mod
+
+        monkeypatch.setattr(mod, "get_backend", lambda: "sqlite")
+        sql = mod._upsert_sql("nba_clv", ("bet_id", "clv_points"), key_columns=("bet_id",))
+        assert sql.startswith("INSERT OR REPLACE INTO nba_clv")
+
+    def test_mysql_uses_on_duplicate_key_update(self, monkeypatch):
+        import scripts.record_nba_outcomes as mod
+
+        monkeypatch.setattr(mod, "get_backend", lambda: "mysql")
+        sql = mod._upsert_sql(
+            "nba_daily_performance",
+            ("season", "game_date", "wins"),
+            key_columns=("season", "game_date"),
+        )
+        assert "OR REPLACE" not in sql
+        assert sql.endswith("ON DUPLICATE KEY UPDATE wins=VALUES(wins)")

@@ -37,14 +37,22 @@ def test_wait_for_readiness_retries_until_success(monkeypatch) -> None:
             return None
 
     attempts = iter([urllib.error.URLError("starting"), Response()])
+    calls: list[str] = []
+    sleeps: list[float] = []
 
-    def open_url(*_args, **_kwargs):
+    def open_url(url, *_args, **_kwargs):
+        calls.append(url)
         result = next(attempts)
         if isinstance(result, Exception):
             raise result
         return result
 
     monkeypatch.setattr(local_services.urllib.request, "urlopen", open_url)
-    monkeypatch.setattr(local_services.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(local_services.time, "sleep", sleeps.append)
 
     wait_for_readiness("http://localhost:8000/readyz", timeout_seconds=1)
+
+    # One failed probe, one backoff sleep, then the successful probe.
+    assert calls == ["http://localhost:8000/readyz"] * 2
+    assert len(sleeps) == 1
+    assert next(attempts, None) is None

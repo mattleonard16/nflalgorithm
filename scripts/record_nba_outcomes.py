@@ -8,19 +8,19 @@ Usage:
 """
 
 import argparse
+import hashlib
 import logging
 import sys
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Sequence
 
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sports.markets import get_sport
-from utils.db import execute, executemany, read_dataframe
+from utils.db import execute, executemany, get_backend, read_dataframe
 from utils.grading import calculate_profit_units, get_confidence_tier, grade_bet
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,45 @@ NBA_MARKET_TO_STAT = {market: spec.stat_column for market, spec in get_sport("nb
 
 # All NBA value bets target the over side (over_price is used for Kelly/value calc)
 NBA_DEFAULT_SIDE = "over"
+
+
+def make_nba_bet_id(
+    season: int,
+    game_date: str,
+    player_id: object,
+    market: str,
+    sportsbook: str,
+    side: str,
+    line: float,
+) -> str:
+    """Derive a stable bet_id from the bet's natural key.
+
+    NBA counterpart of ``make_bet_id`` in ``scripts/record_outcomes.py``. A
+    random UUID per grading run defeats the ``bet_id`` upsert, so every re-grade
+    appended a full duplicate copy of the day to ``nba_bet_outcomes`` (and from
+    there to ``nba_clv`` and everything that reads them). Hashing the natural
+    key makes re-grading idempotent.
+    """
+    key = f"{season}|{game_date}|{player_id}|{market}|{sportsbook}|{side}|{float(line):.4f}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
+
+
+def _upsert_sql(table: str, columns: Sequence[str], key_columns: Sequence[str]) -> str:
+    """Build an insert-or-overwrite statement for the active backend.
+
+    ``INSERT OR REPLACE`` is SQLite-only syntax, so SQLite keeps it unchanged
+    and MySQL gets the same overwrite-on-primary-key semantics through
+    ``ON DUPLICATE KEY UPDATE``.
+    """
+    column_list = ", ".join(columns)
+    placeholders = ", ".join("?" for _ in columns)
+    if get_backend() == "mysql":
+        updates = ", ".join(f"{c}=VALUES({c})" for c in columns if c not in key_columns)
+        return (
+            f"INSERT INTO {table} ({column_list}) VALUES ({placeholders}) "
+            f"ON DUPLICATE KEY UPDATE {updates}"
+        )
+    return f"INSERT OR REPLACE INTO {table} ({column_list}) VALUES ({placeholders})"
 
 
 def grade_nba_bets(game_date: str) -> List[Dict]:
@@ -73,13 +112,20 @@ def grade_nba_bets(game_date: str) -> List[Dict]:
     )
 
     if actuals.empty:
+        # Missing box scores mean "not graded yet", not a push: a push is a
+        # settled zero-profit result and would be persisted as one. Leave the
+        # day ungraded so a re-run after ingest grades it properly.
         logger.warning(
-            "No actual stats found for %s - all bets will be marked as pushes", game_date
+            "No actual stats found for %s - leaving all %d bets ungraded",
+            game_date,
+            len(predictions),
         )
-    else:
-        logger.info("Found actual stats for %d players", len(actuals))
+        return []
+
+    logger.info("Found actual stats for %d players", len(actuals))
 
     outcomes: List[Dict] = []
+    ungraded = 0
 
     for _, pred in predictions.iterrows():
         player_id = pred["player_id"]
@@ -103,21 +149,22 @@ def grade_nba_bets(game_date: str) -> List[Dict]:
 
         player_actuals = actuals[actuals["player_id"] == player_id]
 
+        # No box-score row (or a NULL stat) is an unknown outcome, not a push.
+        # Skip it so it stays ungraded instead of being stored as settled.
         if player_actuals.empty:
-            actual_result = None
-            result = "push"
-        else:
-            player_row = player_actuals.iloc[0]
-            actual_result = player_row.get(stat_column)
-
-            if pd.isna(actual_result):
-                result = "push"
-            else:
-                actual_result = float(actual_result)
-                result = grade_bet(actual_result, line, side)
+            ungraded += 1
+            continue
+        actual_result = player_actuals.iloc[0].get(stat_column)
+        if actual_result is None or pd.isna(actual_result):
+            ungraded += 1
+            continue
+        actual_result = float(actual_result)
+        result = grade_bet(actual_result, line, side)
 
         profit_units = calculate_profit_units(result, price)
-        confidence_tier = get_confidence_tier(edge_pct)
+        # `nba_materialized_value_view.edge_percentage` holds a fraction (p_win
+        # minus implied probability) while `get_confidence_tier` takes a percent.
+        confidence_tier = get_confidence_tier(edge_pct * 100.0)
 
         player_name = pred["player_name"]
         if player_name is None or (isinstance(player_name, float) and pd.isna(player_name)):
@@ -127,7 +174,17 @@ def grade_nba_bets(game_date: str) -> List[Dict]:
                 player_name = "Unknown"
 
         outcome = {
-            "bet_id": str(uuid.uuid4()),
+            # Hash the stored (int) player_id so a float-typed column (NULLs
+            # elsewhere in the frame) cannot change the key between runs.
+            "bet_id": make_nba_bet_id(
+                int(season),
+                game_date,
+                int(player_id) if player_id is not None else None,
+                market,
+                pred["sportsbook"],
+                side,
+                line,
+            ),
             "season": int(season),
             "game_date": game_date,
             "player_id": int(player_id) if player_id is not None else None,
@@ -149,6 +206,8 @@ def grade_nba_bets(game_date: str) -> List[Dict]:
         outcomes.append(outcome)
 
     logger.info("Graded %d bets", len(outcomes))
+    if ungraded:
+        logger.warning("Left %d bets ungraded (no actual stat for the player)", ungraded)
 
     if outcomes:
         wins = sum(1 for o in outcomes if o["result"] == "win")
@@ -174,15 +233,15 @@ def save_nba_outcomes(outcomes: List[Dict]) -> None:
 
     logger.info("Saving %d outcomes to database...", len(outcomes))
 
-    insert_sql = """
-        INSERT OR REPLACE INTO nba_bet_outcomes (
-            bet_id, season, game_date, player_id, player_name, market,
-            sportsbook, side, line, placed_at_line, price, actual_result, result,
-            profit_units, confidence_tier, edge_at_placement, recorded_at
-        ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-        )
-    """
+    insert_sql = _upsert_sql(
+        "nba_bet_outcomes",
+        (
+            "bet_id", "season", "game_date", "player_id", "player_name", "market",
+            "sportsbook", "side", "line", "placed_at_line", "price", "actual_result", "result",
+            "profit_units", "confidence_tier", "edge_at_placement", "recorded_at",
+        ),
+        key_columns=("bet_id",),
+    )
 
     outcome_tuples = [
         (
@@ -239,15 +298,15 @@ def save_nba_outcomes(outcomes: List[Dict]) -> None:
         else None
     )
 
-    perf_sql = """
-        INSERT OR REPLACE INTO nba_daily_performance (
-            season, game_date, total_bets, wins, losses, pushes,
-            profit_units, roi_pct, avg_edge,
-            best_bet, worst_bet, updated_at
-        ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-        )
-    """
+    perf_sql = _upsert_sql(
+        "nba_daily_performance",
+        (
+            "season", "game_date", "total_bets", "wins", "losses", "pushes",
+            "profit_units", "roi_pct", "avg_edge",
+            "best_bet", "worst_bet", "updated_at",
+        ),
+        key_columns=("season", "game_date"),
+    )
 
     execute(
         perf_sql,
@@ -294,7 +353,7 @@ def compute_and_save_clv(game_date: str) -> int:
 
     bet_outcomes = read_dataframe(
         """
-        SELECT bet_id, player_id, market, sportsbook, game_date, placed_at_line
+        SELECT bet_id, player_id, market, sportsbook, game_date, side, placed_at_line
         FROM nba_bet_outcomes
         WHERE game_date = ?
         """,
@@ -305,52 +364,39 @@ def compute_and_save_clv(game_date: str) -> int:
         logger.info("No bet outcomes found for CLV computation on %s", game_date)
         return 0
 
-    # Get open lines (earliest snapshot per player/market/sportsbook)
-    open_lines = read_dataframe(
+    snapshots = read_dataframe(
         """
-        SELECT o.player_id, o.market, o.sportsbook, o.line AS open_line
-        FROM nba_odds o
-        INNER JOIN (
-            SELECT player_id, market, sportsbook, MIN(as_of) AS min_as_of
-            FROM nba_odds
-            WHERE game_date = ? AND player_id IS NOT NULL
-            GROUP BY player_id, market, sportsbook
-        ) earliest
-            ON o.player_id = earliest.player_id
-            AND o.market = earliest.market
-            AND o.sportsbook = earliest.sportsbook
-            AND o.as_of = earliest.min_as_of
-        WHERE o.game_date = ?
+        SELECT player_id, market, sportsbook, line, as_of
+        FROM nba_odds
+        WHERE game_date = ? AND player_id IS NOT NULL
         """,
-        params=(game_date, game_date),
+        params=(game_date,),
     )
 
-    # Get close lines (latest snapshot per player/market/sportsbook)
-    close_lines = read_dataframe(
-        """
-        SELECT o.player_id, o.market, o.sportsbook, o.line AS close_line
-        FROM nba_odds o
-        INNER JOIN (
-            SELECT player_id, market, sportsbook, MAX(as_of) AS max_as_of
-            FROM nba_odds
-            WHERE game_date = ? AND player_id IS NOT NULL
-            GROUP BY player_id, market, sportsbook
-        ) latest
-            ON o.player_id = latest.player_id
-            AND o.market = latest.market
-            AND o.sportsbook = latest.sportsbook
-            AND o.as_of = latest.max_as_of
-        WHERE o.game_date = ?
-        """,
-        params=(game_date, game_date),
+    if snapshots.empty:
+        logger.info("No odds snapshots found for CLV on %s", game_date)
+        return 0
+
+    # Open = earliest snapshot, close = latest snapshot per player/market/book.
+    # `as_of` is TEXT, and SQL MIN/MAX on it orders lexically, which breaks as
+    # soon as two writers format the timestamp differently (naive vs "+00:00",
+    # "T" vs " "). Parse it so the ordering is chronological.
+    merge_keys = ["player_id", "market", "sportsbook"]
+    snapshots["_as_of_ts"] = pd.to_datetime(
+        snapshots["as_of"], errors="coerce", utc=True, format="mixed"
     )
+    snapshots = snapshots.dropna(subset=["_as_of_ts"]).sort_values(
+        merge_keys + ["_as_of_ts"], kind="mergesort"
+    )
+    grouped = snapshots.groupby(merge_keys, sort=False)
+    open_lines = grouped.head(1)[merge_keys + ["line"]].rename(columns={"line": "open_line"})
+    close_lines = grouped.tail(1)[merge_keys + ["line"]].rename(columns={"line": "close_line"})
 
     if open_lines.empty or close_lines.empty:
         logger.info("No odds snapshots found for CLV on %s", game_date)
         return 0
 
     # Merge open and close lines
-    merge_keys = ["player_id", "market", "sportsbook"]
     lines_df = pd.merge(open_lines, close_lines, on=merge_keys, how="inner")
 
     # Join with bet outcomes
@@ -373,7 +419,13 @@ def compute_and_save_clv(game_date: str) -> int:
             float(placed) if placed is not None and not pd.isna(placed) else float(row["open_line"])
         )
         close_line = float(row["close_line"])
-        clv_points = open_line - close_line
+        # Positive CLV = the bet beat the close. An over bettor wins that when
+        # the market moves the line up after entry (they hold the lower line);
+        # an under bettor wins it when the line moves down.
+        if (row.get("side") or NBA_DEFAULT_SIDE) == "under":
+            clv_points = open_line - close_line
+        else:
+            clv_points = close_line - open_line
         clv_pct = (clv_points / open_line * 100) if open_line != 0 else 0.0
 
         records.append(
@@ -390,12 +442,14 @@ def compute_and_save_clv(game_date: str) -> int:
             )
         )
 
-    insert_sql = """
-        INSERT OR REPLACE INTO nba_clv (
-            bet_id, player_id, market, sportsbook, game_date,
-            open_line, close_line, clv_points, clv_pct
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """
+    insert_sql = _upsert_sql(
+        "nba_clv",
+        (
+            "bet_id", "player_id", "market", "sportsbook", "game_date",
+            "open_line", "close_line", "clv_points", "clv_pct",
+        ),
+        key_columns=("bet_id",),
+    )
     executemany(insert_sql, records)
     logger.info("Inserted %d CLV records for %s", len(records), game_date)
     return len(records)
@@ -486,14 +540,16 @@ def compute_nba_line_accuracy(game_date: str) -> int:
             )
         )
 
-    insert_sql = """
-        INSERT OR REPLACE INTO nba_line_accuracy_history (
-            season, game_date, player_id, market, sportsbook,
-            line, actual, mu, sigma,
-            model_abs_error, line_abs_error, model_beats_line,
-            is_over_hit, computed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """
+    insert_sql = _upsert_sql(
+        "nba_line_accuracy_history",
+        (
+            "season", "game_date", "player_id", "market", "sportsbook",
+            "line", "actual", "mu", "sigma",
+            "model_abs_error", "line_abs_error", "model_beats_line",
+            "is_over_hit", "computed_at",
+        ),
+        key_columns=("season", "game_date", "player_id", "market", "sportsbook"),
+    )
     executemany(insert_sql, records)
     logger.info("Wrote %d line accuracy records for %s", len(records), game_date)
     return len(records)

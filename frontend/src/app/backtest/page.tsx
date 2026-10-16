@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { API_BASE_URL } from "@/lib/api";
 
 type Sport = "nfl" | "nba";
 
@@ -33,12 +34,10 @@ interface BacktestResponse {
 
 type SortKey = keyof Pick<RecentPick, "game_date" | "market" | "line" | "actual" | "model_abs_error" | "line_abs_error">;
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
 async function fetchBacktest(sport: Sport, season?: number): Promise<BacktestResponse> {
   const params = new URLSearchParams({ sport });
   if (season != null) params.set("season", String(season));
-  const res = await fetch(`${API_BASE}/api/backtest/summary?${params}`);
+  const res = await fetch(`${API_BASE_URL}/api/backtest/summary?${params}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

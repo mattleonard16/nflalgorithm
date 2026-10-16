@@ -15,6 +15,7 @@ import pandas as pd
 
 from config import config
 from utils.db import read_dataframe
+from utils.grading import align_actuals_to_bets
 from utils.nfl_markets import (
     DATABASE_STAT_COLUMNS,
     error_summary,
@@ -53,6 +54,24 @@ MIN_POSITION_SAMPLE = 30
 YARDAGE_MARKETS = frozenset({"rushing_yards", "receiving_yards", "passing_yards"})
 
 UNKNOWN_POSITION = "UNKNOWN"
+
+# A projected player with no `player_stats_enhanced` row for the week did not
+# record a stat line: an inactive backup, a late scratch. Such projections are
+# excluded from MAE (there is nothing to score them against) but counted as
+# `did_not_play`, provided an identity source (the week's context snapshot or
+# the season roster) vouches for the projected id. A projection that neither a
+# stat row nor an identity source can tie to a player is `unresolved`: an id
+# bridge or ingest failure, and an MAE over the survivors would flatter the
+# model by exclusion. The evaluation blocks when the share of projected
+# player-weeks that resolve (scored or did-not-play) falls below this ratio.
+#
+# The ratio deliberately counts did-not-play as resolved. The roster-backed
+# projector projects every skill player on the depth chart (2026 W1: 872
+# players) while only ~350-370 record a stat line per week (2026 W1-5), so a
+# "played / projected" ratio would sit near 0.4 and block every real week.
+# Missing games are caught separately: a projected team with no stat row at all
+# that week blocks as `team_without_actuals`.
+MIN_OUTCOME_COVERAGE = 0.8
 
 
 def _timestamps(values: pd.Series) -> pd.Series:
@@ -112,8 +131,22 @@ def evaluate_projections(
     runs: pd.DataFrame,
     *,
     candidate_sha: str,
+    roster: pd.DataFrame | None = None,
+    snapshots: pd.DataFrame | None = None,
+    min_outcome_coverage: float = MIN_OUTCOME_COVERAGE,
 ) -> dict[str, Any]:
-    """Score production projection rows without training a surrogate model."""
+    """Score production projection rows without training a surrogate model.
+
+    Projections carry the roster-minted id (``CIN_ja_marr_chase``) while
+    ``player_stats_enhanced`` mints its own from nflverse's abbreviated name
+    (``CIN_j_chase``), so ``actuals`` are re-keyed through ``gsis_id`` onto the
+    projection ids before the join (``utils.grading.align_actuals_to_bets``,
+    the bridge grading uses). ``snapshots`` (``nfl_player_context_snapshots``
+    rows for the scope) supply the id each player was projected under that
+    week and win over the season-current ``roster``. Both are optional; with
+    neither, ids must already agree. See MIN_OUTCOME_COVERAGE for how
+    projections without a stat row are treated.
+    """
     candidate_sha = candidate_sha.lower()
     scope = _evaluation_scope(projections, actuals, games)
     blockers: list[str] = []
@@ -181,11 +214,13 @@ def evaluate_projections(
         eligible = pd.DataFrame()
         failures: Counter[str] = Counter()
         outcome_failures: Counter[str] = Counter()
+        outcome_coverage: dict[str, Any] = {}
     elif not scope["season_weeks"]:
         blockers.append("evaluation scope is empty")
         eligible = pd.DataFrame()
         failures = Counter()
         outcome_failures = Counter()
+        outcome_coverage = {}
     else:
         frame = projections.copy()
         frame["generated_at"] = _timestamps(frame["generated_at"])
@@ -193,6 +228,13 @@ def evaluate_projections(
         if not kickoffs.empty:
             kickoffs["kickoff_utc"] = _timestamps(kickoffs["kickoff_utc"])
         frame = frame.merge(kickoffs, on=["season", "week", "team"], how="left")
+        identity_columns = ["gsis_id", "player_id"]
+        roster_frame = roster if roster is not None else pd.DataFrame(columns=identity_columns)
+        snapshot_frame = (
+            snapshots if snapshots is not None else pd.DataFrame(columns=identity_columns)
+        )
+        if "gsis_id" in actuals.columns:
+            actuals = align_actuals_to_bets(actuals, roster_frame, snapshot_frame)
         frame = frame.merge(melt_actuals(actuals), on=list(PROJECTION_KEYS), how="left")
         # weekly_projections carries no position, so attach it from the same
         # actuals rows rather than migrating the projections table.
@@ -205,9 +247,67 @@ def evaluate_projections(
         failures = Counter(frame["freshness_failure"].dropna().astype(str))
         if failures:
             blockers.append("projection freshness violations are present")
-        missing_actuals = int(frame["actual"].isna().sum())
-        outcome_failures = Counter({"missing_actual": missing_actuals} if missing_actuals else {})
-        if outcome_failures:
+        player_week = ["season", "week", "player_id"]
+        played = (
+            actuals[player_week].drop_duplicates()
+            if not actuals.empty and set(player_week).issubset(actuals.columns)
+            else pd.DataFrame(columns=player_week)
+        )
+        frame = frame.merge(played.assign(_has_stats=True), on=player_week, how="left")
+        frame["_has_stats"] = frame["_has_stats"].fillna(False).astype(bool)
+        known_ids: set[str] = set()
+        for source in (roster_frame, snapshot_frame):
+            if not source.empty and "player_id" in source.columns:
+                known_ids.update(source["player_id"].dropna().astype(str))
+        identified = frame["player_id"].astype(str).isin(known_ids)
+        frame["outcome_status"] = "scored"
+        frame.loc[~frame["_has_stats"] & identified, "outcome_status"] = "did_not_play"
+        frame.loc[~frame["_has_stats"] & ~identified, "outcome_status"] = "unresolved"
+        # A stat row without this market's value is a data gap, not a DNP.
+        frame.loc[frame["_has_stats"] & frame["actual"].isna(), "outcome_status"] = "missing_actual"
+
+        players = frame.drop_duplicates(player_week)
+        projected_players = int(len(players))
+        unresolved_players = int((players["outcome_status"] == "unresolved").sum())
+        resolved_ratio = (
+            (projected_players - unresolved_players) / projected_players
+            if projected_players
+            else 0.0
+        )
+        teams_without_actuals: list[str] = []
+        if "team" in actuals.columns and "team" in frame.columns:
+            stat_teams = set(
+                actuals[["season", "week", "team"]].dropna().itertuples(index=False, name=None)
+            )
+            projected_teams = frame[["season", "week", "team"]].dropna().drop_duplicates()
+            teams_without_actuals = sorted(
+                f"{int(season)}-{int(week)}-{team}"
+                for season, week, team in projected_teams.itertuples(index=False, name=None)
+                if str(team).strip() and (season, week, team) not in stat_teams
+            )
+        outcome_coverage = {
+            "projected_players": projected_players,
+            "scored_players": int((players["outcome_status"] == "scored").sum()),
+            "did_not_play_players": int((players["outcome_status"] == "did_not_play").sum()),
+            "unresolved_players": unresolved_players,
+            "resolved_ratio": resolved_ratio,
+            "min_resolved_ratio": float(min_outcome_coverage),
+            "teams_without_actuals": teams_without_actuals,
+        }
+        outcome_failures = Counter(
+            {
+                status: int(count)
+                for status, count in frame["outcome_status"].value_counts().items()
+                if status != "scored"
+            }
+        )
+        if teams_without_actuals:
+            outcome_failures["team_without_actuals"] = len(teams_without_actuals)
+        if (
+            (projected_players and resolved_ratio < min_outcome_coverage)
+            or outcome_failures.get("missing_actual")
+            or teams_without_actuals
+        ):
             blockers.append("projection outcome coverage is incomplete")
         eligible = frame[frame["freshness_failure"].isna() & frame["actual"].notna()].copy()
         if not eligible.empty:
@@ -266,6 +366,7 @@ def evaluate_projections(
         "freshness_failures": dict(sorted(failures.items())),
         "provenance_failures": dict(sorted(provenance_failures.items())),
         "outcome_failures": dict(sorted(outcome_failures.items())),
+        "outcome_coverage": outcome_coverage,
         "metrics": {
             **overall,
             "by_market": by_market,
@@ -536,8 +637,18 @@ def _load_inputs(season: int, weeks: Iterable[int]) -> tuple[pd.DataFrame, ...]:
     )
     actual_columns = ", ".join(DATABASE_STAT_COLUMNS)
     actuals = read_dataframe(
-        f"SELECT season, week, player_id, position, {actual_columns} "
+        f"SELECT season, week, player_id, gsis_id, team, position, {actual_columns} "
         f"FROM player_stats_enhanced WHERE {where}",
+        params=params,
+    )
+    # Identity bridge from the stats' abbreviated ids onto the projections'
+    # roster-minted ids (see evaluate_projections).
+    roster = read_dataframe(
+        "SELECT season, gsis_id, player_id FROM nfl_roster_players WHERE season = ?",
+        params=(season,),
+    )
+    snapshots = read_dataframe(
+        f"SELECT season, week, gsis_id, player_id FROM nfl_player_context_snapshots WHERE {where}",
         params=params,
     )
     games = read_dataframe(
@@ -549,7 +660,23 @@ def _load_inputs(season: int, weeks: Iterable[int]) -> tuple[pd.DataFrame, ...]:
         f"FROM pipeline_runs WHERE {where} AND status = 'completed'",
         params=params,
     )
-    return projections, actuals, games, runs
+    return projections, actuals, games, runs, roster, snapshots
+
+
+def _evaluate(
+    season: int, weeks: Iterable[int], *, candidate_sha: str, min_outcome_coverage: float
+) -> dict[str, Any]:
+    projections, actuals, games, runs, roster, snapshots = _load_inputs(season, weeks)
+    return evaluate_projections(
+        projections,
+        actuals,
+        games,
+        runs,
+        candidate_sha=candidate_sha,
+        roster=roster,
+        snapshots=snapshots,
+        min_outcome_coverage=min_outcome_coverage,
+    )
 
 
 def _write(path: Path, payload: Mapping[str, Any]) -> None:
@@ -564,6 +691,13 @@ def main() -> None:
     evaluate.add_argument("--season", type=int, required=True)
     evaluate.add_argument("--weeks", type=int, nargs="+", required=True)
     evaluate.add_argument("--output", type=Path, required=True)
+    coverage_help = (
+        "minimum share of projected player-weeks that must resolve to a stat row or a "
+        "known did-not-play player (see MIN_OUTCOME_COVERAGE)"
+    )
+    evaluate.add_argument(
+        "--min-outcome-coverage", type=float, default=MIN_OUTCOME_COVERAGE, help=coverage_help
+    )
     compare = subparsers.add_parser("compare")
     compare.add_argument("baseline", type=Path)
     compare.add_argument("candidate", type=Path)
@@ -574,6 +708,9 @@ def main() -> None:
     mae_gate.add_argument("--season", type=int, required=True)
     mae_gate.add_argument("--week", type=int, required=True)
     mae_gate.add_argument("--output", type=Path, default=None)
+    mae_gate.add_argument(
+        "--min-outcome-coverage", type=float, default=MIN_OUTCOME_COVERAGE, help=coverage_help
+    )
     mae_gate.add_argument(
         "--baseline",
         type=Path,
@@ -593,14 +730,18 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "evaluate":
-        report = evaluate_projections(
-            *_load_inputs(args.season, args.weeks),
+        report = _evaluate(
+            args.season,
+            args.weeks,
             candidate_sha=_git_sha(),
+            min_outcome_coverage=args.min_outcome_coverage,
         )
     elif args.command == "mae-gate":
-        evaluation = evaluate_projections(
-            *_load_inputs(args.season, [args.week]),
+        evaluation = _evaluate(
+            args.season,
+            [args.week],
             candidate_sha=_git_sha(),
+            min_outcome_coverage=args.min_outcome_coverage,
         )
         thresholds = None
         threshold_source: dict[str, Any] = {"kind": "absolute"}

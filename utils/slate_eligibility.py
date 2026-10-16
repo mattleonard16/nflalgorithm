@@ -55,7 +55,7 @@ def likely_to_play(row: Mapping[str, Any], market: str) -> bool:
     position = _text(row.get("position"))
 
     if market == "passing_yards":
-        return starter or depth == 1
+        return _likely_passer(row, starter, depth)
 
     if market == "rushing_yards":
         return _likely_rusher(row, position, starter, depth)
@@ -74,9 +74,24 @@ def likely_to_play(row: Mapping[str, Any], market: str) -> bool:
     return False
 
 
+# A starter's expected attempts from recent games. Depth charts lag reality:
+# replaying 2025, 58 of 533 starting-QB games (11%) had a pregame chart rank
+# other than 1 -- injury fill-ins, midseason benchings, stale charts -- and a
+# rank-only rule dropped every one of them from the board. A backup averages a
+# handful of garbage-time attempts, so 20 separates the two cleanly.
+QB_STARTER_MIN_EXPECTED_ATTEMPTS = 20.0
+
+
+def _likely_passer(row: Mapping[str, Any], starter: bool, depth: int | None) -> bool:
+    if starter or depth == 1:
+        return True
+    attempts = _number(row.get("expected_passing_attempts")) or 0.0
+    return attempts >= QB_STARTER_MIN_EXPECTED_ATTEMPTS
+
+
 def _likely_rusher(row: Mapping[str, Any], position: str, starter: bool, depth: int | None) -> bool:
     if position == "QB":
-        return starter or depth == 1
+        return _likely_passer(row, starter, depth)
     if depth is not None and depth <= 2:
         return True
     rush = _number(row.get("expected_rushing_attempts")) or 0.0

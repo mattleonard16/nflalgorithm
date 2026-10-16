@@ -10,15 +10,17 @@ import type {
   NbaRiskSummary,
   NbaExplainResponse,
 } from "@/lib/nba-types"
-
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+import { API_BASE_URL } from "@/lib/api"
 
 async function fetchJson<T>(path: string, params?: Record<string, string | number>): Promise<T> {
-  const url = new URL(`${BASE}${path}`)
+  // Built as a string rather than `new URL(...)`: an empty base (same-origin)
+  // yields a relative path, which the URL constructor rejects.
+  const search = new URLSearchParams()
   if (params) {
-    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)))
+    Object.entries(params).forEach(([k, v]) => search.set(k, String(v)))
   }
-  const res = await fetch(url.toString(), { cache: "no-store" })
+  const qs = search.toString()
+  const res = await fetch(`${API_BASE_URL}${path}${qs ? `?${qs}` : ""}`, { cache: "no-store" })
   if (!res.ok) {
     throw new Error(`NBA API error ${res.status}: ${await res.text()}`)
   }

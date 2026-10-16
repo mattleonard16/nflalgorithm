@@ -11,6 +11,10 @@ opposite side on player name alone therefore pairs an Over at 55.5 with an
 Under at 70.5 whenever a book posts alternates, and
 ``implied_probability_no_vig`` will happily consume that pair and return a
 confident, wrong number. The line has to be part of the match key.
+
+Yes/No markets (``player_anytime_td``) quote "Yes"/"No" with no line. "Yes"
+is the Over of one-or-more, so a Yes/No pair is stored as Over/Under at
+``YES_NO_LINE`` (0.5); a Yes/No outcome that does carry a line keeps it.
 """
 
 from __future__ import annotations
@@ -19,6 +23,16 @@ from typing import Any, Iterable, Mapping, Optional
 
 OVER = "Over"
 UNDER = "Under"
+YES = "Yes"
+NO = "No"
+
+# The line a Yes/No (at-least-one) market grades against: 1+ is over 0.5.
+YES_NO_LINE = 0.5
+
+# Side held -> the outcome name of the opposite side of the same wager.
+_OPPOSITE = {OVER: UNDER, UNDER: OVER, YES: NO, NO: YES}
+# Outcome name -> the stored side it prices.
+_STORED_SIDE = {OVER: OVER, UNDER: UNDER, YES: OVER, NO: UNDER}
 
 # Books quote points as floats; compare with a tolerance rather than ==, since
 # a JSON round-trip can leave 55.5 and 55.500000000000004.
@@ -57,7 +71,8 @@ def find_opposite_side(
         description: The player description to match, compared exactly as the
             book spells it. ``None`` matches only another quote that also
             carries no description.
-        side: The side already held — ``"Over"`` or ``"Under"``.
+        side: The side already held — ``"Over"``/``"Under"``, or
+            ``"Yes"``/``"No"`` for an at-least-one market.
         point: The line already held. ``None`` matches only another quote that
             also carries no line.
 
@@ -65,10 +80,10 @@ def find_opposite_side(
         The matching outcome, or ``None`` when the book quoted only one side
         at this line.
     """
-    if side not in (OVER, UNDER):
-        raise ValueError(f"side must be {OVER!r} or {UNDER!r}, got {side!r}")
+    if side not in _OPPOSITE:
+        raise ValueError(f"side must be one of {sorted(_OPPOSITE)!r}, got {side!r}")
 
-    wanted = UNDER if side == OVER else OVER
+    wanted = _OPPOSITE[side]
     for candidate in outcomes:
         if candidate.get("description") != description:
             continue
@@ -85,17 +100,23 @@ def pair_two_sided_prices(
     """Resolve ``outcome`` into ``(line, over_price, under_price)``.
 
     Returns ``None`` when the quote is unusable: an unrecognized side, a
-    missing price, or no opposite side at the same line. Callers skip those
-    rows — a one-sided quote cannot have its vig removed, and guessing the
-    other side would invent a market that was never offered.
+    missing price or line, or no opposite side at the same line. A quote with
+    no line is not a line of 0.0, and storing it as one would grade every
+    stat against zero; the one exception is a Yes/No pair, whose missing line
+    is ``YES_NO_LINE`` by definition of the market. Callers skip ``None``
+    rows — a one-sided quote (a book posting only "Yes") cannot have its vig
+    removed, and guessing the other side would invent a market that was never
+    offered.
     """
     side = outcome.get("name")
-    if side not in (OVER, UNDER):
+    if side not in _OPPOSITE:
         return None
 
     price = outcome.get("price")
     point = _point(outcome)
     if price is None:
+        return None
+    if point is None and side not in (YES, NO):
         return None
 
     opposite = find_opposite_side(
@@ -107,10 +128,12 @@ def pair_two_sided_prices(
     if opposite is None or opposite.get("price") is None:
         return None
 
-    over_price = price if side == OVER else opposite["price"]
-    under_price = opposite["price"] if side == OVER else price
+    is_over = _STORED_SIDE[side] == OVER
+    over_price = price if is_over else opposite["price"]
+    under_price = opposite["price"] if is_over else price
+    line = YES_NO_LINE if point is None else point
 
     try:
-        return (float(point if point is not None else 0.0), int(over_price), int(under_price))
+        return (line, int(over_price), int(under_price))
     except (TypeError, ValueError):
         return None

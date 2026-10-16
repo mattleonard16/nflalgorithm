@@ -103,3 +103,29 @@ def test_anytime_touchdown_keeps_anyone_who_rushes_or_catches() -> None:
     assert likely_to_play(te1, "anytime_touchdown") is True
     assert likely_to_play(starting_qb, "anytime_touchdown") is True
     assert likely_to_play(backup_qb, "anytime_touchdown") is False
+
+
+def test_starter_with_a_stale_depth_chart_stays_on_the_pass_slate() -> None:
+    # Fill-in starter whose chart still lists him QB2: his recent attempts say
+    # he is the one throwing.
+    fill_in = {
+        "position": "QB",
+        "roster_status": "ACT",
+        "depth_rank": 2,
+        "is_starter": 0,
+        "expected_passing_attempts": 31.0,
+    }
+    assert likely_to_play(fill_in, "passing_yards") is True
+    assert likely_to_play(fill_in, "rushing_yards") is True
+
+
+def test_volume_fallback_never_overrides_an_out_designation() -> None:
+    injured = {
+        "position": "QB",
+        "roster_status": "ACT",
+        "depth_rank": 2,
+        "is_starter": 0,
+        "injury_status": "Out",
+        "expected_passing_attempts": 31.0,
+    }
+    assert likely_to_play(injured, "passing_yards") is False

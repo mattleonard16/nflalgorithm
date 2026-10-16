@@ -1,9 +1,9 @@
 """Opening/closing line derivation from append-only weekly_odds history.
 
-load_opening_lines picks MIN(as_of) and load_closing_lines picks MAX(as_of)
-per (season, week, player_id, market, sportsbook) key. Both compare as_of as
-SQLite TEXT — lexical, not chronological — which is correct only while all
-writers store consistently-formatted UTC timestamps (they do today).
+load_opening_lines picks the earliest and load_closing_lines the latest as_of
+per (season, week, player_id, market, sportsbook) key. Both parse as_of as a
+UTC timestamp, so mixed offsets order chronologically, and both screen out
+snapshots utils.odds_quality says cannot be graded (SimBook, unjoinable keys).
 """
 
 import os
@@ -58,7 +58,7 @@ def _init_odds_table(conn: sqlite3.Connection) -> None:
     )
 
 
-def _insert_odds(conn, *, season, week, player_id, market, sportsbook, line, price, as_of, event_id="evt1"):
+def _insert_odds(conn, *, season, week, player_id, market, sportsbook, line, price, as_of, event_id="2024_01_HOU_KC"):
     conn.execute(
         "INSERT INTO weekly_odds (event_id, season, week, player_id, market, sportsbook, line, price, as_of) "
         "VALUES (?,?,?,?,?,?,?,?,?)",
@@ -181,3 +181,55 @@ def test_load_closing_lines_empty_table_returns_empty_frame(tmp_path: Path) -> N
         result = load_closing_lines([2024])
 
     assert result.empty
+
+
+def test_synthetic_and_unjoinable_snapshots_are_screened_out(tmp_path: Path) -> None:
+    """SimBook lines are derived from the realized outcome; grading against
+    them is circular. An unjoinable event_id cannot be tied to a game."""
+    db_path = tmp_path / "screened.db"
+    with sqlite3.connect(db_path) as conn:
+        _init_odds_table(conn)
+        _insert_odds(
+            conn, season=2024, week=1, player_id="HOU_cj_stroud", market="passing_yards",
+            sportsbook="SimBook", line=250.5, price=-110, as_of="2024-09-01T10:00:00Z",
+        )
+        _insert_odds(
+            conn, season=2024, week=1, player_id="HOU_cj_stroud", market="passing_yards",
+            sportsbook="Book", line=255.5, price=-110, as_of="2024-09-01T10:00:00Z",
+            event_id="2024_W01_HOU_cj_stroud",
+        )
+        _insert_odds(
+            conn, season=2024, week=1, player_id="HOU_cj_stroud", market="passing_yards",
+            sportsbook="RealBook", line=248.5, price=-110, as_of="2024-09-01T10:00:00Z",
+        )
+        conn.commit()
+
+    with use_database(db_path):
+        closing = load_closing_lines([2024])
+        opening = load_opening_lines([2024])
+
+    assert closing["sportsbook"].tolist() == ["RealBook"]
+    assert opening["sportsbook"].tolist() == ["RealBook"]
+
+
+def test_open_and_close_order_by_time_not_string(tmp_path: Path) -> None:
+    """12:00-05:00 is 17:00Z: later in real time, though lexically smaller."""
+    db_path = tmp_path / "offsets.db"
+    with sqlite3.connect(db_path) as conn:
+        _init_odds_table(conn)
+        _insert_odds(
+            conn, season=2024, week=1, player_id="HOU_cj_stroud", market="passing_yards",
+            sportsbook="Book", line=260.5, price=-110, as_of="2024-09-01T12:00:00-05:00",
+        )
+        _insert_odds(
+            conn, season=2024, week=1, player_id="HOU_cj_stroud", market="passing_yards",
+            sportsbook="Book", line=250.5, price=-110, as_of="2024-09-01T16:00:00+00:00",
+        )
+        conn.commit()
+
+    with use_database(db_path):
+        closing = load_closing_lines([2024])
+        opening = load_opening_lines([2024])
+
+    assert closing.iloc[0]["line"] == 260.5
+    assert opening.iloc[0]["open_line"] == 250.5

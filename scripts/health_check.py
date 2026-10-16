@@ -109,7 +109,7 @@ def main() -> None:
     
     # Show any failures from traditional checks
     if failures:
-        print(f"\n❌ Traditional Health Check Failed:")
+        print("\n❌ Traditional Health Check Failed:")
         for failure in failures:
             print(f"  • {failure}")
     else:
@@ -131,10 +131,10 @@ def main() -> None:
     )
     
     if should_exit_with_error:
-        print(f"\n🚨 System health issues detected - please review alerts above")
+        print("\n🚨 System health issues detected - please review alerts above")
         raise SystemExit("Health check failed")
     else:
-        print(f"\n✅ All systems operational")
+        print("\n✅ All systems operational")
 
 
 if __name__ == "__main__":

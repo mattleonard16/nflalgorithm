@@ -398,7 +398,7 @@ class DailyReporter:
         """Generate comprehensive daily performance report."""
         report_data = self.monitor.generate_comprehensive_report()
         
-        markdown = f"# NFL Algorithm Daily Report\n\n"
+        markdown = "# NFL Algorithm Daily Report\n\n"
         markdown += f"**Generated:** {report_data['generated_at']}\n"
         markdown += f"**System Status:** {report_data['system_status']}\n\n"
         

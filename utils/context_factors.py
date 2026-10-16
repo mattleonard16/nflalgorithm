@@ -17,7 +17,8 @@ into small, bounded multipliers that a projection can be scaled by:
 ``usage_trend_factor``
     Whether his opportunity share (targets / carries / attempts) is rising or
     falling, measured over *played* games so a bye or an injury absence does not
-    read as a collapse in role.
+    read as a collapse in role. Reported, but kept out of the composite by
+    default (``ContextParams.apply_usage_trend``) -- see below.
 
 Every component degrades to exactly 1.0 when its inputs are missing, and names
 itself in the ``neutral_components`` diagnostic when it does. Nothing here ever
@@ -37,6 +38,22 @@ It is kept because it is *player*-specific (his relationship with a scheme)
 where the defense multiplier is a position-group average, and it is held to
 +/-5% with a hard shrinkage so the overlapping part cannot amount to much.
 If you ever add a defense term here, remove the one at the mu site — not both.
+
+USAGE TREND IS MEASURED, NOT APPLIED
+------------------------------------
+Measured on 2024-2025 core players (3,398 starter games: QB passing,
+RB1 rushing, WR/TE receiving) against a baseline built only from each player's
+prior games (``scripts/evaluate_context_factors.py``), the usage trend never
+improved MAE and made it worse the more recency the baseline already carried:
++0.18 yards against a flat mean (not significant), +0.61 (95% CI +0.33..+0.89)
+at a 4-game half-life, +1.12 (+0.83..+1.40) at 2. Any real model already
+weights recent games, so the trend re-applies a hot streak that then reverts --
+and core players, picked for recent high usage, are where it bites. Game
+script lowered MAE in every run (-0.05 to -0.07 overall, -0.14 to -0.30 on
+rushing; small, and clearly outside noise only for rushing against the flat
+mean). Matchup history was neutral. So the composite multiplies game script
+and matchup history only; the trend column is still computed for research and
+for ``apply_usage_trend=True``. Re-measure on new seasons before changing it.
 
 Nothing in this module reads or writes ``player_stats_enhanced.game_script``:
 that column is hardcoded 0.0 on every row.
@@ -141,6 +158,10 @@ class ContextParams:
 
     # Target season plus this many prior ones feed history and trend.
     history_seasons: int = 3
+
+    # Fold the usage trend into the composite. Off: on core players it raised
+    # MAE against every recency-aware baseline (see the module docstring).
+    apply_usage_trend: bool = False
 
     def __post_init__(self) -> None:
         for name in ("script_bounds", "matchup_bounds", "trend_bounds", "composite_bounds"):
@@ -540,7 +561,8 @@ def compute_context_factors(
         if trend_neutral:
             neutral.append(COMPONENT_USAGE_TREND)
 
-        composite = _clip(script * matchup * trend, params.composite_bounds)
+        applied_trend = trend if params.apply_usage_trend else 1.0
+        composite = _clip(script * matchup * applied_trend, params.composite_bounds)
 
         records.append(
             {

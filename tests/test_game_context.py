@@ -7,7 +7,6 @@ import pytest
 
 from utils.game_context import (
     CONTEXT_COLUMNS,
-    GAME_CONTEXT_COLUMNS,
     GAME_CONTEXT_DEFAULTS,
     attach_game_context_to_player_frame,
     extract_game_context,

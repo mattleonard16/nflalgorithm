@@ -52,7 +52,11 @@ def validate_odds_snapshot(
     required.validate()
 
     source_statuses = sorted({str(value).upper() for value in observed.get("source_statuses", [])})
+    # ``scheduled_events`` is the games still to kick off when the odds were
+    # scraped; a started game has no pregame line, so it is not in the
+    # denominator. ``started_events`` records those for transparency.
     scheduled_events = int(observed.get("scheduled_events", 0))
+    started_events = int(observed.get("started_events", 0))
     covered_events = int(observed.get("covered_events", 0))
     covered_event_markets = int(observed.get("covered_event_markets", 0))
     required_event_markets = scheduled_events * len(required.required_markets)
@@ -107,6 +111,9 @@ def validate_odds_snapshot(
     elif max_response_age is None or max_response_age > required.max_age_seconds:
         reason_code = "stale_snapshot"
         reason = f"Odds response age {max_response_age!r}s exceeds {required.max_age_seconds}s"
+    elif scheduled_events <= 0 and started_events > 0:
+        reason_code = "no_upcoming_events"
+        reason = f"All {started_events} requested-week events have already kicked off"
     elif scheduled_events <= 0:
         reason_code = "schedule_missing"
         reason = "No scheduled events were available for odds coverage validation"
@@ -146,6 +153,7 @@ def validate_odds_snapshot(
         "responses_observed": responses_observed,
         "responses_with_age": responses_with_age,
         "scheduled_events": scheduled_events,
+        "started_events": started_events,
         "covered_events": covered_events,
         "event_coverage": event_coverage,
         "required_markets": list(required.required_markets),

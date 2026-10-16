@@ -12,7 +12,36 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # `uv run` must use the environment `uv sync --frozen` built, never re-resolve.
+  UV_FROZEN: '1'
+
 jobs:
+  # Dependency pins and Python lint. uv.lock is the single source of truth:
+  # requirements.txt (Dockerfile.api, pip-audit, venv fallback) is its export.
+  lint-python:
+    runs-on: ubuntu-latest
+    env:
+      # `uv lock --check` must actually re-resolve; UV_FROZEN would skip that.
+      UV_FROZEN: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@v6
+      - name: uv.lock matches pyproject.toml
+        run: uv lock --check
+      - name: requirements.txt matches uv.lock
+        run: |
+          make requirements
+          git diff --exit-code -- requirements.txt \
+            || { echo "requirements.txt is stale: run 'make requirements' and commit it" >&2; exit 1; }
+      - name: Install locked dev tools
+        run: uv sync --frozen --only-dev
+      - name: Ruff (pyflakes rules)
+        run: uv run --no-sync ruff check .
+
   # Exactly what an outside contributor gets: a clone with none of the gitignored
   # private modules. Setup must succeed and `make doctor` must exit 0 (private
   # checks WARN, never FAIL). This is the path that broke for a first-time
@@ -27,11 +56,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install dependencies
-        run: |
-          pip install uv
-          uv venv
-          uv pip install -r requirements.txt
+      - uses: astral-sh/setup-uv@v6
+      # Same resolver and pins as `make install`: uv.lock, runtime + dev group.
+      - name: Install locked dependencies
+        run: uv sync --frozen
       - name: Private files must not be tracked
         run: ./scripts/check_private_files_untracked.sh
       - name: Migrate an empty database
@@ -57,29 +85,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install dependencies
-        run: |
-          pip install uv
-          uv venv
-          uv pip install -r requirements.txt
+      - uses: astral-sh/setup-uv@v6
+      # Same resolver and pins as `make install`: uv.lock, runtime + dev group.
+      - name: Install locked dependencies
+        run: uv sync --frozen
+      # Includes tests/test_nfl_projection_evaluation.py, the MAE-gate logic
+      # (thresholds and skip rules). CI has no projection data, so the
+      # real-data run lives in `make mae-gate`.
       - name: Run tests
         run: |
-          DB_BACKEND=sqlite SQLITE_DB_PATH=nfl_data.db uv run python -m pytest tests/ -v --cov=. --cov-report=xml
-        env:
-          DB_BACKEND: sqlite
-          SQLITE_DB_PATH: nfl_data.db
-      # Gate logic only. CI has no projection data, so the real-data run lives in
-      # `make mae-gate`; this asserts the thresholds and skip rules stay correct.
-      - name: Check model quality gate logic
-        run: |
-          uv run python -m pytest tests/test_nfl_projection_evaluation.py -q
+          uv run python -m pytest tests/ -v --cov=. --cov-report=xml
         env:
           DB_BACKEND: sqlite
           SQLITE_DB_PATH: nfl_data.db
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
-          file: ./coverage.xml
+          files: ./coverage.xml
           fail_ci_if_error: false
 
   pipeline-database-matrix:
@@ -104,11 +126,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install dependencies
-        run: |
-          pip install uv
-          uv venv
-          uv pip install -r requirements.txt
+      - uses: astral-sh/setup-uv@v6
+      # Same resolver and pins as `make install`: uv.lock, runtime + dev group.
+      - name: Install locked dependencies
+        run: uv sync --frozen
       - name: Run MySQL queue and lease matrix
         env:
           TEST_DB_BACKEND: mysql

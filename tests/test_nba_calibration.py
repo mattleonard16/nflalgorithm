@@ -6,7 +6,6 @@ Covers:
 3. Identity when insufficient data (< min_samples)
 4. Well-calibrated input passes through ~unchanged
 5. Save/load roundtrip produces same output
-6. reliability_data() returns correct binned structure
 7. rank_nba_value(calibrated=True) populates p_win_raw key in results
 8. Missing calibration file -> silently ignored (same as calibrated=False)
 """
@@ -335,60 +334,6 @@ class TestSaveLoadRoundtrip:
         cal2.load(save_path)
 
         assert cal2._sample_counts == counts_before
-
-
-# ---------------------------------------------------------------------------
-# Test 6: reliability_data() returns correct binned structure
-# ---------------------------------------------------------------------------
-
-
-class TestReliabilityData:
-    def test_reliability_data_returns_expected_columns(self, db):
-        """reliability_data() must return DataFrame with required columns."""
-        _seed_bet_outcomes(db, "pts", n_win=36, n_loss=24)
-
-        from utils.nba_calibration import NBACalibrator
-
-        cal = NBACalibrator()
-        cal.fit(min_samples=50)
-
-        rel_df = cal.reliability_data("pts", n_bins=10)
-        required_cols = {"bin_center", "predicted_prob", "observed_freq", "count"}
-        assert required_cols.issubset(set(rel_df.columns))
-
-    def test_reliability_data_correct_number_of_bins(self, db):
-        """reliability_data() should return exactly n_bins rows."""
-        _seed_bet_outcomes(db, "pts", n_win=36, n_loss=24)
-
-        from utils.nba_calibration import NBACalibrator
-
-        cal = NBACalibrator()
-        cal.fit(min_samples=50)
-
-        for n_bins in [5, 10, 20]:
-            rel_df = cal.reliability_data("pts", n_bins=n_bins)
-            assert len(rel_df) == n_bins, f"Expected {n_bins} bins, got {len(rel_df)}"
-
-    def test_reliability_data_bin_centers_in_range(self, db):
-        """All bin_center values must be in [0, 1]."""
-        _seed_bet_outcomes(db, "pts", n_win=36, n_loss=24)
-
-        from utils.nba_calibration import NBACalibrator
-
-        cal = NBACalibrator()
-        cal.fit(min_samples=50)
-
-        rel_df = cal.reliability_data("pts", n_bins=10)
-        assert (rel_df["bin_center"] >= 0.0).all()
-        assert (rel_df["bin_center"] <= 1.0).all()
-
-    def test_reliability_data_empty_for_missing_market(self, db):
-        """reliability_data() for a market with no outcomes returns empty DataFrame."""
-        from utils.nba_calibration import NBACalibrator
-
-        cal = NBACalibrator()
-        rel_df = cal.reliability_data("fg3m", n_bins=10)
-        assert len(rel_df) == 0 or (rel_df["count"] == 0).all()
 
 
 # ---------------------------------------------------------------------------

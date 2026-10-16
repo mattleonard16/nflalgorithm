@@ -185,7 +185,9 @@ class TestPositionBucketSelection:
     def test_bucket_default_selected(self, market, position, expected_default):
         from utils.nfl_sigma import compute_player_sigma
 
-        values = [60.0, 75.0, 85.0]  # 3 games < MIN_GAMES
+        # 3 games < MIN_GAMES, and low volume, so the volume-scaled default
+        # stays at or below the flat one.
+        values = [5.0, 8.0, 6.0]
         sigma = compute_player_sigma(values, market=market, position=position)
         assert sigma == pytest.approx(expected_default)
 
@@ -512,3 +514,52 @@ class TestFloorBindsExactlyAtBoundary:
         assert result > floor
         assert result == pytest.approx(floor * 1.001)
 
+
+
+class TestShortHistoryVolumeScaling:
+    """1-5 games: the default scales with the player's volume, never below it."""
+
+    def test_high_volume_wr_gets_a_wider_sigma_than_the_flat_default(self):
+        from utils.nfl_sigma import (
+            SIGMA_DEFAULTS,
+            SIGMA_SHORT_HISTORY_CV,
+            compute_player_sigma,
+        )
+
+        values = [80.0, 95.0, 70.0]  # a rookie WR1 three games in
+        sigma = compute_player_sigma(values, market="receiving_yards", position="WR")
+        expected = SIGMA_SHORT_HISTORY_CV[("receiving_yards", "WR")] * (245.0 / 3)
+        assert sigma == pytest.approx(expected)
+        assert sigma > SIGMA_DEFAULTS[("receiving_yards", "WR")]
+
+    def test_low_volume_player_keeps_the_flat_default(self):
+        from utils.nfl_sigma import SIGMA_DEFAULTS, compute_player_sigma
+
+        sigma = compute_player_sigma([10.0, 12.0], market="receiving_yards", position="WR")
+        assert sigma == pytest.approx(SIGMA_DEFAULTS[("receiving_yards", "WR")])
+
+    def test_no_history_keeps_the_flat_default(self):
+        from utils.nfl_sigma import SIGMA_DEFAULTS, compute_player_sigma
+
+        sigma = compute_player_sigma([], market="rushing_yards", position="RB")
+        assert sigma == pytest.approx(SIGMA_DEFAULTS[("rushing_yards", "RB")])
+
+    def test_legacy_and_unbucketed_paths_are_unchanged(self):
+        from utils.nfl_sigma import SIGMA_DEFAULTS, compute_player_sigma
+
+        values = [80.0, 95.0, 70.0]
+        assert compute_player_sigma(values, market="receiving_yards") == pytest.approx(
+            SIGMA_DEFAULTS[("receiving_yards", None)]
+        )
+        # WR rushing has no CV entry: flat default even at high volume.
+        assert compute_player_sigma(values, market="rushing_yards", position="WR") == pytest.approx(
+            SIGMA_DEFAULTS[("rushing_yards", "WR")]
+        )
+
+    def test_six_games_still_uses_the_ewma_path(self):
+        from utils.nfl_sigma import SIGMA_SHORT_HISTORY_CV, compute_player_sigma
+
+        values = [80.0, 95.0, 70.0, 85.0, 90.0, 75.0]
+        sigma = compute_player_sigma(values, market="receiving_yards", position="WR")
+        scaled = SIGMA_SHORT_HISTORY_CV[("receiving_yards", "WR")] * (sum(values) / 6)
+        assert sigma != pytest.approx(scaled)

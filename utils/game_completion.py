@@ -150,13 +150,3 @@ def _has_stats(game_row: pd.Series, teams_with_stats: set[str]) -> bool:
     )
 
 
-def gradeable_event_ids(
-    games: pd.DataFrame,
-    actuals: pd.DataFrame,
-    *,
-    now: Optional[datetime] = None,
-    settle_after: timedelta = SETTLE_AFTER_KICKOFF,
-) -> set[str]:
-    """The ``event_id`` values a grading run may settle. Convenience wrapper."""
-    report = classify_games(games, actuals, now=now, settle_after=settle_after)
-    return set(report.final)

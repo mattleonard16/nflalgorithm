@@ -2,7 +2,31 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import type { User } from "./types";
-import { getCurrentUser, login as apiLogin, logout as apiLogout, register as apiRegister } from "./api";
+import {
+  AUTH_EXPIRED_EVENT,
+  getCurrentUser,
+  login as apiLogin,
+  logout as apiLogout,
+  register as apiRegister,
+} from "./api";
+
+// Mirrors PIPELINE_OPERATOR_TIERS in api/pipeline_router.py (default
+// "operator,admin"). Override at build time when the backend's list changes.
+const PIPELINE_OPERATOR_TIERS = new Set(
+  (process.env.NEXT_PUBLIC_PIPELINE_OPERATOR_TIERS ?? "operator,admin")
+    .split(",")
+    .map((tier) => tier.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+/**
+ * Whether the backend will let this user run or review the pipeline
+ * (require_pipeline_operator). Client-side gating only hides controls that
+ * would 403; the server remains the authority.
+ */
+export function isPipelineOperator(user: User | null): boolean {
+  return !!user && PIPELINE_OPERATOR_TIERS.has(user.subscription_tier?.toLowerCase() ?? "");
+}
 
 interface AuthContextType {
   user: User | null;
@@ -49,9 +73,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(result.user);
   };
 
+  // A 401 from any authenticated call has already cleared the stored token;
+  // drop the user so the UI stops rendering a signed-in state.
+  useEffect(() => {
+    const onExpired = () => setUser(null);
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, []);
+
   const logout = async () => {
-    await apiLogout();
-    setUser(null);
+    try {
+      await apiLogout();
+    } catch {
+      // apiLogout clears the local token even when the server call fails
+      // (e.g. the session already expired), so signing out locally is correct.
+    } finally {
+      setUser(null);
+    }
   };
 
   return (

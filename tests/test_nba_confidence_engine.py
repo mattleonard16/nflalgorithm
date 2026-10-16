@@ -5,8 +5,6 @@ Covers:
 - Tier assignment (Premium/Strong/Marginal/Pass)
 - Usage spike penalty caps confidence at 74
 - Edge cases: zero edge, very high edge, missing fields
-- score_nba_plays() DataFrame batch processing
-- filter_by_nba_confidence() tier filtering
 - NBA confidence engine does NOT import from config
 """
 
@@ -190,87 +188,6 @@ class TestAssignTier:
         from nba_confidence_engine import assign_nba_tier
 
         assert assign_nba_tier(40.0) == "Pass"
-
-
-# ---------------------------------------------------------------------------
-# score_nba_plays — batch processing
-# ---------------------------------------------------------------------------
-
-
-class TestScorePlays:
-    """Batch scoring of a DataFrame of value plays."""
-
-    def test_adds_confidence_score_column(self):
-        from nba_confidence_engine import score_nba_plays
-
-        df = _make_df()
-        result = score_nba_plays(df)
-        assert "confidence_score" in result.columns
-
-    def test_adds_tier_column(self):
-        from nba_confidence_engine import score_nba_plays
-
-        df = _make_df()
-        result = score_nba_plays(df)
-        assert "confidence_tier" in result.columns
-
-    def test_tier_values_are_valid(self):
-        from nba_confidence_engine import score_nba_plays
-
-        valid_tiers = {"Premium", "Strong", "Marginal", "Pass"}
-        df = _make_df(
-            [
-                _make_row(edge_percentage=0.25, mu=30.0, sigma=3.0, fga_share=0.25),
-                _make_row(edge_percentage=0.02, mu=20.0, sigma=8.0, fga_share=0.05),
-            ]
-        )
-        result = score_nba_plays(df)
-        assert set(result["confidence_tier"].unique()).issubset(valid_tiers)
-
-    def test_empty_df_returns_empty(self):
-        from nba_confidence_engine import score_nba_plays
-
-        df = pd.DataFrame()
-        result = score_nba_plays(df)
-        assert len(result) == 0
-
-
-# ---------------------------------------------------------------------------
-# filter_by_nba_confidence
-# ---------------------------------------------------------------------------
-
-
-class TestFilterByConfidence:
-    """Filter DataFrame by minimum tier level."""
-
-    def test_filter_removes_low_tier(self):
-        from nba_confidence_engine import score_nba_plays, filter_by_nba_confidence
-
-        df = _make_df(
-            [
-                _make_row(edge_percentage=0.25, mu=30.0, sigma=3.0, fga_share=0.25, volatility_score=10.0),
-                _make_row(edge_percentage=0.01, mu=15.0, sigma=10.0, fga_share=0.02, volatility_score=90.0),
-            ]
-        )
-        scored = score_nba_plays(df)
-        filtered = filter_by_nba_confidence(scored, min_tier=2)
-        # Only strong/premium should remain, pass/marginal removed
-        assert all(t in ("Premium", "Strong") for t in filtered["confidence_tier"])
-
-    def test_filter_keeps_all_when_min_tier_4(self):
-        from nba_confidence_engine import score_nba_plays, filter_by_nba_confidence
-
-        df = _make_df([_make_row()])
-        scored = score_nba_plays(df)
-        filtered = filter_by_nba_confidence(scored, min_tier=4)
-        assert len(filtered) == len(scored)
-
-    def test_empty_df_returns_empty(self):
-        from nba_confidence_engine import filter_by_nba_confidence
-
-        df = pd.DataFrame(columns=["confidence_tier", "confidence_score"])
-        result = filter_by_nba_confidence(df, min_tier=1)
-        assert len(result) == 0
 
 
 # ---------------------------------------------------------------------------

@@ -103,6 +103,26 @@ def test_login_with_an_unregistered_email_fails(db):
     assert _count("user_sessions") == 0
 
 
+def test_an_unregistered_email_still_pays_for_a_bcrypt_verify(db, monkeypatch):
+    # Skipping bcrypt on a miss makes response time reveal which emails exist.
+    import api.auth as auth
+
+    real_checkpw = auth.bcrypt.checkpw
+    calls = []
+
+    def counting_checkpw(password, hashed):
+        calls.append(hashed)
+        return real_checkpw(password, hashed)
+
+    monkeypatch.setattr(auth.bcrypt, "checkpw", counting_checkpw)
+
+    assert _login(email="nobody@example.com") is None
+
+    assert len(calls) == 1
+    # Same cost factor as real hashes, so the work matches a wrong password.
+    assert calls[0].startswith(f"$2b${auth._BCRYPT_ROUNDS:02d}$".encode())
+
+
 def test_a_wrong_password_fails_and_opens_no_session(db):
     _register()
 

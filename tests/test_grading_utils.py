@@ -19,6 +19,7 @@ from utils.grading import (
     calculate_profit_units,
     get_confidence_tier,
     grade_bet,
+    known_bet_ids,
 )
 
 
@@ -349,6 +350,60 @@ class TestAlignActualsToBets:
         empty = pd.DataFrame(columns=["gsis_id", "player_id"])
         aligned = align_actuals_to_bets(self._actuals(), empty)
         assert list(aligned["player_id"]) == ["LAR_m_stafford", "LAR_p_nacua"]
+
+    def test_the_week_snapshot_id_wins_and_the_roster_id_rides_along(self):
+        """A trade rewrites the roster row; the graded week's snapshot does not."""
+        actuals = self._actuals().assign(season=2025, week=5)
+        roster = self._roster()
+        roster.loc[1, "player_id"] = "DAL_puka_nacua"
+        snapshots = pd.DataFrame(
+            [{"season": 2025, "week": 5, "gsis_id": "00-0039075", "player_id": "LAR_puka_nacua"}]
+        )
+        aligned = align_actuals_to_bets(actuals, roster, snapshots)
+        assert list(aligned["player_id"]) == [
+            "LAR_matthew_stafford",
+            "LAR_puka_nacua",
+            "DAL_puka_nacua",
+        ]
+        assert list(aligned["receiving_yards"].iloc[1:]) == [88.0, 88.0]
+
+    def test_a_snapshot_from_another_week_is_not_used(self):
+        actuals = self._actuals().assign(season=2025, week=5)
+        snapshots = pd.DataFrame(
+            [{"season": 2025, "week": 6, "gsis_id": "00-0039075", "player_id": "DAL_puka_nacua"}]
+        )
+        aligned = align_actuals_to_bets(actuals, self._roster(), snapshots)
+        assert list(aligned["player_id"]) == ["LAR_matthew_stafford", "LAR_puka_nacua"]
+
+    def test_an_alias_never_displaces_another_players_primary_id(self):
+        actuals = self._actuals().assign(season=2025, week=5)
+        roster = self._roster()
+        # The roster's (stale) id for Nacua collides with Stafford's snapshot id.
+        roster.loc[1, "player_id"] = "LAR_matthew_stafford"
+        snapshots = pd.DataFrame(
+            [
+                {
+                    "season": 2025,
+                    "week": 5,
+                    "gsis_id": "00-0026498",
+                    "player_id": "LAR_matthew_stafford",
+                },
+                {"season": 2025, "week": 5, "gsis_id": "00-0039075", "player_id": "LAR_puka_nacua"},
+            ]
+        )
+        aligned = align_actuals_to_bets(actuals, roster, snapshots)
+        stafford = aligned[aligned["player_id"] == "LAR_matthew_stafford"]
+        assert len(stafford) == 1
+        assert stafford["gsis_id"].iloc[0] == "00-0026498"
+
+    def test_known_bet_ids_unions_roster_and_snapshot_ids(self):
+        snapshots = pd.DataFrame([{"gsis_id": "x", "player_id": "NYJ_garrett_wilson"}])
+        assert known_bet_ids(self._roster(), snapshots) == {
+            "LAR_matthew_stafford",
+            "LAR_puka_nacua",
+            "NYJ_garrett_wilson",
+        }
+        assert known_bet_ids(pd.DataFrame(columns=["gsis_id", "player_id"])) == set()
 
     def test_a_frame_missing_gsis_id_fails_loud(self):
         with pytest.raises(ValueError, match="actuals missing required column: gsis_id"):

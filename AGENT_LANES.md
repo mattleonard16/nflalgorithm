@@ -32,8 +32,8 @@ What landed, by territory:
 
 **Correction 1 — `build_correlation_matrix` was not correlation/parlay work in flight.** It was an
 orphaned function in `risk_manager.py` with zero callers; I deleted it (`a425280`). No parlay work
-is happening in this lane. The only `build_correlation_matrix` still live is the unrelated one in
-`utils/nba_monte_carlo.py`.
+is happening in this lane. The unrelated `build_correlation_matrix` in `utils/nba_monte_carlo.py`
+had no callers either and was removed later with the rest of the dead NBA portfolio code.
 
 **Correction 2 — I am done with the gitignored files, but I did edit them.** Local-only, in no
 commit: `config.py` (Kelly flag default), `models/position_specific/weekly.py` (sigma + defense call

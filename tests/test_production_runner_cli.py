@@ -361,14 +361,16 @@ def test_inline_main_exits_nonzero_when_pipeline_report_has_errors(monkeypatch) 
     assert exc_info.value.code == 1
 
 
-def test_inline_main_returns_normally_for_successful_pipeline_report(monkeypatch) -> None:
+def test_inline_main_returns_normally_for_successful_pipeline_report(monkeypatch, capsys) -> None:
     report: dict[str, Any] = {
         "success": True,
         "stages": [{"status": "ok", "stage": "ingest"}],
         "errors": [],
     }
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     def successful_pipeline(*args: object, **kwargs: object) -> dict[str, Any]:
+        calls.append((args, kwargs))
         return report
 
     monkeypatch.setattr(
@@ -378,7 +380,13 @@ def test_inline_main_returns_normally_for_successful_pipeline_report(monkeypatch
     )
     monkeypatch.setattr(production_runner, "run_production_pipeline", successful_pipeline)
 
-    production_runner.main()
+    assert production_runner.main() is None
+
+    assert len(calls) == 1
+    assert calls[0][0] == (2026, 1)
+    out = capsys.readouterr().out
+    assert "Pipeline SUCCEEDED" in out
+    assert "[OK] ingest" in out
 
 
 def test_main_enqueues_by_default(monkeypatch, capsys) -> None:

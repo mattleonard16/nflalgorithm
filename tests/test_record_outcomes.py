@@ -64,16 +64,23 @@ def _bet(
     price: int = -110,
     side: str = "over",
     edge: float = 0.10,
+    implied_prob: float | None = None,
+    implied_prob_under: float | None = None,
 ) -> None:
     execute(
         """
         INSERT INTO materialized_value_view (
             season, week, player_id, event_id, market, sportsbook, line, price, side,
-            mu, sigma, p_win, edge_percentage, expected_roi, kelly_fraction, stake,
-            generated_at
-        ) VALUES (?, ?, ?, ?, ?, 'DraftKings', ?, ?, ?, 70.0, 20.0, 0.55, ?, 0.05, 0.02, 20.0, ?)
+            mu, sigma, p_win, implied_prob, implied_prob_under,
+            edge_percentage, expected_roi, kelly_fraction, stake, generated_at
+        ) VALUES (
+            ?, ?, ?, ?, ?, 'DraftKings', ?, ?, ?, 70.0, 20.0, 0.55, ?, ?, ?, 0.05, 0.02, 20.0, ?
+        )
         """,
-        (SEASON, WEEK, player_id, event_id, market, line, price, side, edge, NOW.isoformat()),
+        (
+            SEASON, WEEK, player_id, event_id, market, line, price, side,
+            implied_prob, implied_prob_under, edge, NOW.isoformat(),
+        ),
     )
 
 
@@ -197,6 +204,60 @@ def test_a_player_without_a_stat_row_in_a_finished_game_is_a_push(final_game):
     assert inactive["result"] == "push"
     assert inactive["profit_units"] == 0.0
     assert inactive["actual_result"] is None
+
+
+def _snapshot(gsis_id: str, player_id: str, team: str) -> None:
+    execute(
+        "INSERT INTO nfl_player_context_snapshots "
+        "(season, week, gsis_id, player_id, team, position, prior_source, captured_at) "
+        "VALUES (?, ?, ?, ?, ?, 'WR', 'test', ?)",
+        (SEASON, WEEK, gsis_id, player_id, team, NOW.isoformat()),
+    )
+
+
+def test_a_traded_player_is_graded_under_the_id_of_the_graded_week(db):
+    # Bet minted as NYJ_garrett_wilson; the roster upsert has since rewritten
+    # the season row to his new club. The week's snapshot still holds NYJ.
+    _game("2025_05_NYJ_BUF", PAST_KICKOFF)
+    _roster("00-0037000", "DAL_garrett_wilson", "DAL")
+    _snapshot("00-0037000", "NYJ_garrett_wilson", "NYJ")
+    _bet("NYJ_garrett_wilson", event_id="2025_05_NYJ_BUF", line=64.5)
+    _stat("NYJ_g_wilson", "NYJ", gsis_id="00-0037000", receiving_yards=90.0)
+
+    [outcome] = grade_bets(SEASON, WEEK)
+
+    assert outcome["result"] == "win"
+    assert outcome["actual_result"] == pytest.approx(90.0)
+
+
+def test_a_bet_no_identity_source_knows_is_left_ungraded_not_pushed(final_game, capsys):
+    # The roster only knows the post-trade id and there is no snapshot, so the
+    # bet's id ties to no player. It must not be booked as a settled push.
+    _roster("00-0037000", "DAL_garrett_wilson", "DAL")
+    _roster("00-0000002", "BUF_receiver_a", "BUF")
+    _bet("BUF_receiver_a")
+    _bet("NYJ_garrett_wilson")
+    _stat("BUF_r_a", "BUF", gsis_id="00-0000002", receiving_yards=71.0)
+    _stat("DAL_g_wilson", "DAL", gsis_id="00-0037000", receiving_yards=90.0)
+
+    outcomes = grade_bets(SEASON, WEEK)
+
+    assert [o["player_id"] for o in outcomes] == ["BUF_receiver_a"]
+    assert "1 bet(s) left ungraded" in capsys.readouterr().out
+
+
+def test_an_identified_player_without_a_stat_row_is_still_a_push(final_game):
+    _roster("00-0000002", "BUF_receiver_a", "BUF")
+    _roster("00-0000003", "BUF_inactive_receiver", "BUF")
+    _bet("BUF_receiver_a")
+    _bet("BUF_inactive_receiver")
+    _stat("BUF_r_a", "BUF", gsis_id="00-0000002", receiving_yards=71.0)
+
+    outcomes = {o["player_id"]: o for o in grade_bets(SEASON, WEEK)}
+
+    assert outcomes["BUF_receiver_a"]["result"] == "win"
+    assert outcomes["BUF_inactive_receiver"]["result"] == "push"
+    assert outcomes["BUF_inactive_receiver"]["profit_units"] == 0.0
 
 
 def test_an_under_bet_wins_when_the_stat_lands_below_the_line(final_game):
@@ -328,14 +389,6 @@ def test_the_weekly_clv_average_leaves_out_bets_without_a_close(final_game):
     assert average == pytest.approx(stored_bp)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "utils/clv.py compute_clv scores line movement with the sign inverted: an over "
-        "taken at 64.5 that closes at 67.5 holds the better number, but clv_points and "
-        "the model-curve clv_bp both come out negative"
-    ),
-)
 def test_an_over_taken_below_the_closing_line_beat_the_close(final_game):
     outcomes = _graded_receiver(line=64.5)
     _odds("BUF_receiver_a", 64.5, PAST_KICKOFF - timedelta(days=1))
@@ -350,6 +403,27 @@ def test_a_two_sided_close_records_clv_for_a_one_sided_entry(final_game):
     _odds("BUF_receiver_a", 64.5, PAST_KICKOFF - timedelta(hours=1), under_price=-110)
 
     assert compute_and_save_clv(SEASON, WEEK, outcomes) == 0.0
+
+
+def test_a_price_move_is_graded_off_the_stored_entry_market_probability(final_game):
+    """The view stores the de-vigged pair the bet was priced on and no under
+    price. grade_bets must carry that pair to CLV, or every bet falls back to
+    the model curve, which reads a pure price move at one line as 0."""
+    _bet("BUF_receiver_a", line=64.5, implied_prob=0.5, implied_prob_under=0.5)
+    _stat("BUF_receiver_a", "BUF", receiving_yards=71.0)
+    [outcome] = grade_bets(SEASON, WEEK)
+    _odds("BUF_receiver_a", 64.5, PAST_KICKOFF - timedelta(days=1), under_price=-110)
+    _odds(
+        "BUF_receiver_a", 64.5, PAST_KICKOFF - timedelta(hours=1),
+        price=-140, under_price=120,
+    )
+
+    average = compute_and_save_clv(SEASON, WEEK, [outcome])
+
+    raw_over, raw_under = 140 / 240, 100 / 220
+    expected_bp = (raw_over / (raw_over + raw_under) - 0.5) * 10_000
+    assert average == pytest.approx(expected_bp, abs=1e-2)
+    assert average > 0
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,8 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from config import config
-from pipeline_jobs.service import JobService
+from pipeline_jobs.service import QUEUED_STATUSES, JobService
+from utils.db import fetchone
 
 config.logs_dir.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -23,6 +24,30 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
+# A job in any of these states will still run the week; enqueueing another
+# would only stack duplicate runs and burn odds-API quota.
+ACTIVE_JOB_STATUSES = (*QUEUED_STATUSES, "running")
+
+
+def active_job_for_week(season: int, week: int) -> tuple[str, str, str] | None:
+    """Return ``(job_id, run_id, status)`` of an in-flight job for the week."""
+    placeholders = ", ".join("?" for _ in ACTIVE_JOB_STATUSES)
+    row = fetchone(
+        f"""
+        SELECT j.job_id, j.run_id, j.status
+        FROM pipeline_jobs j
+        JOIN pipeline_runs r ON r.run_id = j.run_id
+        WHERE r.season = ? AND r.week = ? AND j.job_type = 'nfl_weekly'
+          AND j.status IN ({placeholders})
+        ORDER BY j.created_at DESC
+        LIMIT 1
+        """,
+        (season, week, *ACTIVE_JOB_STATUSES),
+    )
+    if not row:
+        return None
+    return str(row[0]), str(row[1]), str(row[2])
 
 
 class PipelineScheduler:
@@ -46,6 +71,23 @@ class PipelineScheduler:
         """Resolve the active NFL week and enqueue the fail-closed production path."""
         season = int(nfl.get_current_season(roster=True))
         week = int(nfl.get_current_week())
+        active = active_job_for_week(season, week)
+        if active is not None:
+            job_id, run_id, status = active
+            logger.info(
+                "Skipping enqueue for %s week %s: run %s is already %s",
+                season,
+                week,
+                run_id,
+                status,
+            )
+            return {
+                "success": True,
+                "status": "skipped",
+                "reason": f"run {run_id} already {status}",
+                "run_id": run_id,
+                "job_id": job_id,
+            }
         now = datetime.now(timezone.utc)
         bucket = now.strftime("%Y%m%dT%H%M")
         job = JobService().create_pipeline_job(

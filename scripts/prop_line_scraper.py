@@ -12,7 +12,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Container, Dict, List, Optional, cast
+from typing import Any, Container, Dict, Iterable, List, Optional, cast
 
 import pandas as pd
 
@@ -22,12 +22,34 @@ from config import config
 from scripts.simple_cache import redact_api_key, simple_cached_client
 from utils.db import execute, get_connection, read_dataframe
 from utils.event_keys import UnresolvableEventError, resolve_event_id
-from utils.player_id_utils import canonicalize_team, make_player_id, team_for_player
+from utils.matching import LooseRosterIndex, build_loose_roster_index, resolve_roster_player
+from utils.odds_math import implied_probability_no_vig
+from utils.player_id_utils import canonicalize_team, make_player_id
 from utils.two_sided_odds import pair_two_sided_prices
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+# How far a feed kickoff may sit from the stored schedule and still be the same
+# game. Flex scheduling moves a game by hours within its week; a rematch of the
+# same matchup is weeks away.
+_KICKOFF_TOLERANCE = pd.Timedelta(days=3)
+
+# Odds API market key -> market key in sports/markets.py (what
+# weekly_projections.market and weekly_odds.market carry).
+ODDS_API_MARKETS = {
+    "player_pass_yds": "passing_yards",
+    "player_rush_yds": "rushing_yards",
+    "player_reception_yds": "receiving_yards",
+    "player_receptions": "receptions",
+    # A Yes/No market; utils.two_sided_odds stores Yes/No as Over/Under 0.5.
+    "player_anytime_td": "anytime_touchdown",
+}
+
+# The outcome each two-sided quote is read from: the Over, or the Yes of a
+# Yes/No market. The opposite side is paired to it at the same line.
+_PRIMARY_SIDES = frozenset({"Over", "Yes"})
 
 
 class NFLPropScraper:
@@ -77,17 +99,6 @@ class NFLPropScraper:
             "Washington Commanders": "WAS",
         }
 
-        # Position mapping for common names
-        self.position_mapping = {
-            "Running Back": "RB",
-            "Wide Receiver": "WR",
-            "Tight End": "TE",
-            "Quarterback": "QB",
-            "RB": "RB",
-            "WR": "WR",
-            "TE": "TE",
-            "QB": "QB",
-        }
 
     @staticmethod
     def _save_snapshot(path: Path, snapshot: Dict) -> None:
@@ -125,54 +136,118 @@ class NFLPropScraper:
         return status, age, created_at
 
     @staticmethod
-    def _select_scheduled_events(
-        events: List[Dict],
-        schedule: pd.DataFrame,
-        now: pd.Timestamp | None = None,
-    ) -> List[Dict]:
-        """Return every API event whose kickoff belongs to the requested NFL week.
+    def _as_of(now: pd.Timestamp | None = None) -> pd.Timestamp:
+        if now is None:
+            return pd.Timestamp.now(tz="UTC")
+        stamp = pd.Timestamp(now)
+        return stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
 
-        Coverage is only required for games that have not kicked off yet. The
-        Odds API's events endpoint lists upcoming games, so a Thursday game is
-        gone by Saturday and demanding the whole week would fail every scrape
-        after the week's first kickoff. A game already under way has no pregame
-        line left to capture, so its absence is expected, not a fault. Missing
-        odds for a game still to come is still a hard failure: that is the case
-        where the card would quietly be built from a partial slate.
+    @staticmethod
+    def _split_schedule(
+        schedule: pd.DataFrame, now: pd.Timestamp | None = None
+    ) -> tuple[pd.DataFrame, int, pd.Timestamp]:
+        """Split the requested week into games still to kick off and games started.
 
-        ``now`` is injectable so tests can pin the clock.
+        Returns ``(upcoming, started_count, as_of)``. ``upcoming`` carries a
+        parsed ``kickoff_ts`` column. Only upcoming games have a pregame line
+        left to capture, so they alone form the coverage denominator.
         """
         if schedule.empty or "kickoff_utc" not in schedule:
             raise RuntimeError("Requested-week schedule has no kickoff timestamps")
         kickoffs = pd.to_datetime(schedule["kickoff_utc"], errors="coerce", utc=True)
         if kickoffs.isna().any():
             raise RuntimeError("Requested-week schedule contains missing kickoff timestamps")
-        # Compare timezone-aware timestamps directly. Pandas 3 may store a
-        # Series at microsecond resolution while scalar ``Timestamp.value`` is
-        # nanoseconds, which made equivalent kickoffs compare unequal.
-        scheduled_kickoffs = set(kickoffs.tolist())
-        selected = []
-        for event in events:
-            kickoff = pd.to_datetime(event.get("commence_time"), errors="coerce", utc=True)
-            if pd.notna(kickoff) and kickoff in scheduled_kickoffs:
-                selected.append(event)
+        as_of = NFLPropScraper._as_of(now)
+        is_upcoming = kickoffs > as_of
+        upcoming = schedule.loc[is_upcoming].assign(kickoff_ts=kickoffs[is_upcoming])
+        return upcoming.reset_index(drop=True), int((~is_upcoming).sum()), as_of
 
-        as_of = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now).tz_convert("UTC")
-        upcoming = int((kickoffs > as_of).sum())
-        started = len(schedule) - upcoming
-        if len(selected) < upcoming:
+    @staticmethod
+    def _select_scheduled_events(
+        events: List[Dict],
+        schedule: pd.DataFrame,
+        now: pd.Timestamp | None = None,
+    ) -> List[Dict]:
+        """Return one API event for each requested-week game still to kick off.
+
+        Coverage is only required for games that have not kicked off yet. The
+        Odds API's events endpoint lists upcoming games, so a Thursday game is
+        gone by Saturday and demanding the whole week would fail every scrape
+        after the week's first kickoff. A game already under way has no pregame
+        line left to capture, so its absence is expected, not a fault, and an
+        event the feed still lists after its kickoff is not scraped. Missing
+        odds for a game still to come is still a hard failure: that is the case
+        where the card would quietly be built from a partial slate.
+
+        Coverage is checked per game, not by count. When the schedule carries
+        ``home_team``/``away_team`` each upcoming game must be matched by its
+        matchup (kickoff within ``_KICKOFF_TOLERANCE``, which absorbs flex
+        moves); otherwise by its exact kickoff. Each event satisfies at most
+        one game, so a stray or in-progress event cannot mask a missing one.
+
+        ``now`` is injectable so tests can pin the clock.
+        """
+        upcoming, started, as_of = NFLPropScraper._split_schedule(schedule, now)
+        by_matchup = {"home_team", "away_team"}.issubset(schedule.columns)
+
+        candidates: List[tuple[int, pd.Timestamp, tuple[str, str]]] = []
+        for index, event in enumerate(events):
+            # Compare timezone-aware timestamps directly. Pandas 3 may store a
+            # Series at microsecond resolution while scalar ``Timestamp.value``
+            # is nanoseconds, which made equivalent kickoffs compare unequal.
+            kickoff = pd.to_datetime(event.get("commence_time"), errors="coerce", utc=True)
+            if pd.isna(kickoff) or kickoff <= as_of:
+                continue
+            matchup = (
+                canonicalize_team(event.get("home_team")),
+                canonicalize_team(event.get("away_team")),
+            )
+            candidates.append((index, kickoff, matchup))
+
+        claimed: set[int] = set()
+        missing: List[str] = []
+        for game in upcoming.itertuples(index=False):
+            game_kickoff = game.kickoff_ts
+            game_matchup = (
+                canonicalize_team(getattr(game, "home_team", "")),
+                canonicalize_team(getattr(game, "away_team", "")),
+            )
+            match = None
+            for index, kickoff, matchup in candidates:
+                if index in claimed:
+                    continue
+                if by_matchup:
+                    if not all(game_matchup) or matchup != game_matchup:
+                        continue
+                    if abs(kickoff - game_kickoff) > _KICKOFF_TOLERANCE:
+                        continue
+                elif kickoff != game_kickoff:
+                    continue
+                match = index
+                break
+            if match is None:
+                label = getattr(game, "game_id", None) or (
+                    f"{game_matchup[1]}@{game_matchup[0]}" if all(game_matchup) else ""
+                )
+                missing.append(f"{label} {game_kickoff.isoformat()}".strip())
+            else:
+                claimed.add(match)
+
+        if missing:
             raise RuntimeError(
-                f"Live odds cover {len(selected)} of {upcoming} requested-week games "
-                f"still to kick off ({started} already started, as of {as_of.isoformat()})"
+                f"Live odds cover {len(claimed)} of {len(upcoming)} requested-week games "
+                f"still to kick off ({started} already started, as of {as_of.isoformat()}); "
+                f"missing: {', '.join(missing)}"
             )
         if started:
             logger.info(
                 "%d of %d week games already kicked off; scraping the remaining %d",
                 started,
                 len(schedule),
-                upcoming,
+                len(upcoming),
             )
-        return selected
+        # Preserve the feed's order.
+        return [events[index] for index in sorted(claimed)]
 
     # ------------------------ Weekly odds (Week N) ------------------------
     @staticmethod
@@ -213,14 +288,23 @@ class NFLPropScraper:
         load_json_path: Optional[Path] = None,
         *,
         allow_synthetic: bool = True,
+        now: pd.Timestamp | None = None,
     ) -> List[Dict]:
         """Fetch weekly player props for a given NFL week.
         Returns list of dicts with keys: player, team, position, book, stat, line, over_odds, under_odds,
         game_date, home_team, away_team
         """
-        # The validator requires exactly these markets, so fetching any other
-        # list can never pass coverage.
-        markets = list(config.pipeline.odds_required_markets)
+        # The validator requires exactly the required markets, so only they
+        # count toward coverage. Optional markets (anytime TD) are fetched and
+        # stored too, but kept out of the audit so a thin optional market can
+        # neither fail nor pad the required coverage.
+        required_markets = list(config.pipeline.odds_required_markets)
+        optional_markets = [
+            market
+            for market in getattr(config.pipeline, "odds_optional_markets", ())
+            if market not in required_markets
+        ]
+        markets = required_markets + optional_markets
         results: List[Dict] = []
         source_statuses: set[str] = set()
         response_ages: List[float] = []
@@ -235,6 +319,8 @@ class NFLPropScraper:
             "snapshot_at": datetime.now(timezone.utc).isoformat(),
             "responses_observed": 0,
             "scheduled_events": 0,
+            "started_events": 0,
+            "week_events": 0,
             "covered_events": 0,
             "covered_event_markets": 0,
             "sportsbooks_per_event_market": {},
@@ -353,24 +439,33 @@ class NFLPropScraper:
         snapshot["events"] = events
         schedule = read_dataframe(
             """
-            SELECT game_id, kickoff_utc
+            SELECT game_id, home_team, away_team, kickoff_utc
             FROM games
             WHERE season = ? AND week = ?
             """,
             params=(season, week),
         )
-        self.last_weekly_audit["scheduled_events"] = len(schedule)
-        events = self._select_scheduled_events(events, schedule)
+        # The coverage denominator is the games still to kick off at scrape
+        # time: a started game has no pregame line, so counting it would fail
+        # every run after the week's first kickoff. Started games are recorded
+        # separately so the audit still shows the whole week.
+        upcoming, started_events, as_of = self._split_schedule(schedule, now)
+        self.last_weekly_audit["scheduled_events"] = len(upcoming)
+        self.last_weekly_audit["started_events"] = started_events
+        self.last_weekly_audit["week_events"] = len(schedule)
+        events = self._select_scheduled_events(events, schedule, now=as_of)
         roster_ids = self._roster_player_ids(season)
         self.last_weekly_audit["team_unresolved"] = 0
 
-        # Odds API market key -> stat column in sports/markets.py.
-        stat_mapping = {
-            "player_pass_yds": "passing_yards",
-            "player_rush_yds": "rushing_yards",
-            "player_reception_yds": "receiving_yards",
-            "player_receptions": "receptions",
-        }
+        stat_mapping = ODDS_API_MARKETS
+        unmapped = [market for market in markets if market not in stat_mapping]
+        if unmapped:
+            # Storing the provider key as the market would never join a
+            # projection; skip it so coverage fails loud instead.
+            logger.error(
+                "No internal market for Odds API market(s) %s; not fetched", unmapped
+            )
+            markets = [market for market in markets if market in stat_mapping]
 
         # Fetch props for each event and market
         for event in events:
@@ -459,7 +554,7 @@ class NFLPropScraper:
                         market
                     ] = market_payload
 
-                stat_category = stat_mapping.get(market, market)
+                stat_category = stat_mapping[market]
                 rows_before_market = len(results)
 
                 # Data structure: single event with bookmakers
@@ -469,7 +564,7 @@ class NFLPropScraper:
                         if market_data.get("key") != market:
                             continue
                         for outcome in market_data.get("outcomes", []):
-                            if outcome.get("name") != "Over":
+                            if outcome.get("name") not in _PRIMARY_SIDES:
                                 continue
                             player_desc = outcome.get("description", "")
                             info = self._extract_player_info(player_desc, home, away, roster_ids)
@@ -499,9 +594,10 @@ class NFLPropScraper:
                                 {
                                     "event_id": game_key,
                                     "source_player_id": outcome.get("id"),
-                                    "player_id": make_player_id(info["name"], info["team"]),
+                                    "player_id": info["player_id"],
                                     "player": info["name"],
                                     "team": info["team"],
+                                    "team_guessed": info["team_guessed"],
                                     "position": info["position"],
                                     "book": book_name,
                                     "stat": stat_category,
@@ -513,13 +609,18 @@ class NFLPropScraper:
                                     "away_team": away,
                                 }
                             )
-                            if book_name and book_name != "Unknown":
-                                sportsbooks_by_pair.setdefault((str(event_id), market), set()).add(
+                            if (
+                                market in required_markets
+                                and book_name
+                                and book_name != "Unknown"
+                            ):
+                                sportsbooks_by_pair.setdefault((game_key, market), set()).add(
                                     str(book_name)
                                 )
 
-                if len(results) > rows_before_market:
-                    covered_pairs.add((str(event_id), market))
+                # Keyed by game, not provider id: coverage is per scheduled game.
+                if market in required_markets and len(results) > rows_before_market:
+                    covered_pairs.add((game_key, market))
                     self.last_weekly_audit["covered_events"] = len(
                         {covered_event for covered_event, _market in covered_pairs}
                     )
@@ -539,7 +640,9 @@ class NFLPropScraper:
             "response_timestamps": response_timestamps,
             "snapshot_at": datetime.now(timezone.utc).isoformat(),
             "responses_observed": responses_observed,
-            "scheduled_events": len(schedule),
+            "scheduled_events": len(upcoming),
+            "started_events": started_events,
+            "week_events": len(schedule),
             "covered_events": len({event_id for event_id, _market in covered_pairs}),
             "covered_event_markets": len(covered_pairs),
             "sportsbooks_per_event_market": {
@@ -551,25 +654,54 @@ class NFLPropScraper:
         return results
 
     def save_weekly_odds(self, rows: List[Dict], week: int, season: int) -> int:
-        """Append one timestamped, two-sided snapshot to the canonical odds table."""
+        """Append one timestamped, two-sided snapshot to the canonical odds table.
+
+        Rows that cannot be tied to a game are dropped before writing. The rest
+        are written in a single transaction: a failure on any row rolls back
+        the whole batch and returns 0, so a half-written snapshot never becomes
+        the newest ``as_of`` that readers treat as the current market.
+        """
         if not rows:
             return 0
         as_of = datetime.now(timezone.utc).isoformat()
-        saved = 0
         unresolved = 0
+        resolved: List[tuple[str, Dict]] = []
+        for r in rows:
+            try:
+                # A key that joins to no game is worse than a rejected row:
+                # it looks joinable and silently drops out of every kickoff
+                # join downstream.
+                event_id = resolve_event_id(
+                    season,
+                    week,
+                    home_team=r.get("home_team"),
+                    away_team=r.get("away_team"),
+                    existing=r.get("event_id"),
+                )
+            except UnresolvableEventError as e:
+                unresolved += 1
+                logger.warning("Dropping odds row for %s: no game key (%s)", r.get("player"), e)
+                continue
+            resolved.append((event_id, r))
+        if unresolved:
+            # Systematic key failure drops every row; at per-row warning level
+            # that reads as normal operation.
+            logger.error(
+                "Dropped %s of %s odds rows with no resolvable game key for %s week %s",
+                unresolved,
+                len(rows),
+                season,
+                week,
+            )
+        if not resolved:
+            return 0
+
+        saved = 0
         with get_connection() as conn:
-            for r in rows:
-                try:
-                    # A key that joins to no game is worse than a rejected row:
-                    # it looks joinable and silently drops out of every kickoff
-                    # join downstream.
-                    event_id = resolve_event_id(
-                        season,
-                        week,
-                        home_team=r.get("home_team"),
-                        away_team=r.get("away_team"),
-                        existing=r.get("event_id"),
-                    )
+            current: Optional[Dict] = None
+            try:
+                for event_id, r in resolved:
+                    current = r
                     execute(
                         """
                         INSERT INTO weekly_odds
@@ -592,23 +724,57 @@ class NFLPropScraper:
                         conn=conn,
                     )
                     saved += 1
-                except UnresolvableEventError as e:
-                    unresolved += 1
-                    logger.warning("Dropping odds row for %s: no game key (%s)", r.get("player"), e)
-                except Exception as e:
-                    logger.warning("Save weekly odds failed for %s: %s", r.get("player"), e)
+            except Exception as e:
+                conn.rollback()
+                logger.error(
+                    "Save weekly odds failed for %s; rolled back all %s rows of the %s week %s "
+                    "snapshot: %s",
+                    (current or {}).get("player"),
+                    len(resolved),
+                    season,
+                    week,
+                    e,
+                )
+                return 0
             conn.commit()
-        if unresolved:
-            # Systematic key failure drops every row; at per-row warning level
-            # that reads as normal operation.
-            logger.error(
-                "Dropped %s of %s odds rows with no resolvable game key for %s week %s",
-                unresolved,
-                len(rows),
-                season,
-                week,
-            )
         return saved
+
+    @staticmethod
+    def _line_imbalance(row: Dict) -> float:
+        """Distance of a quote from a 50/50 market; the main line is the minimum.
+
+        Alternate lines are priced well away from even money, so the most
+        balanced Over/Under pair is the book's main line. A row without a
+        usable two-sided price ranks last.
+        """
+        try:
+            p_over, p_under = implied_probability_no_vig(
+                int(row["over_odds"]), int(row["under_odds"])
+            )
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            return float("inf")
+        return abs(p_over - p_under)
+
+    @classmethod
+    def _keep_main_lines(cls, rows: List[Dict]) -> List[Dict]:
+        """Collapse to one row per (event, player, stat, book): the main line.
+
+        A book posting alternates returns several lines for the same player
+        and market. Storing whichever came last would record an alternate as
+        the book's line, so keep the most balanced pair; ties keep the first.
+        """
+        unique_rows: dict[tuple[object, ...], Dict] = {}
+        for row in rows:
+            key = (
+                row.get("event_id"),
+                row.get("player_id"),
+                row.get("stat"),
+                row.get("book"),
+            )
+            kept = unique_rows.get(key)
+            if kept is None or cls._line_imbalance(row) < cls._line_imbalance(kept):
+                unique_rows[key] = row
+        return list(unique_rows.values())
 
     def run_weekly_update(
         self,
@@ -627,16 +793,7 @@ class NFLPropScraper:
             load_json_path=load_json_path,
             allow_synthetic=allow_synthetic,
         )
-        unique_rows: dict[tuple[object, ...], Dict] = {}
-        for row in rows:
-            key = (
-                row.get("event_id"),
-                row.get("player_id"),
-                row.get("stat"),
-                row.get("book"),
-            )
-            unique_rows[key] = row
-        rows = list(unique_rows.values())
+        rows = self._keep_main_lines(rows)
         saved = self.save_weekly_odds(rows, week, season)
         if saved != len(rows):
             raise RuntimeError(f"Persisted only {saved} of {len(rows)} weekly odds rows")
@@ -679,8 +836,16 @@ class NFLPropScraper:
         """Extract player name, team, and position from description.
 
         The book names the player, not the club. The season roster decides
-        between the two clubs in the game; a name on neither roster falls
-        back to the old home-club guess, which is wrong for every away player.
+        between the two clubs in the game: first on the exact player_id, then
+        on a spelling-insensitive key with first-name aliases ("JaMarr Chase",
+        "Hollywood Brown"; see ``utils.matching.resolve_roster_player``). A
+        roster hit returns the roster's own ``player_id`` so the quote joins
+        the projection at tier 1.
+
+        A name on neither roster falls back to the home-club guess, which is
+        wrong for every away player, so the result carries
+        ``team_guessed=True`` and downstream matching must treat the team as
+        unknown rather than as evidence.
         """
 
         # Basic extraction (format varies by sportsbook)
@@ -692,17 +857,51 @@ class NFLPropScraper:
             player_name = player_description.strip()
             team_info = ""
 
-        team = team_for_player(player_name, (home_team, away_team), roster_ids)
+        team, player_id = resolve_roster_player(
+            player_name,
+            (home_team, away_team),
+            roster_ids,
+            self._loose_roster_index(roster_ids),
+        )
+        team_guessed = False
         if not team:
             self.last_weekly_audit["team_unresolved"] = (
                 self.last_weekly_audit.get("team_unresolved", 0) + 1
             )
-            team = self._guess_team(player_name, home_team, away_team, team_info)
+            team = self._team_from_info(team_info)
+            if not team:
+                team = self._guess_team(player_name, home_team, away_team, team_info)
+                team_guessed = True
+            player_id = make_player_id(player_name, team)
 
         # Try to determine position (would need player database for accuracy)
         position = self._guess_position(player_name)
 
-        return {"name": player_name, "team": team, "position": position}
+        return {
+            "name": player_name,
+            "team": team,
+            "position": position,
+            "player_id": player_id,
+            "team_guessed": team_guessed,
+        }
+
+    def _loose_roster_index(self, roster_ids: Container[str]) -> LooseRosterIndex:
+        """Loose-name index of ``roster_ids``, built once per roster object."""
+        cached = getattr(self, "_loose_index_cache", None)
+        if cached is not None and cached[0] is roster_ids:
+            return cached[1]
+        index = (
+            build_loose_roster_index(roster_ids) if isinstance(roster_ids, Iterable) else {}
+        )
+        self._loose_index_cache = (roster_ids, index)
+        return index
+
+    def _team_from_info(self, team_info: str) -> str:
+        """The club a book named next to the player ("Name - Denver Broncos")."""
+        for full_name, abbrev in self.team_mapping.items():
+            if team_info and full_name.lower() in team_info.lower():
+                return abbrev
+        return ""
 
     def _guess_team(self, player_name: str, home_team: str, away_team: str, team_info: str) -> str:
         """Guess player's team (simplified - would need player database)"""

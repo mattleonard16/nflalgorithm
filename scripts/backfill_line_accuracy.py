@@ -20,6 +20,7 @@ import pandas as pd
 from config import config
 from utils.db import read_dataframe, write_dataframe
 from utils.nfl_markets import DATABASE_STAT_COLUMNS, melt_actuals
+from utils.odds_quality import describe_excluded, filter_gradeable_odds
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,68 +48,72 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_closing_lines(seasons: List[int]) -> pd.DataFrame:
-    """Load the latest (closing) odds snapshot per player/market/sportsbook/week."""
+# One book's quote on one player prop in one week.
+_LINE_KEY = ["season", "week", "player_id", "market", "sportsbook"]
+
+
+def _load_gradeable_snapshots(seasons: List[int]) -> pd.DataFrame:
+    """Every gradeable odds snapshot for ``seasons``, with ``as_of`` parsed.
+
+    Screened through ``filter_gradeable_odds``: ``SimBook`` lines are derived
+    from the realized outcome, so a hit rate measured against them is
+    circular, and an unjoinable ``event_id`` cannot be tied to a game. A
+    ``_as_of_ts`` column holds the parsed timestamp so opening and closing are
+    picked chronologically rather than by TEXT comparison, which misorders
+    mixed UTC offsets (the same rule ``utils/clv.py`` applies).
+    """
     placeholders = ",".join("?" for _ in seasons)
     query = f"""
-    SELECT
-        o.season, o.week, o.player_id, o.market, o.sportsbook,
-        o.line, o.price, o.as_of
-    FROM weekly_odds o
-    INNER JOIN (
-        SELECT season, week, player_id, market, sportsbook,
-               MAX(as_of) AS max_as_of
-        FROM weekly_odds
-        WHERE season IN ({placeholders})
-        GROUP BY season, week, player_id, market, sportsbook
-    ) latest
-        ON o.season = latest.season
-        AND o.week = latest.week
-        AND o.player_id = latest.player_id
-        AND o.market = latest.market
-        AND o.sportsbook = latest.sportsbook
-        AND o.as_of = latest.max_as_of
-    WHERE o.season IN ({placeholders})
-    ORDER BY o.season, o.week, o.player_id
+    SELECT event_id, season, week, player_id, market, sportsbook, line, price, as_of
+    FROM weekly_odds
+    WHERE season IN ({placeholders})
     """
-    params = tuple(seasons) + tuple(seasons)
     try:
-        return read_dataframe(query, params=params)
+        odds = read_dataframe(query, params=tuple(seasons))
     except Exception as e:
-        logger.error("Failed to load closing lines: %s", e)
+        logger.error("Failed to load odds snapshots: %s", e)
         return pd.DataFrame()
+    if odds.empty:
+        return odds
+
+    excluded = describe_excluded(odds)
+    odds = filter_gradeable_odds(odds)
+    if excluded["gradeable"] < excluded["total"]:
+        logger.info("Screened odds snapshots out of line accuracy: %s", excluded)
+
+    odds["_as_of_ts"] = pd.to_datetime(odds["as_of"], errors="coerce", utc=True, format="mixed")
+    unparsed = int(odds["_as_of_ts"].isna().sum())
+    if unparsed:
+        logger.warning("Dropping %d odds snapshots with unparseable as_of", unparsed)
+        odds = odds[odds["_as_of_ts"].notna()]
+    return odds
+
+
+def _pick_snapshot(odds: pd.DataFrame, latest: bool) -> pd.DataFrame:
+    """One row per ``_LINE_KEY``: the latest snapshot, or the earliest."""
+    if odds.empty:
+        return pd.DataFrame()
+    grouped = odds.groupby(_LINE_KEY, dropna=False)["_as_of_ts"]
+    idx = grouped.idxmax() if latest else grouped.idxmin()
+    return odds.loc[idx].sort_values(["season", "week", "player_id"]).reset_index(drop=True)
+
+
+def load_closing_lines(seasons: List[int]) -> pd.DataFrame:
+    """Load the latest (closing) gradeable snapshot per player/market/sportsbook/week."""
+    picked = _pick_snapshot(_load_gradeable_snapshots(seasons), latest=True)
+    if picked.empty:
+        return picked
+    return picked[[*_LINE_KEY, "line", "price", "as_of"]]
 
 
 def load_opening_lines(seasons: List[int]) -> pd.DataFrame:
-    """Load the earliest (opening) odds snapshot per player/market/sportsbook/week."""
-    placeholders = ",".join("?" for _ in seasons)
-    query = f"""
-    SELECT
-        o.season, o.week, o.player_id, o.market, o.sportsbook,
-        o.line AS open_line, o.as_of AS open_as_of
-    FROM weekly_odds o
-    INNER JOIN (
-        SELECT season, week, player_id, market, sportsbook,
-               MIN(as_of) AS min_as_of
-        FROM weekly_odds
-        WHERE season IN ({placeholders})
-        GROUP BY season, week, player_id, market, sportsbook
-    ) earliest
-        ON o.season = earliest.season
-        AND o.week = earliest.week
-        AND o.player_id = earliest.player_id
-        AND o.market = earliest.market
-        AND o.sportsbook = earliest.sportsbook
-        AND o.as_of = earliest.min_as_of
-    WHERE o.season IN ({placeholders})
-    ORDER BY o.season, o.week, o.player_id
-    """
-    params = tuple(seasons) + tuple(seasons)
-    try:
-        return read_dataframe(query, params=params)
-    except Exception as e:
-        logger.error("Failed to load opening lines: %s", e)
-        return pd.DataFrame()
+    """Load the earliest (opening) gradeable snapshot per player/market/sportsbook/week."""
+    picked = _pick_snapshot(_load_gradeable_snapshots(seasons), latest=False)
+    if picked.empty:
+        return picked
+    return picked[[*_LINE_KEY, "line", "as_of"]].rename(
+        columns={"line": "open_line", "as_of": "open_as_of"}
+    )
 
 
 def load_actual_stats(seasons: List[int]) -> pd.DataFrame:
@@ -278,7 +283,6 @@ def compute_season_type_accuracy(df: pd.DataFrame) -> Dict[str, Dict]:
             continue
         model_error = (subset["mu"] - subset["actual"]).abs().mean()
         line_error = (subset["line"] - subset["actual"]).abs().mean()
-        model_beats = float(model_error < line_error) if len(subset) > 0 else 0.0
         results[label]["model_mae_vs_actual"] = round(float(model_error), 3)
         results[label]["line_mae_vs_actual"] = round(float(line_error), 3)
         results[label]["model_beat_line_rate"] = round(

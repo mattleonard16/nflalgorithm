@@ -14,13 +14,27 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
 from config import config
-from utils.db import executemany, read_dataframe
+from utils.db import executemany, get_backend, read_dataframe
 from utils.nfl_markets import MARKET_TO_STAT
 
 logger = logging.getLogger(__name__)
 
 
 # ── Market-to-stat mapping ───────────────────────────────────────────
+
+# Projections carry the roster-form player_id ("DAL_ceedee_lamb") while stats
+# carry the abbreviated form ("DAL_c_lamb"), so joining on player_id alone
+# matches almost nothing. Bridge through nfl_roster_players' gsis_id, the same
+# key utils.grading.align_actuals_to_bets uses for bet grading. An id that maps
+# to more than one gsis_id in a season is ambiguous and falls back to a direct
+# player_id match, as does an id the roster does not know.
+_ROSTER_GSIS_BRIDGE = """
+    SELECT season, player_id, MIN(gsis_id) AS gsis_id
+    FROM nfl_roster_players
+    WHERE gsis_id IS NOT NULL AND gsis_id <> ''
+    GROUP BY season, player_id
+    HAVING COUNT(DISTINCT gsis_id) = 1
+"""
 
 # ── Outcome attribution ─────────────────────────────────────────────
 
@@ -208,13 +222,27 @@ def update_agent_performance(
     if not records:
         return 0
 
-    insert_sql = """
-    INSERT OR REPLACE INTO agent_performance (
-        season, week, agent_name, player_id, market,
-        recommendation, confidence, final_decision, outcome,
-        profit_units, correct, recorded_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """
+    # `INSERT OR REPLACE` is SQLite-only; MySQL spells the same upsert on the
+    # same primary key `ON DUPLICATE KEY UPDATE`.
+    key_columns = ("season", "week", "agent_name", "player_id", "market")
+    value_columns = (
+        "recommendation",
+        "confidence",
+        "final_decision",
+        "outcome",
+        "profit_units",
+        "correct",
+        "recorded_at",
+    )
+    columns = ", ".join(key_columns + value_columns)
+    placeholders = ", ".join("?" for _ in key_columns + value_columns)
+    if get_backend() == "mysql":
+        updates = ", ".join(f"{c} = VALUES({c})" for c in value_columns)
+        conflict = f"ON DUPLICATE KEY UPDATE {updates}"
+    else:
+        updates = ", ".join(f"{c} = excluded.{c}" for c in value_columns)
+        conflict = f"ON CONFLICT({', '.join(key_columns)}) DO UPDATE SET {updates}"
+    insert_sql = f"INSERT INTO agent_performance ({columns}) VALUES ({placeholders}) {conflict}"
     executemany(insert_sql, records)
     logger.info("Inserted %d agent performance records for s=%d w=%d", len(records), season, week)
     return len(records)
@@ -486,10 +514,15 @@ def _model_accuracy_trends(
            AVG(ABS(p.mu - {stat_expr})) as mae,
            COUNT(*) as n
     FROM weekly_projections p
+    LEFT JOIN ({bridge}) r
+        ON r.season = p.season AND r.player_id = p.player_id
     INNER JOIN player_stats_enhanced s
-        ON p.player_id = s.player_id
-        AND p.season = s.season
+        ON p.season = s.season
         AND p.week = s.week
+        AND (
+            s.gsis_id = r.gsis_id
+            OR (r.gsis_id IS NULL AND s.player_id = p.player_id)
+        )
     WHERE p.season = ? AND p.week BETWEEN ? AND ?
     GROUP BY p.week, p.market
     ORDER BY p.week, p.market
@@ -502,7 +535,7 @@ def _model_accuracy_trends(
             stat_expr = "(COALESCE(s.rushing_tds, 0) + COALESCE(s.receiving_tds, 0))"
         else:
             stat_expr = f"s.{stat_col}"
-        formatted_query = query.format(stat_expr=stat_expr)
+        formatted_query = query.format(stat_expr=stat_expr, bridge=_ROSTER_GSIS_BRIDGE)
         try:
             df = read_dataframe(formatted_query, params=(season, week_start, week_end))
             for _, row in df.iterrows():
@@ -594,12 +627,20 @@ def _load_actual_stat(
         select_expr = stat_col
         result_col = stat_col
 
+    # Same gsis bridge as _model_accuracy_trends: the projection's player_id is
+    # the roster form, the stats row's is not.
     query = f"""
-    SELECT {select_expr} FROM player_stats_enhanced
-    WHERE season = ? AND week = ? AND player_id = ?
+    SELECT {select_expr} FROM player_stats_enhanced s
+    LEFT JOIN ({_ROSTER_GSIS_BRIDGE}) r
+        ON r.season = s.season AND r.player_id = ?
+    WHERE s.season = ? AND s.week = ?
+      AND (
+          s.gsis_id = r.gsis_id
+          OR (r.gsis_id IS NULL AND s.player_id = ?)
+      )
     """
     try:
-        df = read_dataframe(query, params=(season, week, player_id))
+        df = read_dataframe(query, params=(player_id, season, week, player_id))
         if df.empty:
             return None
         val = df.iloc[0][result_col]
@@ -722,7 +763,7 @@ def main() -> None:
                 f"({tp['hit_rate']:.1%}), avg profit={tp['avg_profit']:.2f}"
             )
         if recs["recommendations"]:
-            print(f"\nRecommendations:")
+            print("\nRecommendations:")
             for rec in recs["recommendations"]:
                 print(f"  [{rec['tier']}] {rec['action']}: {rec['reason']}")
 
@@ -760,7 +801,7 @@ def _print_report_summary(report: Dict[str, Any]) -> None:
 
     recs = report.get("threshold_recommendations", {})
     if recs.get("recommendations"):
-        print(f"\nThreshold Recommendations:")
+        print("\nThreshold Recommendations:")
         for rec in recs["recommendations"]:
             print(f"  [{rec['tier']}] {rec['action']}: {rec['reason']}")
 

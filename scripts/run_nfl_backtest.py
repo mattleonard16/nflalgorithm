@@ -10,6 +10,11 @@ Two production-safety guarantees, enforced here:
 - ``weekly_projections`` is never written — the persistence hook is replaced
   with a no-op, so stored pregame evidence for past weeks stays untouched.
 
+And one honesty guarantee: while week W trains and predicts, every
+defense-multiplier lookup is clamped to ``through_week <= W - 1``
+(``clamp_defense_lookahead``), because the replayed season already holds
+week W's games and the lookup's cutoff is inclusive.
+
 The weekly model is proprietary and gitignored; this script fails with a clear
 message where that module is absent (e.g. CI), and the harness it drives is
 covered by tests/test_nfl_backtest.py with a stub model instead.
@@ -28,10 +33,14 @@ under ``features`` so two runs can be told apart after the fact.
 from __future__ import annotations
 
 import argparse
+import functools
+import inspect
 import json
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterator
 
 import pandas as pd
 
@@ -76,6 +85,70 @@ def _patch_for_backtest(weekly, model_dir: Path) -> None:
     weekly._write_predictions = _no_write
 
 
+# Defense-multiplier entry points that read player_stats_enhanced with an
+# inclusive ``week <= through_week`` cutoff.
+DEFENSE_LOOKUPS = ("get_defense_multiplier", "compute_defense_vs_position_multipliers")
+
+
+def _clamp_through_week(func, season: int, week: int):
+    """Wrap ``func`` so a target-season ``through_week`` never reaches ``week``."""
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError) as exc:
+        raise SystemExit(f"cannot inspect defense lookup {func!r}: {exc}") from exc
+    if "through_week" not in signature.parameters:
+        raise SystemExit(
+            f"defense lookup {getattr(func, '__name__', func)!r} takes no through_week; "
+            "update scripts/run_nfl_backtest.py's look-ahead clamp to match"
+        )
+
+    @functools.wraps(func)
+    def clamped(*args, **kwargs):
+        bound = signature.bind(*args, **kwargs)
+        through_week = bound.arguments.get("through_week")
+        call_season = bound.arguments.get("season", season)
+        if (
+            through_week is not None
+            and int(call_season) == season
+            and int(through_week) >= week
+        ):
+            bound.arguments["through_week"] = week - 1
+        return func(*bound.args, **bound.kwargs)
+
+    return clamped
+
+
+@contextmanager
+def clamp_defense_lookahead(weekly, season: int, week: int) -> Iterator[None]:
+    """Keep target-week games out of the defense multipliers for one week.
+
+    ``utils.defense_adjustments`` reads ``week <= through_week``. A live run is
+    safe because the target week has no stat rows yet, but a walk-forward
+    backtest replays a season whose every week is already in the database, so
+    a ``through_week`` equal to the target week folds that week's own games
+    into the opponent multiplier (measured: core MAE 32.37 -> 31.77 leaked).
+
+    Every lookup is wrapped where it is looked up: on
+    ``utils.defense_adjustments`` (``get_defense_multiplier`` resolves
+    ``compute_defense_vs_position_multipliers`` through that module) and on
+    the weekly module, which binds ``get_defense_multiplier`` by name at
+    import (docs/DEPLOYMENT_MANIFEST.md). Originals are restored on exit,
+    including on error.
+    """
+    from utils import defense_adjustments
+
+    targets = [(defense_adjustments, name) for name in DEFENSE_LOOKUPS]
+    targets += [(weekly, name) for name in DEFENSE_LOOKUPS if hasattr(weekly, name)]
+    saved = [(owner, name, getattr(owner, name)) for owner, name in targets]
+    try:
+        for owner, name, original in saved:
+            setattr(owner, name, _clamp_through_week(original, season, week))
+        yield
+    finally:
+        for owner, name, original in reversed(saved):
+            setattr(owner, name, original)
+
+
 def _training_tuples(season: int, week: int, history_seasons: int) -> list[tuple[int, int]]:
     """(season, week) pairs strictly before the target week, bounded by depth."""
     frame = read_dataframe(
@@ -107,8 +180,9 @@ def _make_predict_fn(weekly, history_seasons: int):
             f"week {week}: training on {len(tuples)} season-week pairs "
             f"({tuples[0]} .. {tuples[-1]})"
         )
-        weekly.train_weekly_models(tuples)
-        return weekly.predict_week(season, week, roster_backed=False)
+        with clamp_defense_lookahead(weekly, season, week):
+            weekly.train_weekly_models(tuples)
+            return weekly.predict_week(season, week, roster_backed=False)
 
     return predict_fn
 
@@ -124,6 +198,12 @@ def _print_summary(report: dict) -> None:
     if "coverage_1sigma" in overall:
         line += f" cover1s={overall['coverage_1sigma']:.1%} z_std={overall['z_std']:.2f}"
     print(line)
+    coverage = report.get("match_coverage")
+    if coverage:
+        print(
+            f"unscored predictions: {coverage['unmatched']}/{coverage['predictions']} "
+            f"({coverage['unmatched_fraction']:.1%})"
+        )
     for market, group in sorted(report["by_market"].items()):
         line = (
             f"  {market}: n={group['count']} mae={group['mae']:.2f} bias={group['mean_bias']:+.2f}"

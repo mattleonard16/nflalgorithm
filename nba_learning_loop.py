@@ -774,7 +774,7 @@ def main() -> None:
 
         # Also show injury edge performance
         injury_perf = _injury_edge_performance(n_days=args.days)
-        print(f"\nInjury Edge Analysis:")
+        print("\nInjury Edge Analysis:")
         print(f"  Injury bets: {injury_perf['injury_bets']}")
         print(f"  Non-injury bets: {injury_perf['non_injury_bets']}")
         print(f"  Injury alpha: {injury_perf['injury_alpha']:.1%}")
@@ -823,7 +823,7 @@ def _print_nba_report_summary(report: Dict[str, Any]) -> None:
 
     injury = report.get("injury_edge_analysis", {})
     if injury:
-        print(f"\nInjury Edge Analysis:")
+        print("\nInjury Edge Analysis:")
         inj = injury.get("injury_bets", {})
         non_inj = injury.get("non_injury_bets", {})
         print(

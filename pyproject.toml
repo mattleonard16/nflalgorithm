@@ -11,6 +11,7 @@ authors = [
 dependencies = [
     "pandas>=2.1.0",
     "numpy>=1.24.0",
+    "scipy>=1.11.0",
     "scikit-learn>=1.3.0",
     "optuna>=3.4.0",
     "requests>=2.31.0",
@@ -19,11 +20,6 @@ dependencies = [
     "plotly>=5.17.0",
     "jinja2>=3.1.0",
     "rich>=13.7.0",
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "black>=23.9.0",
-    "isort>=5.12.0",
-    "mypy>=1.6.0",
     "pymysql>=1.1.0",
     "sqlalchemy>=2.0.0",
     "nflreadpy>=0.1.5",
@@ -46,13 +42,15 @@ dev = [
     "isort>=5.12.0",
     "mypy>=1.6.0",
 ]
-shap = ["shap>=0.44.0"]
 sentry = ["sentry-sdk>=2.0.0"]
 
 # [build-system]  # Disabled for simple script-based project
 # requires = ["hatchling"]
 # build-backend = "hatchling.build"
 
+# Test and lint tooling lives here, not in [project].dependencies, so it stays
+# out of requirements.txt and the production image. `uv sync` installs this
+# group by default; `uv export --no-dev` (requirements.txt) leaves it out.
 [dependency-groups]
 dev = [
     "pytest>=7.4.0",
@@ -60,6 +58,7 @@ dev = [
     "black>=23.9.0",
     "isort>=5.12.0",
     "mypy>=1.6.0",
+    "ruff>=0.6.0",
 ]
 
 [tool.uv]
@@ -74,6 +73,27 @@ target-version = ['py313']
 [tool.isort]
 profile = "black"
 line_length = 100
+
+# CI blocks on `ruff check .`. Pyflakes rules only (undefined names, unused
+# imports/variables, redefinitions); style stays with black/isort.
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = [
+    "frontend",
+    "node_modules",
+    ".venv",
+    "venv",
+    "migration_backup",
+    # Gitignored private modules: absent in CI, linted on the machine that has them.
+    "./config.py",
+    "./data_pipeline.py",
+    "./value_betting_engine.py",
+    "models/position_specific/weekly.py",
+]
+
+[tool.ruff.lint]
+select = ["F"]
 
 [tool.mypy]
 python_version = "3.13"

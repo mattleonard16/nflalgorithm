@@ -22,6 +22,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { CheckCircle2, XCircle, MinusCircle } from "lucide-react";
+import { normaliseResult } from "@/lib/utils";
 
 function KPICard({
   title,
@@ -60,9 +61,11 @@ function KPICard({
 }
 
 function ResultIcon({ result }: { result: string | null }) {
-  if (result === "WIN") {
+  // bet_outcomes.result is lowercase ("win"/"loss"/"push").
+  const norm = normaliseResult(result);
+  if (norm === "WIN") {
     return <CheckCircle2 className="h-5 w-5 text-green-400" />;
-  } else if (result === "LOSS") {
+  } else if (norm === "LOSS") {
     return <XCircle className="h-5 w-5 text-red-400" />;
   } else {
     return <MinusCircle className="h-5 w-5 text-slate-500" />;
@@ -92,11 +95,18 @@ export default function PerformancePage() {
 
   // Fetch outcomes when selected week changes
   useEffect(() => {
-    if (selectedWeek) {
-      getOutcomes(selectedWeek.season, selectedWeek.week)
-        .then(setOutcomes)
-        .catch(() => setOutcomes([]));
-    }
+    if (!selectedWeek) return;
+    let cancelled = false;
+    getOutcomes(selectedWeek.season, selectedWeek.week)
+      .then((data) => {
+        if (!cancelled) setOutcomes(data);
+      })
+      .catch(() => {
+        if (!cancelled) setOutcomes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedWeek]);
 
   if (loading) {

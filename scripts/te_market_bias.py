@@ -273,7 +273,7 @@ def print_terminal_summary(report: Dict) -> None:
     if tests["t_test"]:
         t = tests["t_test"]
         sig_label = "YES" if t["significant_at_05"] else "NO"
-        print(f"  T-test (regular vs playoff line_diff):")
+        print("  T-test (regular vs playoff line_diff):")
         print(f"    t={t['t_statistic']:.3f}, p={t['p_value']:.4f}, significant(0.05): {sig_label}")
     else:
         print("  T-test: insufficient data")
@@ -281,7 +281,7 @@ def print_terminal_summary(report: Dict) -> None:
     if tests["chi_squared"]:
         c = tests["chi_squared"]
         sig_label = "YES" if c["significant_at_05"] else "NO"
-        print(f"  Chi-squared (over/under rates):")
+        print("  Chi-squared (over/under rates):")
         print(f"    chi2={c['chi2_statistic']:.3f}, p={c['p_value']:.4f}, significant(0.05): {sig_label}")
     else:
         print("  Chi-squared: insufficient data")

@@ -423,7 +423,7 @@ class TestComputeContextFactors:
         )
         assert frame.iloc[0]["opponent"] == "KC"
 
-    def test_composite_is_the_product_of_the_components(self):
+    def test_composite_leaves_the_usage_trend_out_by_default(self):
         history = pd.DataFrame(
             [_history_row(week=i + 1, targets=v, receiving_yards=v * 10.0)
              for i, v in enumerate([4] * 5 + [9] * 3)]
@@ -435,6 +435,26 @@ class TestComputeContextFactors:
             players=_player(team="DEN"),
             games=GAMES,
             history=history,
+        ).iloc[0]
+        # The trend is still reported, and here it is far from neutral...
+        assert row["usage_trend_factor"] > 1.0
+        # ...but it does not move the projection.
+        expected = row["game_script_factor"] * row["matchup_history_factor"]
+        assert row["composite_factor"] == pytest.approx(expected)
+
+    def test_composite_is_the_product_of_the_components_when_trend_applied(self):
+        history = pd.DataFrame(
+            [_history_row(week=i + 1, targets=v, receiving_yards=v * 10.0)
+             for i, v in enumerate([4] * 5 + [9] * 3)]
+        )
+        row = compute_context_factors(
+            season=2025,
+            week=10,
+            market="receiving_yards",
+            players=_player(team="DEN"),
+            games=GAMES,
+            history=history,
+            params=ContextParams(apply_usage_trend=True),
         ).iloc[0]
         expected = (
             row["game_script_factor"]

@@ -2,10 +2,10 @@
 
 Covers:
 - compute_usage_features() with known team/player data
-- fga_share calculation (player FGA / team FGA)
-- min_share calculation
+- fga_share calculation (player FGA / team FGA), pre-game only
+- min_share calculation, pre-game only
+- no same-game leakage: a row's shares never use that row's box score
 - usage_delta (L5 - L10 trend)
-- is_usage_spike() with threshold detection
 - Edge cases: no team data, single game, zero FGA
 """
 
@@ -68,35 +68,36 @@ class TestComputeUsageFeatures:
         assert "fga_share" in result.columns
 
     def test_fga_share_calculation_correct(self):
-        """When player is the only player on team, fga_share = 1.0."""
+        """When player is the only player on team, every per-game share is 1.0,
+        so the pre-game share from game 2 on is 1.0. Game 1 has no history."""
         from utils.nba_usage import compute_usage_features
 
-        df = _make_player_df(1)
-        df["fga"] = [20.0]
+        df = _make_player_df(2)
         result = compute_usage_features(df)
-        # With only one player on BOS in this game, team_fga = player_fga
-        assert result.iloc[0]["fga_share"] == pytest.approx(1.0)
+        assert math.isnan(result.iloc[0]["fga_share"])
+        assert result.iloc[1]["fga_share"] == pytest.approx(1.0)
 
     def test_fga_share_with_two_players(self):
-        """fga_share = player_fga / team_fga when multiple players share a game."""
+        """fga_share is the prior games' player_fga / team_fga. Game 2's value
+        is game 1's share (0.20), not game 2's own share (0.50)."""
         from utils.nba_usage import compute_usage_features
 
         df = pd.DataFrame(
             {
-                "player_id": [1, 2],
-                "player_name": ["Player A", "Player B"],
-                "team_abbreviation": ["BOS", "BOS"],
-                "season": [2025, 2025],
-                "game_date": ["2026-01-01", "2026-01-01"],
-                "game_id": ["g0001", "g0001"],
-                "fga": [20.0, 80.0],
-                "min": [34.0, 34.0],
-                "pts": [25.0, 30.0],
+                "player_id": [1, 2, 1, 2],
+                "player_name": ["Player A", "Player B"] * 2,
+                "team_abbreviation": ["BOS"] * 4,
+                "season": [2025] * 4,
+                "game_date": ["2026-01-01", "2026-01-01", "2026-01-03", "2026-01-03"],
+                "game_id": ["g0001", "g0001", "g0002", "g0002"],
+                "fga": [20.0, 80.0, 50.0, 50.0],
+                "min": [34.0] * 4,
+                "pts": [25.0, 30.0, 25.0, 30.0],
             }
-        )
+        ).sort_values(["player_id", "game_date"]).reset_index(drop=True)
         result = compute_usage_features(df)
-        player_a = result[result["player_id"] == 1].iloc[0]
-        assert player_a["fga_share"] == pytest.approx(0.20)
+        player_a = result[result["player_id"] == 1].sort_values("game_date")
+        assert player_a.iloc[1]["fga_share"] == pytest.approx(0.20)
 
     def test_adds_min_share_column(self):
         from utils.nba_usage import compute_usage_features
@@ -106,34 +107,56 @@ class TestComputeUsageFeatures:
         assert "min_share" in result.columns
 
     def test_min_share_calculation_correct(self):
-        """When player is the only player, min_share = 1.0."""
+        """When player is the only player, the pre-game min_share is 1.0."""
         from utils.nba_usage import compute_usage_features
 
-        df = _make_player_df(1)
-        df["min"] = [36.0]
+        df = _make_player_df(2)
         result = compute_usage_features(df)
-        assert result.iloc[0]["min_share"] == pytest.approx(1.0)
+        assert math.isnan(result.iloc[0]["min_share"])
+        assert result.iloc[1]["min_share"] == pytest.approx(1.0)
 
     def test_min_share_with_two_players(self):
-        """min_share = player_min / team_min."""
+        """min_share is the prior games' player_min / team_min."""
         from utils.nba_usage import compute_usage_features
 
         df = pd.DataFrame(
             {
-                "player_id": [1, 2],
-                "player_name": ["Player A", "Player B"],
-                "team_abbreviation": ["BOS", "BOS"],
-                "season": [2025, 2025],
-                "game_date": ["2026-01-01", "2026-01-01"],
-                "game_id": ["g0001", "g0001"],
-                "fga": [20.0, 20.0],
-                "min": [36.0, 204.0],
-                "pts": [25.0, 30.0],
+                "player_id": [1, 2, 1, 2],
+                "player_name": ["Player A", "Player B"] * 2,
+                "team_abbreviation": ["BOS"] * 4,
+                "season": [2025] * 4,
+                "game_date": ["2026-01-01", "2026-01-01", "2026-01-03", "2026-01-03"],
+                "game_id": ["g0001", "g0001", "g0002", "g0002"],
+                "fga": [20.0] * 4,
+                "min": [36.0, 204.0, 120.0, 120.0],
+                "pts": [25.0, 30.0, 25.0, 30.0],
             }
-        )
+        ).sort_values(["player_id", "game_date"]).reset_index(drop=True)
         result = compute_usage_features(df)
-        player_a = result[result["player_id"] == 1].iloc[0]
-        assert player_a["min_share"] == pytest.approx(36.0 / 240.0)
+        player_a = result[result["player_id"] == 1].sort_values("game_date")
+        assert player_a.iloc[1]["min_share"] == pytest.approx(36.0 / 240.0)
+
+    def test_shares_do_not_use_current_game(self):
+        """Changing a game's own box score must not change that game's features:
+        they are model inputs, so same-game values would leak the target."""
+        from utils.nba_usage import compute_usage_features
+
+        df = _make_player_df(6)
+        other = df.assign(player_id=2, player_name="Teammate", fga=60.0, min=200.0)
+        base = pd.concat([df, other]).sort_values(["player_id", "game_date"]).reset_index(drop=True)
+
+        bumped = base.copy()
+        pid = int(df["player_id"].iloc[0])
+        last = (bumped["player_id"] == pid) & (bumped["game_date"] == bumped["game_date"].max())
+        bumped.loc[last, "fga"] = 60.0
+        bumped.loc[last, "min"] = 48.0
+
+        cols = ["fga_share", "min_share", "usage_delta"]
+        a = compute_usage_features(base)
+        b = compute_usage_features(bumped)
+        row_a = a[a["player_id"] == pid].iloc[-1][cols]
+        row_b = b[b["player_id"] == pid].iloc[-1][cols]
+        pd.testing.assert_series_equal(row_a, row_b)
 
     def test_adds_usage_delta_column(self):
         """usage_delta tracks L5 - L10 trend in fga_share."""
@@ -148,7 +171,6 @@ class TestComputeUsageFeatures:
         from utils.nba_usage import compute_usage_features
 
         n = 12
-        df = _make_player_df(n)
         # Increasing FGA over time: early games low, recent high.
         # Because the player is the only player, team_fga == player_fga so
         # fga_share is always 1.0.  We need two players to create genuine
@@ -180,81 +202,37 @@ class TestComputeUsageFeatures:
 
 
 # ---------------------------------------------------------------------------
-# is_usage_spike
-# ---------------------------------------------------------------------------
-
-
-class TestIsUsageSpike:
-    """Test spike detection for sudden usage changes."""
-
-    def test_spike_detected_when_above_threshold(self):
-        from utils.nba_usage import is_usage_spike
-
-        # L5 avg = 0.30, L10 avg = 0.20 → delta = 0.10 > 0.08 threshold
-        assert is_usage_spike(fga_share_l5=0.30, fga_share_l10=0.20, threshold=0.08)
-
-    def test_no_spike_when_below_threshold(self):
-        from utils.nba_usage import is_usage_spike
-
-        # L5 avg = 0.22, L10 avg = 0.20 → delta = 0.02 < 0.15 threshold
-        assert not is_usage_spike(fga_share_l5=0.22, fga_share_l10=0.20, threshold=0.15)
-
-    def test_no_spike_when_none_l5(self):
-        from utils.nba_usage import is_usage_spike
-
-        assert not is_usage_spike(fga_share_l5=None, fga_share_l10=0.20)
-
-    def test_no_spike_when_none_l10(self):
-        from utils.nba_usage import is_usage_spike
-
-        assert not is_usage_spike(fga_share_l5=0.30, fga_share_l10=None)
-
-    def test_default_threshold_used(self):
-        """Default threshold is 0.15."""
-        from utils.nba_usage import is_usage_spike
-
-        # Delta = 0.20 > 0.15 default threshold
-        assert is_usage_spike(fga_share_l5=0.40, fga_share_l10=0.20)
-
-    def test_exact_threshold_not_spike(self):
-        """Equality is not a spike (strictly greater than)."""
-        from utils.nba_usage import is_usage_spike
-
-        assert not is_usage_spike(fga_share_l5=0.35, fga_share_l10=0.20, threshold=0.15)
-
-
-# ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
 
 
 class TestUsageEdgeCases:
     def test_zero_team_fga_no_division_error(self):
-        """When team FGA is 0, fga_share should be 0 (not error).
+        """When team FGA is 0, that game's share should be 0 (not error).
 
         The implementation clips team_fga to a minimum of 1 to avoid
-        division by zero, so a player with 20 FGA in a game where the
-        team total is 0 (impossible in practice but possible in test data
-        when FGA=0) should be handled gracefully.
+        division by zero, so a game where the team total is 0 (impossible in
+        practice but possible in test data when FGA=0) is handled gracefully.
+        The share surfaces on the following game's (pre-game) row.
         """
         from utils.nba_usage import compute_usage_features
 
         df = pd.DataFrame(
             {
-                "player_id": [1],
-                "player_name": ["Test"],
-                "team_abbreviation": ["BOS"],
-                "season": [2025],
-                "game_date": ["2026-01-01"],
-                "game_id": ["g1"],
-                "fga": [0.0],
-                "min": [34.0],
-                "pts": [25.0],
+                "player_id": [1, 1],
+                "player_name": ["Test", "Test"],
+                "team_abbreviation": ["BOS", "BOS"],
+                "season": [2025, 2025],
+                "game_date": ["2026-01-01", "2026-01-03"],
+                "game_id": ["g1", "g2"],
+                "fga": [0.0, 10.0],
+                "min": [34.0, 34.0],
+                "pts": [25.0, 25.0],
             }
         )
         result = compute_usage_features(df)
-        # fga=0, team_fga=0; clip(1) → 0/1 = 0.0
-        assert result.iloc[0]["fga_share"] == pytest.approx(0.0)
+        # game 1: fga=0, team_fga=0; clip(1) → 0/1 = 0.0
+        assert result.iloc[1]["fga_share"] == pytest.approx(0.0)
 
     def test_single_game_has_nan_or_zero_delta(self):
         """With only 1 game, usage_delta should be NaN or 0."""
