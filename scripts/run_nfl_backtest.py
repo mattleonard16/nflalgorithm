@@ -124,6 +124,12 @@ def _print_summary(report: dict) -> None:
     if "coverage_1sigma" in overall:
         line += f" cover1s={overall['coverage_1sigma']:.1%} z_std={overall['z_std']:.2f}"
     print(line)
+    coverage = report.get("match_coverage")
+    if coverage:
+        print(
+            f"unscored predictions: {coverage['unmatched']}/{coverage['predictions']} "
+            f"({coverage['unmatched_fraction']:.1%})"
+        )
     for market, group in sorted(report["by_market"].items()):
         line = (
             f"  {market}: n={group['count']} mae={group['mae']:.2f} bias={group['mean_bias']:+.2f}"
