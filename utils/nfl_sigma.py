@@ -116,6 +116,23 @@ SIGMA_EWMA_MULTIPLIERS: dict[_Bucket, float] = {
     ("rushing_yards", "QB"): 1.13,
 }
 
+# Coefficient of variation for players with 1..MIN_GAMES_FOR_SIGMA-1 games.
+# A flat default ignores volume: a 41-yard WR and a 12-yard WR got the same
+# 22.5, so short-history starters -- rookies, new arrivals -- were priced as
+# if far more predictable than they are. On 2024-25 core-usage players with
+# fewer than 6 prior games, +/-1 sigma covered 44-55% of outcomes against a
+# 68% target (WR receiving 44%, n=104), while the 6+ game path covered 63-69%.
+# Each CV is the 68.27th percentile of |actual - mean| / mean measured on the
+# well-calibrated 6+ game players, so it reflects the stat's own spread rather
+# than the extra noise of a mean built from two or three games.
+SIGMA_SHORT_HISTORY_CV: dict[_Bucket, float] = {
+    ("passing_yards", "QB"): 0.38,
+    ("rushing_yards", "RB"): 0.62,
+    ("receiving_yards", "WR"): 0.70,
+    ("receiving_yards", "TE"): 0.71,
+    ("receiving_yards", "RB"): 0.81,
+}
+
 _GENERIC_FLOOR = 10.0
 _GENERIC_DEFAULT = 20.0
 
@@ -175,6 +192,12 @@ def compute_player_sigma(
     multiplier = _lookup(SIGMA_EWMA_MULTIPLIERS, market, bucket, 1.0)
 
     if len(arr) < MIN_GAMES_FOR_SIGMA:
+        # Too few games for a dispersion estimate, but enough to know the
+        # player's volume: scale the default up for high-volume players. Never
+        # below the flat default, so low-volume players are unchanged.
+        cv = SIGMA_SHORT_HISTORY_CV.get((market, bucket)) if bucket else None
+        if cv is not None and len(arr) > 0:
+            return max(default, cv * max(float(arr.mean()), 0.0))
         return default
 
     return max(_ewma_sigma(arr, decay=decay) * multiplier, floor)
