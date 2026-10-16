@@ -82,7 +82,7 @@ class TestFindOppositeSide:
 
     def test_unknown_side_fails_loud(self):
         with pytest.raises(ValueError, match="side must be"):
-            find_opposite_side(ALT_MARKET, description="Alpha Receiver", side="Yes", point=55.5)
+            find_opposite_side(ALT_MARKET, description="Alpha Receiver", side="Push", point=55.5)
 
 
 class TestPairTwoSidedPrices:
@@ -110,5 +110,39 @@ class TestPairTwoSidedPrices:
         assert pair_two_sided_prices(market[0], market) is None
 
     def test_non_over_under_outcome_is_rejected(self):
-        market = [_outcome("Yes", 55.5, -110)]
+        market = [_outcome("Push", 55.5, -110)]
         assert pair_two_sided_prices(market[0], market) is None
+
+
+class TestYesNoMarkets:
+    """Anytime TD quotes Yes/No with no line: stored as Over/Under 0.5."""
+
+    MARKET = [
+        {"name": "Yes", "description": "Alpha Receiver", "price": 140},
+        {"name": "No", "description": "Alpha Receiver", "price": -180},
+        {"name": "Yes", "description": "Beta Back", "price": -120},
+    ]
+
+    def test_yes_no_pair_is_over_under_at_half(self):
+        assert pair_two_sided_prices(self.MARKET[0], self.MARKET) == (0.5, 140, -180)
+
+    def test_starting_from_no_orders_prices_by_side(self):
+        assert pair_two_sided_prices(self.MARKET[1], self.MARKET) == (0.5, 140, -180)
+
+    def test_yes_only_quote_is_rejected(self):
+        # One-sided: nothing to de-vig against.
+        assert pair_two_sided_prices(self.MARKET[2], self.MARKET) is None
+
+    def test_yes_never_pairs_with_an_under(self):
+        market = [
+            {"name": "Yes", "description": "Alpha Receiver", "price": 140},
+            {"name": "Under", "description": "Alpha Receiver", "price": -180},
+        ]
+        assert pair_two_sided_prices(market[0], market) is None
+
+    def test_yes_no_with_a_line_keeps_it(self):
+        market = [
+            {"name": "Yes", "description": "Alpha Receiver", "point": 1.5, "price": 400},
+            {"name": "No", "description": "Alpha Receiver", "point": 1.5, "price": -600},
+        ]
+        assert pair_two_sided_prices(market[0], market) == (1.5, 400, -600)

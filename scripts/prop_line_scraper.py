@@ -36,6 +36,21 @@ logger = logging.getLogger(__name__)
 # same matchup is weeks away.
 _KICKOFF_TOLERANCE = pd.Timedelta(days=3)
 
+# Odds API market key -> market key in sports/markets.py (what
+# weekly_projections.market and weekly_odds.market carry).
+ODDS_API_MARKETS = {
+    "player_pass_yds": "passing_yards",
+    "player_rush_yds": "rushing_yards",
+    "player_reception_yds": "receiving_yards",
+    "player_receptions": "receptions",
+    # A Yes/No market; utils.two_sided_odds stores Yes/No as Over/Under 0.5.
+    "player_anytime_td": "anytime_touchdown",
+}
+
+# The outcome each two-sided quote is read from: the Over, or the Yes of a
+# Yes/No market. The opposite side is paired to it at the same line.
+_PRIMARY_SIDES = frozenset({"Over", "Yes"})
+
 
 class NFLPropScraper:
     """NFL Player Prop Line Scraper"""
@@ -290,9 +305,17 @@ class NFLPropScraper:
         Returns list of dicts with keys: player, team, position, book, stat, line, over_odds, under_odds,
         game_date, home_team, away_team
         """
-        # The validator requires exactly these markets, so fetching any other
-        # list can never pass coverage.
-        markets = list(config.pipeline.odds_required_markets)
+        # The validator requires exactly the required markets, so only they
+        # count toward coverage. Optional markets (anytime TD) are fetched and
+        # stored too, but kept out of the audit so a thin optional market can
+        # neither fail nor pad the required coverage.
+        required_markets = list(config.pipeline.odds_required_markets)
+        optional_markets = [
+            market
+            for market in getattr(config.pipeline, "odds_optional_markets", ())
+            if market not in required_markets
+        ]
+        markets = required_markets + optional_markets
         results: List[Dict] = []
         source_statuses: set[str] = set()
         response_ages: List[float] = []
@@ -445,13 +468,15 @@ class NFLPropScraper:
         roster_ids = self._roster_player_ids(season)
         self.last_weekly_audit["team_unresolved"] = 0
 
-        # Odds API market key -> stat column in sports/markets.py.
-        stat_mapping = {
-            "player_pass_yds": "passing_yards",
-            "player_rush_yds": "rushing_yards",
-            "player_reception_yds": "receiving_yards",
-            "player_receptions": "receptions",
-        }
+        stat_mapping = ODDS_API_MARKETS
+        unmapped = [market for market in markets if market not in stat_mapping]
+        if unmapped:
+            # Storing the provider key as the market would never join a
+            # projection; skip it so coverage fails loud instead.
+            logger.error(
+                "No internal market for Odds API market(s) %s; not fetched", unmapped
+            )
+            markets = [market for market in markets if market in stat_mapping]
 
         # Fetch props for each event and market
         for event in events:
@@ -540,7 +565,7 @@ class NFLPropScraper:
                         market
                     ] = market_payload
 
-                stat_category = stat_mapping.get(market, market)
+                stat_category = stat_mapping[market]
                 rows_before_market = len(results)
 
                 # Data structure: single event with bookmakers
@@ -550,7 +575,7 @@ class NFLPropScraper:
                         if market_data.get("key") != market:
                             continue
                         for outcome in market_data.get("outcomes", []):
-                            if outcome.get("name") != "Over":
+                            if outcome.get("name") not in _PRIMARY_SIDES:
                                 continue
                             player_desc = outcome.get("description", "")
                             info = self._extract_player_info(player_desc, home, away, roster_ids)
@@ -595,13 +620,17 @@ class NFLPropScraper:
                                     "away_team": away,
                                 }
                             )
-                            if book_name and book_name != "Unknown":
+                            if (
+                                market in required_markets
+                                and book_name
+                                and book_name != "Unknown"
+                            ):
                                 sportsbooks_by_pair.setdefault((game_key, market), set()).add(
                                     str(book_name)
                                 )
 
                 # Keyed by game, not provider id: coverage is per scheduled game.
-                if len(results) > rows_before_market:
+                if market in required_markets and len(results) > rows_before_market:
                     covered_pairs.add((game_key, market))
                     self.last_weekly_audit["covered_events"] = len(
                         {covered_event for covered_event, _market in covered_pairs}

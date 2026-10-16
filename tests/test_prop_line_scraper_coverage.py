@@ -295,3 +295,99 @@ def test_clean_batch_commits_once(monkeypatch) -> None:
     assert scraper.save_weekly_odds(_save_rows(), week=1, season=2026) == 3
     assert conn.committed is True
     assert conn.rolled_back is False
+
+
+# ------------------------------------------------------------- anytime TD
+
+
+def _anytime_td_payload() -> dict:
+    outcomes = [
+        {"name": "Yes", "description": "Some Player", "price": 150},
+        {"name": "No", "description": "Some Player", "price": -200},
+        # Yes-only quote: one-sided, cannot be de-vigged, never stored.
+        {"name": "Yes", "description": "Other Player", "price": 300},
+    ]
+    return {
+        "bookmakers": [
+            {"title": "BookA", "markets": [{"key": "player_anytime_td", "outcomes": outcomes}]}
+        ]
+    }
+
+
+class _AnytimeClient:
+    def __init__(self) -> None:
+        self.markets: list[str] = []
+
+    def get(self, url: str, params: dict, api_type: str) -> _Response:
+        if url.endswith("/events"):
+            return _Response(EVENTS)
+        self.markets.append(params["markets"])
+        if params["markets"] == "player_anytime_td":
+            return _Response(_anytime_td_payload())
+        return _Response(_market_payload(params["markets"]))
+
+
+def _scrape_with_optional(monkeypatch, optional: tuple[str, ...]):
+    monkeypatch.setattr(prop_line_scraper.time, "sleep", lambda _s: None)
+
+    def fake_read(sql: str, params: tuple = ()) -> pd.DataFrame:
+        if "FROM games" in sql:
+            return SCHEDULE.copy()
+        return pd.DataFrame({"player_id": []})
+
+    monkeypatch.setattr(prop_line_scraper, "read_dataframe", fake_read)
+    monkeypatch.setattr(prop_line_scraper.config.pipeline, "odds_optional_markets", optional)
+    scraper = NFLPropScraper(odds_api_key="test-key")
+    client = _AnytimeClient()
+    scraper.client = client
+    rows = scraper.get_upcoming_week_props(1, 2026, now=SATURDAY)
+    return scraper, client, rows
+
+
+def test_anytime_td_yes_no_is_stored_as_a_paired_half_point_line(monkeypatch) -> None:
+    scraper, client, rows = _scrape_with_optional(monkeypatch, ("player_anytime_td",))
+
+    assert "player_anytime_td" in client.markets
+    td_rows = [row for row in rows if row["stat"] == "anytime_touchdown"]
+    # One per upcoming game; the Yes-only "Other Player" quote never pairs.
+    assert len(td_rows) == 3
+    assert {row["player"] for row in td_rows} == {"Some Player"}
+    assert {(row["line"], row["over_odds"], row["under_odds"]) for row in td_rows} == {
+        (0.5, 150, -200)
+    }
+    assert not any(row["stat"] == "player_anytime_td" for row in rows)
+
+    # The optional market neither pads nor fails the required coverage: one
+    # book on anytime TD would fail breadth if it were counted.
+    audit = scraper.last_weekly_audit
+    assert not any(
+        key.endswith(":player_anytime_td") for key in audit["sportsbooks_per_event_market"]
+    )
+    required = tuple(prop_line_scraper.config.pipeline.odds_required_markets)
+    assert audit["covered_event_markets"] == 3 * len(required)
+    result = validate_odds_snapshot(
+        audit,
+        requirements=OddsRequirements(
+            max_age_seconds=300,
+            min_event_coverage=1.0,
+            min_market_coverage=1.0,
+            min_sportsbooks_per_event_market=2,
+            required_markets=required,
+        ),
+    )
+    assert result["valid"] is True, result["reason"]
+
+
+def test_unmapped_market_is_not_fetched_or_stored_under_its_provider_key(monkeypatch) -> None:
+    _scraper, client, rows = _scrape_with_optional(monkeypatch, ("player_kicking_points",))
+
+    assert "player_kicking_points" not in client.markets
+    assert rows and all(not row["stat"].startswith("player_") for row in rows)
+
+
+def test_default_markets_fetch_anytime_td_without_requiring_it() -> None:
+    from config.runtime import pipeline
+
+    assert "player_anytime_td" in pipeline.odds_optional_markets
+    assert "player_anytime_td" not in pipeline.odds_required_markets
+    assert prop_line_scraper.ODDS_API_MARKETS["player_anytime_td"] == "anytime_touchdown"
