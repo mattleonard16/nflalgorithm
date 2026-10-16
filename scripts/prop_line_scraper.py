@@ -12,7 +12,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Container, Dict, List, Optional, cast
+from typing import Any, Container, Dict, Iterable, List, Optional, cast
 
 import pandas as pd
 
@@ -22,8 +22,9 @@ from config import config
 from scripts.simple_cache import redact_api_key, simple_cached_client
 from utils.db import execute, get_connection, read_dataframe
 from utils.event_keys import UnresolvableEventError, resolve_event_id
+from utils.matching import LooseRosterIndex, build_loose_roster_index, resolve_roster_player
 from utils.odds_math import implied_probability_no_vig
-from utils.player_id_utils import canonicalize_team, make_player_id, team_for_player
+from utils.player_id_utils import canonicalize_team, make_player_id
 from utils.two_sided_odds import pair_two_sided_prices
 
 # Set up logging
@@ -34,6 +35,21 @@ logger = logging.getLogger(__name__)
 # game. Flex scheduling moves a game by hours within its week; a rematch of the
 # same matchup is weeks away.
 _KICKOFF_TOLERANCE = pd.Timedelta(days=3)
+
+# Odds API market key -> market key in sports/markets.py (what
+# weekly_projections.market and weekly_odds.market carry).
+ODDS_API_MARKETS = {
+    "player_pass_yds": "passing_yards",
+    "player_rush_yds": "rushing_yards",
+    "player_reception_yds": "receiving_yards",
+    "player_receptions": "receptions",
+    # A Yes/No market; utils.two_sided_odds stores Yes/No as Over/Under 0.5.
+    "player_anytime_td": "anytime_touchdown",
+}
+
+# The outcome each two-sided quote is read from: the Over, or the Yes of a
+# Yes/No market. The opposite side is paired to it at the same line.
+_PRIMARY_SIDES = frozenset({"Over", "Yes"})
 
 
 class NFLPropScraper:
@@ -289,9 +305,17 @@ class NFLPropScraper:
         Returns list of dicts with keys: player, team, position, book, stat, line, over_odds, under_odds,
         game_date, home_team, away_team
         """
-        # The validator requires exactly these markets, so fetching any other
-        # list can never pass coverage.
-        markets = list(config.pipeline.odds_required_markets)
+        # The validator requires exactly the required markets, so only they
+        # count toward coverage. Optional markets (anytime TD) are fetched and
+        # stored too, but kept out of the audit so a thin optional market can
+        # neither fail nor pad the required coverage.
+        required_markets = list(config.pipeline.odds_required_markets)
+        optional_markets = [
+            market
+            for market in getattr(config.pipeline, "odds_optional_markets", ())
+            if market not in required_markets
+        ]
+        markets = required_markets + optional_markets
         results: List[Dict] = []
         source_statuses: set[str] = set()
         response_ages: List[float] = []
@@ -444,13 +468,15 @@ class NFLPropScraper:
         roster_ids = self._roster_player_ids(season)
         self.last_weekly_audit["team_unresolved"] = 0
 
-        # Odds API market key -> stat column in sports/markets.py.
-        stat_mapping = {
-            "player_pass_yds": "passing_yards",
-            "player_rush_yds": "rushing_yards",
-            "player_reception_yds": "receiving_yards",
-            "player_receptions": "receptions",
-        }
+        stat_mapping = ODDS_API_MARKETS
+        unmapped = [market for market in markets if market not in stat_mapping]
+        if unmapped:
+            # Storing the provider key as the market would never join a
+            # projection; skip it so coverage fails loud instead.
+            logger.error(
+                "No internal market for Odds API market(s) %s; not fetched", unmapped
+            )
+            markets = [market for market in markets if market in stat_mapping]
 
         # Fetch props for each event and market
         for event in events:
@@ -539,7 +565,7 @@ class NFLPropScraper:
                         market
                     ] = market_payload
 
-                stat_category = stat_mapping.get(market, market)
+                stat_category = stat_mapping[market]
                 rows_before_market = len(results)
 
                 # Data structure: single event with bookmakers
@@ -549,7 +575,7 @@ class NFLPropScraper:
                         if market_data.get("key") != market:
                             continue
                         for outcome in market_data.get("outcomes", []):
-                            if outcome.get("name") != "Over":
+                            if outcome.get("name") not in _PRIMARY_SIDES:
                                 continue
                             player_desc = outcome.get("description", "")
                             info = self._extract_player_info(player_desc, home, away, roster_ids)
@@ -579,9 +605,10 @@ class NFLPropScraper:
                                 {
                                     "event_id": game_key,
                                     "source_player_id": outcome.get("id"),
-                                    "player_id": make_player_id(info["name"], info["team"]),
+                                    "player_id": info["player_id"],
                                     "player": info["name"],
                                     "team": info["team"],
+                                    "team_guessed": info["team_guessed"],
                                     "position": info["position"],
                                     "book": book_name,
                                     "stat": stat_category,
@@ -593,13 +620,17 @@ class NFLPropScraper:
                                     "away_team": away,
                                 }
                             )
-                            if book_name and book_name != "Unknown":
+                            if (
+                                market in required_markets
+                                and book_name
+                                and book_name != "Unknown"
+                            ):
                                 sportsbooks_by_pair.setdefault((game_key, market), set()).add(
                                     str(book_name)
                                 )
 
                 # Keyed by game, not provider id: coverage is per scheduled game.
-                if len(results) > rows_before_market:
+                if market in required_markets and len(results) > rows_before_market:
                     covered_pairs.add((game_key, market))
                     self.last_weekly_audit["covered_events"] = len(
                         {covered_event for covered_event, _market in covered_pairs}
@@ -816,8 +847,16 @@ class NFLPropScraper:
         """Extract player name, team, and position from description.
 
         The book names the player, not the club. The season roster decides
-        between the two clubs in the game; a name on neither roster falls
-        back to the old home-club guess, which is wrong for every away player.
+        between the two clubs in the game: first on the exact player_id, then
+        on a spelling-insensitive key with first-name aliases ("JaMarr Chase",
+        "Hollywood Brown"; see ``utils.matching.resolve_roster_player``). A
+        roster hit returns the roster's own ``player_id`` so the quote joins
+        the projection at tier 1.
+
+        A name on neither roster falls back to the home-club guess, which is
+        wrong for every away player, so the result carries
+        ``team_guessed=True`` and downstream matching must treat the team as
+        unknown rather than as evidence.
         """
 
         # Basic extraction (format varies by sportsbook)
@@ -829,17 +868,51 @@ class NFLPropScraper:
             player_name = player_description.strip()
             team_info = ""
 
-        team = team_for_player(player_name, (home_team, away_team), roster_ids)
+        team, player_id = resolve_roster_player(
+            player_name,
+            (home_team, away_team),
+            roster_ids,
+            self._loose_roster_index(roster_ids),
+        )
+        team_guessed = False
         if not team:
             self.last_weekly_audit["team_unresolved"] = (
                 self.last_weekly_audit.get("team_unresolved", 0) + 1
             )
-            team = self._guess_team(player_name, home_team, away_team, team_info)
+            team = self._team_from_info(team_info)
+            if not team:
+                team = self._guess_team(player_name, home_team, away_team, team_info)
+                team_guessed = True
+            player_id = make_player_id(player_name, team)
 
         # Try to determine position (would need player database for accuracy)
         position = self._guess_position(player_name)
 
-        return {"name": player_name, "team": team, "position": position}
+        return {
+            "name": player_name,
+            "team": team,
+            "position": position,
+            "player_id": player_id,
+            "team_guessed": team_guessed,
+        }
+
+    def _loose_roster_index(self, roster_ids: Container[str]) -> LooseRosterIndex:
+        """Loose-name index of ``roster_ids``, built once per roster object."""
+        cached = getattr(self, "_loose_index_cache", None)
+        if cached is not None and cached[0] is roster_ids:
+            return cached[1]
+        index = (
+            build_loose_roster_index(roster_ids) if isinstance(roster_ids, Iterable) else {}
+        )
+        self._loose_index_cache = (roster_ids, index)
+        return index
+
+    def _team_from_info(self, team_info: str) -> str:
+        """The club a book named next to the player ("Name - Denver Broncos")."""
+        for full_name, abbrev in self.team_mapping.items():
+            if team_info and full_name.lower() in team_info.lower():
+                return abbrev
+        return ""
 
     def _guess_team(self, player_name: str, home_team: str, away_team: str, team_info: str) -> str:
         """Guess player's team (simplified - would need player database)"""

@@ -2,6 +2,9 @@
 
 Wraps the risk_manager module to enforce exposure rules, detect
 correlations, and report warnings about bankroll risk.
+
+A bet breaching a team/game/player exposure cap is REJECTed; a bet that is
+only part of a correlation group is NEUTRAL with the group in its rationale.
 """
 
 from __future__ import annotations
@@ -58,27 +61,39 @@ class RiskAgent(BaseAgent):
             risk_kelly = row.get("risk_adjusted_kelly", 0)
             orig_kelly = row.get("kelly_fraction", 0)
 
-            has_warning = (
-                pd.notna(corr_group) or pd.notna(exposure_warn)
-            )
             kelly_reduced = (
                 risk_kelly < orig_kelly
                 if orig_kelly > 0
                 else False
             )
 
-            if has_warning:
+            # Exposure rules are enforced; correlation is reported. Every
+            # correlation group sits inside one team (risk_manager requires
+            # it), so correlated stake past a limit always also breaches the
+            # team cap and arrives here as an exposure warning. Rejecting on
+            # the label alone vetoed nearly every multi-bet card.
+            if pd.notna(exposure_warn):
                 recommendation = "REJECT"
                 confidence = 0.80
                 warnings = []
                 if pd.notna(corr_group):
                     warnings.append(f"correlated({corr_group})")
-                if pd.notna(exposure_warn):
-                    warnings.append(str(exposure_warn))
+                warnings.append(str(exposure_warn))
                 rationale = (
                     f"Risk warnings for {pid} {market}: "
                     + "; ".join(warnings)
                 )
+            elif pd.notna(corr_group):
+                recommendation = "NEUTRAL"
+                confidence = 0.65
+                rationale = (
+                    f"Correlated exposure for {pid} {market}: correlated({corr_group}), "
+                    "within exposure limits"
+                )
+                if kelly_reduced:
+                    rationale += (
+                        f"; Kelly reduced {orig_kelly:.4f} -> {risk_kelly:.4f} (drawdown risk)"
+                    )
             elif kelly_reduced:
                 recommendation = "NEUTRAL"
                 confidence = 0.65

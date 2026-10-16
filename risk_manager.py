@@ -51,8 +51,19 @@ def _same_game(row_a: pd.Series, row_b: pd.Series) -> bool:
 
 # ── Correlation detection ──────────────────────────────────────────────
 
+# Pair types in label priority: a group's label leads with its strongest type
+# (the API reports ``label.split("_")[0]`` as the group type).
+PAIR_TYPE_PRIORITY: Tuple[str, ...] = ("pos_corr", "neg_corr", "same_team")
+
+
 def detect_correlations(df: pd.DataFrame) -> pd.DataFrame:
     """Tag every row with a ``correlation_group`` label.
+
+    Pairs are classified by :func:`_classify_pair` and grouped with
+    union-find, so any chain of correlated pairs is one group however the
+    rows are ordered. The label lists every pair type present in the group,
+    strongest first, plus a sequence number: ``pos_corr_1``,
+    ``pos_corr+same_team_2``.
 
     Returns a *new* DataFrame (original is not mutated) with one extra
     column: ``correlation_group`` (str | None).
@@ -60,11 +71,17 @@ def detect_correlations(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df.assign(correlation_group=pd.Series(dtype="object"))
 
-    groups: Dict[int, str] = {}
-    group_counter = 0
+    n_rows = len(df)
+    parent = list(range(n_rows))
 
-    idx_list = list(df.index)
-    for i, j in combinations(range(len(idx_list)), 2):
+    def find(k: int) -> int:
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+
+    edge_types: List[Tuple[int, int, str]] = []
+    for i, j in combinations(range(n_rows), 2):
         row_a = df.iloc[i]
         row_b = df.iloc[j]
 
@@ -75,48 +92,78 @@ def detect_correlations(df: pd.DataFrame) -> pd.DataFrame:
         if pair is None:
             continue
 
-        label = pair
-        if i in groups:
-            label = groups[i]
-        elif j in groups:
-            label = groups[j]
-        else:
-            group_counter += 1
-            label = f"{pair}_{group_counter}"
+        edge_types.append((i, j, pair))
+        root_i, root_j = find(i), find(j)
+        if root_i != root_j:
+            parent[max(root_i, root_j)] = min(root_i, root_j)
 
-        groups[i] = label
-        groups[j] = label
+    types_by_root: Dict[int, set] = {}
+    for i, _j, pair in edge_types:
+        types_by_root.setdefault(find(i), set()).add(pair)
+
+    # Number groups in order of their first row, so labels are stable.
+    labels: Dict[int, str] = {}
+    for root in sorted(types_by_root):
+        kinds = [t for t in PAIR_TYPE_PRIORITY if t in types_by_root[root]]
+        labels[root] = f"{'+'.join(kinds)}_{len(labels) + 1}"
 
     group_series = pd.Series(
-        [groups.get(k) for k in range(len(idx_list))],
+        [labels.get(find(k)) for k in range(n_rows)],
         index=df.index,
         dtype="object",
     )
     return df.assign(correlation_group=group_series)
 
 
-def _classify_pair(a: pd.Series, b: pd.Series) -> Optional[str]:
-    """Return a label if (a, b) form a known correlated pair."""
-    mkt_a = str(a.get("market", "")).lower()
-    mkt_b = str(b.get("market", "")).lower()
-    for pos_a, pos_b in POSITIVE_CORRELATIONS:
-        if (mkt_a == pos_a and mkt_b == pos_b) or (
-            mkt_a == pos_b and mkt_b == pos_a
-        ):
-            return "pos_corr"
-    for neg_a, neg_b in NEGATIVE_CORRELATIONS:
-        if (mkt_a == neg_a and mkt_b == neg_b) or (
-            mkt_a == neg_b and mkt_b == neg_a
-        ):
-            return "neg_corr"
+def _side(row: pd.Series) -> str:
+    """The bet side; rows without one are overs (the pre-``side`` default)."""
+    side = row.get("side")
+    if side is None or (not isinstance(side, str) and pd.isna(side)):
+        return "over"
+    side = str(side).strip().lower()
+    return side or "over"
 
-    # Same-team stacking (multiple props on same team, same game)
+
+def _market_pair(mkt_a: str, mkt_b: str, pairs: List[Tuple[str, str]]) -> bool:
+    return any(
+        (mkt_a == x and mkt_b == y) or (mkt_a == y and mkt_b == x) for x, y in pairs
+    )
+
+
+def _classify_pair(a: pd.Series, b: pd.Series) -> Optional[str]:
+    """Return a label if (a, b) concentrate risk on one outcome, else None.
+
+    - Same player_id: not a correlation. Multi-book quotes of one prop are
+      the same bet; per-player concentration is capped by
+      :func:`compute_exposure`'s player limit instead.
+    - Every type requires the same known team. A QB's passing yards and an
+      OPPOSING receiver's yards are not a stack.
+    - Side matters. Positively correlated markets concentrate when both bets
+      take the same side (QB over + his WR over); negatively correlated ones
+      when they take opposite sides (QB passing over + his RB rushing under).
+      The other combinations offset each other and are not flagged.
+    - Any other two props on one team in one game are ``same_team``.
+    """
+    pid_a = a.get("player_id")
+    pid_b = b.get("player_id")
+    if pd.notna(pid_a) and pd.notna(pid_b) and pid_a == pid_b:
+        return None
+
     team_a = a.get("team")
     team_b = b.get("team")
-    if pd.notna(team_a) and pd.notna(team_b) and team_a == team_b:
-        return "same_team"
+    if not (pd.notna(team_a) and pd.notna(team_b) and team_a == team_b):
+        return None
 
-    return None
+    mkt_a = str(a.get("market", "")).lower()
+    mkt_b = str(b.get("market", "")).lower()
+    same_side = _side(a) == _side(b)
+    if _market_pair(mkt_a, mkt_b, POSITIVE_CORRELATIONS):
+        return "pos_corr" if same_side else None
+    if _market_pair(mkt_a, mkt_b, NEGATIVE_CORRELATIONS):
+        return "neg_corr" if not same_side else None
+
+    # Same-team stacking (multiple props on same team, same game)
+    return "same_team"
 
 
 # ── Same-team stacking detection ──────────────────────────────────────

@@ -231,12 +231,23 @@ def test_market_position_cross_grouping() -> None:
     assert cross["rushing_yards|RB"]["mean_bias"] == pytest.approx(-10.0)
 
 
-def _report_for_compare(mae: float, coverage: float, weeks: list[int]) -> dict:
+def _report_for_compare(
+    mae: float,
+    coverage: float,
+    weeks: list[int],
+    *,
+    count: int = 100,
+    keys_sha: str = "same-rows",
+) -> dict:
     group = {"mae": mae, "coverage_1sigma": coverage}
     return {
+        "schema_version": 2,
         "label": f"run_mae_{mae}",
         "season": SEASON,
         "weeks_evaluated": weeks,
+        "market_counts": {MARKET: count},
+        "evaluated_keys_sha256": keys_sha,
+        "match_coverage": {"predictions": count, "unmatched": 0, "unmatched_fraction": 0.0},
         "overall": group,
         "by_market": {MARKET: group},
     }
@@ -325,3 +336,137 @@ def test_feature_overrides_restore_on_error_and_reject_unknown_flags() -> None:
         with feature_overrides(features, no_such_flag=True):
             pass
     assert not hasattr(features, "no_such_flag")
+
+
+# ---------------------------------------------------------------------------
+# Evaluated-scope fingerprint, unmatched predictions, yardage-only positions
+# ---------------------------------------------------------------------------
+
+
+def test_compare_refuses_fewer_rows_on_the_same_weeks() -> None:
+    """The verified defect: 5,117 rows at MAE 26.88 vs 2,000 rows at MAE 20
+    on the same weeks used to pass."""
+    baseline = _report_for_compare(26.88, 0.68, [1, 2], count=5117, keys_sha="full")
+    candidate = _report_for_compare(20.0, 0.68, [1, 2], count=2000, keys_sha="subset")
+
+    comparison = compare_walk_forward(baseline, candidate)
+
+    assert comparison["passed"] is False
+    assert any("row counts per market differ" in b for b in comparison["blockers"])
+
+
+def test_compare_refuses_same_counts_but_different_rows() -> None:
+    baseline = _report_for_compare(10.0, 0.68, [1, 2], keys_sha="rows-a")
+    candidate = _report_for_compare(9.0, 0.68, [1, 2], keys_sha="rows-b")
+
+    comparison = compare_walk_forward(baseline, candidate)
+
+    assert comparison["passed"] is False
+    assert any("player_id, market) keys differ" in b for b in comparison["blockers"])
+
+
+def test_compare_refuses_reports_without_a_fingerprint() -> None:
+    baseline = _report_for_compare(10.0, 0.68, [1, 2])
+    for field_name in ("schema_version", "market_counts", "evaluated_keys_sha256"):
+        baseline.pop(field_name)
+    candidate = _report_for_compare(9.0, 0.68, [1, 2])
+
+    comparison = compare_walk_forward(baseline, candidate)
+
+    assert comparison["passed"] is False
+    assert any(
+        b.startswith("baseline report") and "re-run" in b for b in comparison["blockers"]
+    )
+
+
+def test_compare_refuses_a_report_with_too_many_unscored_predictions() -> None:
+    baseline = _report_for_compare(10.0, 0.68, [1, 2])
+    candidate = _report_for_compare(9.0, 0.68, [1, 2])
+    candidate["match_coverage"]["unmatched_fraction"] = 0.25
+
+    comparison = compare_walk_forward(baseline, candidate)
+
+    assert comparison["passed"] is False
+    assert any("without an actual" in b for b in comparison["blockers"])
+
+
+def test_identical_runs_share_a_fingerprint_and_compare_cleanly() -> None:
+    actuals = _actuals([("wr_a", 1, 50.0), ("wr_b", 1, 60.0), ("wr_a", 2, 70.0)])
+
+    def predict_fn(season: int, week: int) -> pd.DataFrame:
+        if week == 1:
+            return _predictions([("wr_b", 58.0, 10.0), ("wr_a", 55.0, 10.0)])
+        return _predictions([("wr_a", 66.0, 10.0)])
+
+    first = run_walk_forward(predict_fn, actuals, _config((1, 2))).report
+    second = run_walk_forward(predict_fn, actuals, _config((1, 2))).report
+
+    assert first["schema_version"] == 2
+    assert first["market_counts"] == {MARKET: 3}
+    assert len(first["evaluated_keys_sha256"]) == 64
+    assert first["evaluated_keys_sha256"] == second["evaluated_keys_sha256"]
+    assert compare_walk_forward(first, second)["passed"] is True
+
+
+def test_week_with_too_many_unscored_predictions_is_excluded() -> None:
+    # Week 1: 1 of 2 predictions has no stat row (50% unmatched) -> excluded,
+    # even though it clears min_week_rows. Week 2 is clean.
+    actuals = _actuals([("wr_a", 1, 50.0), ("wr_a", 2, 50.0), ("wr_b", 2, 40.0)])
+
+    def predict_fn(season: int, week: int) -> pd.DataFrame:
+        return _predictions([("wr_a", 52.0, 10.0), ("wr_b", 45.0, 10.0)])
+
+    result = run_walk_forward(predict_fn, actuals, _config((1, 2)))
+
+    assert result.report["weeks_evaluated"] == [2]
+    assert any(
+        "week 1" in p and "excluded from aggregates" in p for p in result.report["problems"]
+    )
+    assert result.report["match_coverage"]["unmatched"] == 0
+
+
+def test_null_stat_counts_as_unmatched_not_as_a_scored_row() -> None:
+    actuals = _actuals([(f"wr_{i}", 1, 50.0) for i in range(20)] + [("wr_null", 1, None)])
+
+    def predict_fn(season: int, week: int) -> pd.DataFrame:
+        return _predictions([(f"wr_{i}", 50.0, 10.0) for i in range(20)] + [("wr_null", 0.0, 1.0)])
+
+    report = run_walk_forward(predict_fn, actuals, _config((1,))).report
+
+    assert report["overall"]["count"] == 20
+    assert report["match_coverage"] == {
+        "predictions": 21,
+        "unmatched": 1,
+        "unmatched_fraction": pytest.approx(1 / 21),
+        "max_unmatched_fraction": 0.10,
+    }
+
+
+def test_by_position_is_yardage_only_while_market_position_keeps_all() -> None:
+    actuals = pd.DataFrame(
+        [
+            {
+                "season": SEASON,
+                "week": 1,
+                "player_id": "wr_a",
+                "position": "WR",
+                "receiving_yards": 50.0,
+                "receptions": 5.0,
+            }
+        ]
+    )
+
+    def predict_fn(season: int, week: int) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {"player_id": "wr_a", "market": "receiving_yards", "mu": 60.0, "sigma": 10.0},
+                {"player_id": "wr_a", "market": "receptions", "mu": 5.5, "sigma": 1.0},
+            ]
+        )
+
+    report = run_walk_forward(predict_fn, actuals, _config((1,))).report
+
+    assert report["by_position"]["WR"]["count"] == 1
+    assert report["by_position"]["WR"]["mae"] == pytest.approx(10.0)
+    assert set(report["by_market_position"]) == {"receiving_yards|WR", "receptions|WR"}
+    assert report["market_counts"] == {"receiving_yards": 1, "receptions": 1}

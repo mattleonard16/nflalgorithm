@@ -17,6 +17,12 @@ Three failure modes of name-based matching are addressed here:
   names disagree only in their suffix. Suffix info must come from a raw-name
   source (e.g. roster names) — player_ids are built from already-stripped
   names and carry none.
+- **Book spelling variants**: books write "JaMarr Chase" for the roster's
+  "Ja'Marr Chase" and "Hollywood Brown" for "Marquise Brown".
+  :func:`loose_name_key` deletes punctuation instead of spacing it and folds
+  known first-name aliases (``FIRST_NAME_ALIASES``) to one form;
+  :func:`resolve_roster_player` uses it to find the one rostered club when
+  the exact player_id lookup misses.
 - **Stale/duplicate snapshots**: ``weekly_odds`` accumulates one row per
   scrape. :func:`latest_snapshot_per_key` keeps only the newest row per
   quote key; :func:`filter_stale_snapshots` drops quotes that are ancient
@@ -27,11 +33,12 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Any, NamedTuple
+from typing import Any, Container, Iterable, Mapping, NamedTuple
 
 import pandas as pd
 
 from utils.clv import SNAPSHOT_KEY
+from utils.player_id_utils import canonicalize_team, make_player_id, name_from_player_id
 
 NAME_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv", "v"})
 
@@ -130,6 +137,119 @@ def suffix_conflict(name_a: Any, name_b: Any) -> bool:
     if not a or not b or a == b:
         return False
     return strip_name_suffix(a) == strip_name_suffix(b)
+
+
+# Nickname <-> legal first-name pairs that books and rosters disagree on.
+# Each group folds to one form in :func:`loose_name_key`, so the lookup works
+# in both directions. Only the FIRST name token is folded, and only these
+# exact tokens: a broad nickname table ("Mike"/"Michael") would merge
+# distinct players. Add a pair when a real book/roster disagreement is seen.
+FIRST_NAME_ALIASES: tuple[frozenset[str], ...] = (
+    frozenset({"marquise", "hollywood"}),
+    frozenset({"bam", "zonovan"}),
+    frozenset({"tank", "nathaniel"}),
+    frozenset({"josh", "joshua"}),
+    frozenset({"gabe", "gabriel"}),
+    frozenset({"cam", "cameron"}),
+    frozenset({"chig", "chigoziem"}),
+    frozenset({"kenneth", "ken"}),
+)
+_FIRST_NAME_CANON: dict[str, str] = {
+    token: min(group) for group in FIRST_NAME_ALIASES for token in group
+}
+
+
+def loose_name_key(name: Any) -> str:
+    """A spelling-insensitive lookup key for one player's name.
+
+    Accents, case, punctuation and generational suffixes are ignored, and
+    apostrophes/periods are DELETED rather than turned into spaces, so
+    "JaMarr Chase", "Ja'Marr Chase" and the player_id-derived "ja marr chase"
+    agree, as do "A.J. Brown", "A. J. Brown" and "aj brown". The first token
+    is folded through ``FIRST_NAME_ALIASES`` ("Hollywood Brown" ==
+    "Marquise Brown"); tokens are then joined without separators.
+
+    Returns "" for an empty or non-string name. This is a lookup key, never
+    an identifier: it deliberately collides more than :func:`normalize_name`,
+    so callers must still guard on team and position.
+    """
+    if not name or not isinstance(name, str):
+        return ""
+    nfkd = unicodedata.normalize("NFKD", name)
+    text = "".join(ch for ch in nfkd if not unicodedata.combining(ch)).lower()
+    text = re.sub(r"['’`.]", "", text)
+    tokens = [t for t in re.split(r"[^a-z0-9]+", text) if t and t not in NAME_SUFFIXES]
+    if not tokens:
+        return ""
+    tokens[0] = _FIRST_NAME_CANON.get(tokens[0], tokens[0])
+    return "".join(tokens)
+
+
+LooseRosterIndex = Mapping[tuple[str, str], frozenset[str]]
+
+
+def build_loose_roster_index(roster_player_ids: Iterable[str]) -> dict[tuple[str, str], frozenset[str]]:
+    """Map ``(team, loose_name_key)`` to the roster player_ids carrying it.
+
+    Roster ids are ``TEAM_name`` (see ``make_player_id``); an id without a
+    valid team prefix is skipped. More than one id under one key means the
+    key is ambiguous for that club and must not resolve.
+    """
+    index: dict[tuple[str, str], set[str]] = {}
+    for pid in roster_player_ids:
+        if not isinstance(pid, str) or "_" not in pid:
+            continue
+        team = canonicalize_team(pid.split("_", 1)[0])
+        key = loose_name_key(name_from_player_id(pid))
+        if team and key:
+            index.setdefault((team, key), set()).add(pid)
+    return {key: frozenset(pids) for key, pids in index.items()}
+
+
+class RosterResolution(NamedTuple):
+    """The club and roster player_id a book name resolved to ("" if none)."""
+
+    team: str
+    player_id: str
+
+
+def resolve_roster_player(
+    name: Any,
+    clubs: Iterable[str],
+    roster_player_ids: Container[str],
+    loose_index: LooseRosterIndex | None = None,
+) -> RosterResolution:
+    """Resolve a book's player name to exactly one rostered club in the game.
+
+    Tries the exact player_id first (``make_player_id`` per club, the rule
+    ``utils.player_id_utils.team_for_player`` applies); when that finds no
+    club, retries on :func:`loose_name_key` against ``loose_index`` (build it
+    once with :func:`build_loose_roster_index`). Each pass must find exactly
+    one club holding exactly one player: a name on both rosters (Michael
+    Carter ARI RB vs Michael Carter II PHI DB) stays unresolved rather than
+    being assigned to either club.
+
+    Returns the roster's own player_id, so a loose hit is stored under the id
+    the projections carry ("CIN_ja_marr_chase", not "CIN_jamarr_chase").
+    """
+    teams = [team for team in dict.fromkeys(canonicalize_team(c) for c in clubs) if team]
+
+    exact = [(team, make_player_id(name, team)) for team in teams]
+    exact = [(team, pid) for team, pid in exact if pid in roster_player_ids]
+    if len(exact) == 1:
+        return RosterResolution(*exact[0])
+    if len(exact) > 1:
+        return RosterResolution("", "")
+
+    key = loose_name_key(name)
+    if not key or not loose_index:
+        return RosterResolution("", "")
+    loose = [(team, loose_index.get((team, key), frozenset())) for team in teams]
+    loose = [(team, pids) for team, pids in loose if pids]
+    if len(loose) == 1 and len(loose[0][1]) == 1:
+        team, pids = loose[0]
+        return RosterResolution(team, next(iter(pids)))
+    return RosterResolution("", "")
 
 
 def _parse_timestamps(series: pd.Series, column: str) -> pd.Series:

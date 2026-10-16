@@ -2,7 +2,11 @@
 
 Joins weekly projections with odds from multiple sportsbooks using tiered matching:
   Tier 1:   exact player_id + market (confidence 0.95)
-  Tier 2:   normalized_name + market + canonicalized team (confidence 0.90)
+  Tier 2:   loose name + market + canonicalized team (confidence 0.90).
+            The loose key (utils.matching.loose_name_key) ignores
+            punctuation and folds first-name aliases, so "JaMarr Chase" and
+            "Hollywood Brown" meet the roster's "Ja'Marr Chase" and
+            "Marquise Brown"; tier 3 uses the same key.
   Tier 2.5: roster-verified suffix-bearing name + market (confidence 0.87),
             tried before the suffix-stripped tier 3. player_ids are built from
             already-stripped names, so suffix evidence comes ONLY from
@@ -12,7 +16,8 @@ Joins weekly projections with odds from multiple sportsbooks using tiered matchi
             guarded by positions_compatible and suffix_conflict
             (utils/matching.py). Positions come from nfl_roster_players first
             (covers defense and is available pregame), then
-            player_stats_enhanced as fallback.
+            player_stats_enhanced as fallback. The fuzzy pass ignores an
+            odds team the scraper guessed (pid not on the season roster).
 
 Odds are deduplicated to the latest snapshot per (event_id, player_id, market,
 sportsbook) before matching, so superseded scrapes never fan out the join.
@@ -35,6 +40,7 @@ import pandas as pd
 from utils.db import read_dataframe, get_connection
 from utils.matching import (
     latest_snapshot_per_key,
+    loose_name_key,
     name_variants,
     positions_compatible,
     strip_name_suffix,
@@ -148,7 +154,7 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
 
     # Roster is the only raw-name source (pids are suffix-stripped) and the
     # only pregame position source that covers defensive players.
-    full_name_map, roster_pos = _load_roster_maps(season)
+    full_name_map, roster_pos, roster_pids = _load_roster_maps(season)
 
     # ---- prepare enrichment columns ---------------------------------
     # norm_name_full is the roster-verified suffix-preserving form, or ""
@@ -161,6 +167,9 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
         lambda pid: normalize_player_name(name_from_player_id(pid))
     )
     proj["norm_name_full"] = proj["player_id"].map(full_name_map).fillna("")
+    proj["loose_name"] = proj["player_id"].apply(
+        lambda pid: loose_name_key(name_from_player_id(pid))
+    )
     proj["team_canon"] = proj["team"].apply(canonicalize_team)
 
     odds = odds.copy()
@@ -170,6 +179,17 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
     odds["norm_name_full"] = odds["player_id"].map(full_name_map).fillna("")
     odds["odds_team_raw"] = odds["player_id"].apply(_team_from_pid)
     odds["odds_team_canon"] = odds["odds_team_raw"].apply(canonicalize_team)
+    odds["loose_name"] = odds["player_id"].apply(
+        lambda pid: loose_name_key(name_from_player_id(pid))
+    )
+    # weekly_odds stores only the pid, so whether the scraper resolved the
+    # club from the roster or guessed the home club is recoverable only by
+    # roster membership: the scraper emits the roster's own pid on a hit.
+    # With no roster loaded there is no evidence either way, so the pid team
+    # keeps counting as known (the pre-roster behavior).
+    odds["odds_team_known"] = (
+        odds["player_id"].isin(roster_pids) if roster_pids else True
+    )
 
     # Build a stats lookup: player_id -> (position, team, name)
     stats_map: dict = {}
@@ -220,12 +240,15 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
         ~odds_remaining.apply(lambda r: (r["player_id"], r["market"]) in matched_odds_pids, axis=1)
     ]
 
-    # ---- Tier 2: normalized_name + market + team_canon --------------
+    # ---- Tier 2: loose name + market + team_canon --------------------
+    # loose_name (utils.matching.loose_name_key) equals whenever norm_name
+    # does, and also bridges book spellings ("jamarr" vs "ja marr") and the
+    # FIRST_NAME_ALIASES pairs ("hollywood" vs "marquise").
     if not proj_remaining.empty and not odds_remaining.empty:
         tier2 = proj_remaining.merge(
             odds_remaining,
-            left_on=["norm_name", "market", "team_canon"],
-            right_on=["norm_name", "market", "odds_team_canon"],
+            left_on=["loose_name", "market", "team_canon"],
+            right_on=["loose_name", "market", "odds_team_canon"],
             how="inner",
             suffixes=("_proj", "_odds"),
         )
@@ -262,11 +285,11 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
         )
         matched_rows.extend(t25_rows)
 
-    # ---- Tier 3: normalized_name + market (no team) -----------------
+    # ---- Tier 3: loose name + market (no team) ----------------------
     if not proj_remaining.empty and not odds_remaining.empty:
         tier3 = proj_remaining.merge(
             odds_remaining,
-            on=["norm_name", "market"],
+            on=["loose_name", "market"],
             how="inner",
             suffixes=("_proj", "_odds"),
         )
@@ -305,7 +328,9 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
     # one odds quote matches at most one projection (best score wins).
     # Matching each projection independently let TB_chris_godwin and
     # NYJ_chris_rodwin both claim TB_chris_godwinn. A typo is weak evidence
-    # on its own, so the teams must also agree when both are known.
+    # on its own, so the teams must also agree when both are known. An odds
+    # team the scraper guessed (home club, pid not on the roster) is not
+    # known: it is wrong for every away player and would block the match.
     if not proj_remaining.empty and not odds_remaining.empty:
         candidates = []
         for p_idx, (_, pr) in enumerate(proj_remaining.iterrows()):
@@ -317,6 +342,8 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
                 if orow["market"] != p_market:
                     continue
                 o_team = orow.get("odds_team_canon", "") or ""
+                if not orow.get("odds_team_known", True):
+                    o_team = ""
                 if p_team and o_team and p_team != o_team:
                     continue
                 o_pos = _pid_position(orow["player_id"], stats_map, roster_pos)
@@ -381,16 +408,19 @@ def join_odds_projections(season: int, week: int) -> pd.DataFrame:
 # ======================================================================
 
 
-def _load_roster_maps(season: int) -> Tuple[dict, dict]:
+def _load_roster_maps(season: int) -> Tuple[dict, dict, frozenset]:
     """Roster-derived per-pid maps: suffix-preserving names and positions.
 
-    Returns ``(full_name_map, roster_pos)``:
+    Returns ``(full_name_map, roster_pos, roster_pids)``:
     - ``full_name_map``: pid -> normalized raw roster name WITH suffix
       preserved ("david long jr"), only for pids with exactly one distinct
       roster name that season; ambiguous pids are omitted (= unknown).
     - ``roster_pos``: pid -> position (QB/RB/WR/TE/DB/LB/...), only for pids
       with exactly one distinct position; covers defensive players and is
       available pregame, unlike player_stats_enhanced.
+    - ``roster_pids``: every rostered pid that season (empty when the roster
+      is unavailable), used to tell a roster-resolved odds team from a
+      guessed one.
     """
     try:
         roster = read_dataframe(
@@ -403,7 +433,7 @@ def _load_roster_maps(season: int) -> Tuple[dict, dict]:
     full_name_map: dict = {}
     roster_pos: dict = {}
     if roster.empty:
-        return full_name_map, roster_pos
+        return full_name_map, roster_pos, frozenset()
     for pid, grp in roster.groupby("player_id"):
         names = {
             name_variants(n).with_suffix
@@ -419,7 +449,8 @@ def _load_roster_maps(season: int) -> Tuple[dict, dict]:
         }
         if len(positions) == 1:
             roster_pos[pid] = positions.pop()
-    return full_name_map, roster_pos
+    roster_pids = frozenset(roster["player_id"].dropna().astype(str))
+    return full_name_map, roster_pos, roster_pids
 
 
 def _pid_position(pid, stats_map: dict, roster_pos: dict) -> str:

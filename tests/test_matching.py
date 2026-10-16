@@ -17,12 +17,16 @@ import pytest
 
 from utils.clv import SNAPSHOT_KEY
 from utils.matching import (
+    RosterResolution,
     StaleFilterResult,
+    build_loose_roster_index,
     filter_stale_snapshots,
     latest_snapshot_per_key,
+    loose_name_key,
     name_variants,
     normalize_name,
     positions_compatible,
+    resolve_roster_player,
     strip_name_suffix,
     suffix_conflict,
 )
@@ -484,3 +488,85 @@ class TestFilterStaleSnapshots:
         kicks = pd.DataFrame([{"event_id": "game1"}])
         with pytest.raises(ValueError, match="kickoffs_df missing required columns"):
             filter_stale_snapshots(odds, kicks)
+
+
+# ======================================================================
+# loose_name_key / resolve_roster_player
+# ======================================================================
+
+
+class TestLooseNameKey:
+    @pytest.mark.parametrize(
+        ("book", "roster"),
+        [
+            ("JaMarr Chase", "Ja'Marr Chase"),
+            ("DAndre Swift", "D'Andre Swift"),
+            ("Hollywood Brown", "Marquise Brown"),
+            ("Zonovan Knight", "Bam Knight"),
+            ("Nathaniel Dell", "Tank Dell"),
+            ("Joshua Palmer", "Josh Palmer"),
+            ("Gabriel Davis", "Gabe Davis"),
+            ("Cameron Skattebo", "Cam Skattebo"),
+            ("Chigoziem Okonkwo", "Chig Okonkwo"),
+            ("Ken Walker III", "Kenneth Walker III"),
+            ("A. J. Brown", "A.J. Brown"),
+            ("D.K. Metcalf", "DK Metcalf"),
+            ("Amon-Ra St. Brown", "amon ra st brown"),
+            ("Jaxon Smith-Njigba", "jaxon smith njigba"),
+            ("Marvin Harrison Jr.", "marvin harrison"),
+        ],
+    )
+    def test_variants_share_a_key(self, book: str, roster: str) -> None:
+        assert loose_name_key(book) == loose_name_key(roster) != ""
+
+    def test_alias_folds_first_name_only(self) -> None:
+        # "Cam" in a surname position is not a first name to fold.
+        assert loose_name_key("Josh Cam") != loose_name_key("Josh Cameron")
+
+    def test_distinct_players_keep_distinct_keys(self) -> None:
+        assert loose_name_key("Chase Brown") != loose_name_key("Marquise Brown")
+
+    @pytest.mark.parametrize("value", [None, "", 12, "   "])
+    def test_empty_inputs(self, value) -> None:
+        assert loose_name_key(value) == ""
+
+
+class TestResolveRosterPlayer:
+    ROSTER = frozenset(
+        {"CIN_ja_marr_chase", "BAL_lamar_jackson", "ARI_michael_carter", "PHI_michael_carter"}
+    )
+    INDEX = build_loose_roster_index(ROSTER)
+
+    def _resolve(self, name: str, clubs: tuple[str, str]) -> RosterResolution:
+        return resolve_roster_player(name, clubs, self.ROSTER, self.INDEX)
+
+    def test_exact_hit_wins(self) -> None:
+        assert self._resolve("Lamar Jackson", ("BAL", "CIN")) == ("BAL", "BAL_lamar_jackson")
+
+    @pytest.mark.parametrize("clubs", [("BAL", "CIN"), ("CIN", "BAL")])
+    def test_loose_hit_returns_the_roster_pid(self, clubs) -> None:
+        assert self._resolve("JaMarr Chase", clubs) == ("CIN", "CIN_ja_marr_chase")
+
+    def test_feed_club_names_are_canonicalized(self) -> None:
+        resolved = self._resolve("JaMarr Chase", ("Baltimore Ravens", "Cincinnati Bengals"))
+        assert resolved.team == "CIN"
+
+    def test_name_on_both_rosters_is_unresolved(self) -> None:
+        assert self._resolve("Michael Carter", ("ARI", "PHI")) == ("", "")
+        assert self._resolve("Michael Carter Jr", ("ARI", "PHI")) == ("", "")
+
+    def test_no_index_means_exact_only(self) -> None:
+        assert resolve_roster_player("JaMarr Chase", ("CIN", "BAL"), self.ROSTER) == ("", "")
+
+    def test_ambiguous_loose_key_within_one_club_is_unresolved(self) -> None:
+        roster = frozenset({"NYG_cam_smith", "NYG_cameron_smith"})
+        index = build_loose_roster_index(roster)
+        assert resolve_roster_player("Cameron Smith", ("NYG", "DAL"), roster, index) == (
+            "NYG",
+            "NYG_cameron_smith",
+        )
+        # No exact id; the loose key reaches both NYG players, so neither.
+        assert resolve_roster_player("CamSmith", ("NYG", "DAL"), roster, index) == ("", "")
+
+    def test_index_skips_ids_without_a_team(self) -> None:
+        assert build_loose_roster_index(["chris_godwin", "", "XX_some_one"]) == {}
