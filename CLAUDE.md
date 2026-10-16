@@ -206,6 +206,13 @@ empty of 1,396), so the gate becomes verifiable on real data once 2026 actuals l
 re-run `make week-refresh` for a past 2025 week to "fix" those rows — it would overwrite pregame
 evidence (and the pre-kickoff guard refuses anyway).
 
+**Id bridge (2026-10)**: projection ids are minted from the roster (`CIN_ja_marr_chase`) and stats ids
+from the abbreviated box-score name (`CIN_j_chase`), so a plain `player_id` join matched 0 of 503
+2026 stat ids. `scripts/evaluate_nfl_projections.py` and grading now re-key actuals through
+`gsis_id` via `utils.grading.align_actuals_to_bets`, preferring the graded week's
+`nfl_player_context_snapshots` id so a player traded after his bet still grades. Join on `gsis_id`,
+never on the team-embedded `player_id`, anywhere a player's history must survive a trade.
+
 ### Verify Data
 ```bash
 DB_BACKEND=sqlite SQLITE_DB_PATH=nfl_data.db uv run python -c "
@@ -384,7 +391,9 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     EWMA multiplier, floors/defaults scaled by the same factor. Result: overall 1-sigma coverage
     66.3% -> 68.2%; QB passing (previously unvalidated, 58.2%) landed at 68.5%. Factors are
     in-sample for 2025 — validate against 2026 walk-forward before re-tuning, via
-    `make nfl-backtest` + `compare`. The unread config knobs (`config.integration.ewma_decay` in
+    `make nfl-backtest` + `compare`. Players with 1-5 games now get `max(flat default, CV x their
+    mean)` (`SIGMA_SHORT_HISTORY_CV`) instead of one flat default: on 2024-25 core players that
+    path covered 44-55% at +/-1 sigma, and now 62-73% (QB unchanged). The unread config knobs (`config.integration.ewma_decay` in
     both `config/runtime.py` and `config.py` — zero readers, confirmed by grep) have been
     removed; do not reintroduce a config knob for `_compute_market_mu`'s constant, since nothing
     in production reads it.
