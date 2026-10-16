@@ -249,6 +249,8 @@ NFL_ODDS_MIN_EVENT_COVERAGE=1.0
 NFL_ODDS_MIN_MARKET_COVERAGE=1.0
 NFL_ODDS_MIN_SPORTSBOOKS_PER_EVENT_MARKET=2
 NFL_ODDS_REQUIRED_MARKETS=player_pass_yds,player_rush_yds,player_reception_yds,player_receptions
+# Fetched and stored but left out of the coverage gate (many books quote Yes only):
+NFL_ODDS_OPTIONAL_MARKETS=player_anytime_td
 LOG_FORMAT=console  # use json in deployments
 LOG_LEVEL=INFO
 ```
