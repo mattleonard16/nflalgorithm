@@ -42,7 +42,6 @@ dev = [
     "isort>=5.12.0",
     "mypy>=1.6.0",
 ]
-shap = ["shap>=0.44.0"]
 sentry = ["sentry-sdk>=2.0.0"]
 
 # [build-system]  # Disabled for simple script-based project

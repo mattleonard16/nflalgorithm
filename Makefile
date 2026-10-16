@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint typecheck format validate requirements mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto db-analyze nfl-backtest context-eval production-run health
+.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint typecheck format validate requirements mae-gate dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto db-analyze nfl-backtest context-eval production-run health
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -246,12 +246,6 @@ mae-gate:
 		--season $(SEASON) --week $(WEEK) \
 		$(if $(strip $(BASELINE)),--baseline $(BASELINE) --tolerance-pct $(or $(strip $(TOLERANCE_PCT)),10),) \
 		--output logs/metrics/nfl-mae-gate-$(SEASON)-w$(WEEK).json
-
-# Hyperparameter optimization with environment detection
-optimize:
-	@echo "Running Optuna hyperparameter optimization with $(ENV_TYPE)..."
-	$(PYTHON) optuna_optimization.py
-	@echo "Optimization complete! Check optuna.db for results"
 
 
 # Launch dashboard with environment detection
