@@ -118,3 +118,25 @@ def test_the_sigma_floor_still_applies_to_yardage(mvv, monkeypatch):
     )
 
     assert stored.loc["BUF_tight", "sigma"] == pytest.approx(7.5)
+
+
+def test_a_volatile_starter_whose_spread_exceeds_his_mean_stays_on_the_card(mvv, monkeypatch):
+    # An RB1's receiving line: 22 yards on average with a 26-yard spread. That
+    # is a boom-or-bust receiver with history, not a missing projection.
+    stored = _materialize(
+        mvv,
+        monkeypatch,
+        [
+            _ranked_row(player_id="BUF_rb1", line=19.5, mu=22.0, sigma=26.0),
+            _ranked_row(player_id="BUF_collapsed", line=19.5, mu=1.6, sigma=37.5),
+            _ranked_row(
+                player_id="BUF_qb_collapsed",
+                market="passing_yards",
+                line=220.5,
+                mu=60.0,
+                sigma=64.5,
+            ),
+        ],
+    )
+
+    assert set(stored.index) == {"BUF_rb1"}

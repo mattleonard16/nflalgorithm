@@ -19,6 +19,14 @@ from value_betting_engine import rank_weekly_value
 
 logger = logging.getLogger(__name__)
 
+# Below these means a yardage row whose sigma >= mu is a missing history, not a
+# volatile player: a starter's projected volume clears them comfortably.
+UNGROUNDED_MU_CEILING = {
+    "receiving_yards": 15.0,
+    "rushing_yards": 15.0,
+    "passing_yards": 100.0,
+}
+
 
 def materialize_week(
     season: int,
@@ -101,24 +109,30 @@ def materialize_week(
         # manufacture an edge from noise. On the 2026 W1 slate this shape
         # covers 556 of 1,396 rows.
         #
-        # sigma >= mu is the observable signature: for a genuine skill-position
-        # yardage projection the mean exceeds the spread. Count markets are
-        # exempt: an anytime-TD mean below 1 always sits under its spread, and
-        # that is the shape of the stat, not a missing history. This lives
+        # The signature is a collapsed mean under a spread at least as wide:
+        # sigma >= mu with mu below a small per-market ceiling. sigma >= mu
+        # alone also matched real starters -- a boom-or-bust receiver's spread
+        # routinely exceeds his mean -- and on 2024-25 core players it dropped
+        # 32% of RB1 receiving rows and 17-18% of starting WR/TE rows, every one
+        # with full history. Above the ceiling the model has clearly projected
+        # volume; below it, sigma >= mu is the no-history shape. Count markets
+        # are exempt: an anytime-TD mean below 1 always sits under its spread,
+        # and that is the shape of the stat, not a missing history. This lives
         # here, in the tracked materialization path, rather than in the model,
-        # because every
-        # card passes through this chokepoint regardless of which producer
-        # generated it — including deployments whose private model code differs
-        # from this machine's.
+        # because every card passes through this chokepoint regardless of
+        # which producer generated it — including deployments whose private
+        # model code differs from this machine's.
+        mu_values = payload['mu'].astype(float)
         ungrounded_mask = (
             payload['market'].isin(GAMMA_MARKETS)
             & payload['mu'].notna()
             & payload['sigma'].notna()
-            & (payload['sigma'].astype(float) >= payload['mu'].astype(float))
+            & (payload['sigma'].astype(float) >= mu_values)
+            & (mu_values < payload['market'].map(UNGROUNDED_MU_CEILING).astype(float))
         )
         if ungrounded_mask.any():
             logger.warning(
-                "Dropping %d of %d rows whose sigma >= mu (no usable history)",
+                "Dropping %d of %d rows with a collapsed mu under sigma (no usable history)",
                 int(ungrounded_mask.sum()),
                 len(payload),
             )
