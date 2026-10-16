@@ -12,7 +12,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Container, Dict, List, Optional, cast
+from typing import Any, Container, Dict, Iterable, List, Optional, cast
 
 import pandas as pd
 
@@ -22,8 +22,9 @@ from config import config
 from scripts.simple_cache import redact_api_key, simple_cached_client
 from utils.db import execute, get_connection, read_dataframe
 from utils.event_keys import UnresolvableEventError, resolve_event_id
+from utils.matching import LooseRosterIndex, build_loose_roster_index, resolve_roster_player
 from utils.odds_math import implied_probability_no_vig
-from utils.player_id_utils import canonicalize_team, make_player_id, team_for_player
+from utils.player_id_utils import canonicalize_team, make_player_id
 from utils.two_sided_odds import pair_two_sided_prices
 
 # Set up logging
@@ -579,9 +580,10 @@ class NFLPropScraper:
                                 {
                                     "event_id": game_key,
                                     "source_player_id": outcome.get("id"),
-                                    "player_id": make_player_id(info["name"], info["team"]),
+                                    "player_id": info["player_id"],
                                     "player": info["name"],
                                     "team": info["team"],
+                                    "team_guessed": info["team_guessed"],
                                     "position": info["position"],
                                     "book": book_name,
                                     "stat": stat_category,
@@ -816,8 +818,16 @@ class NFLPropScraper:
         """Extract player name, team, and position from description.
 
         The book names the player, not the club. The season roster decides
-        between the two clubs in the game; a name on neither roster falls
-        back to the old home-club guess, which is wrong for every away player.
+        between the two clubs in the game: first on the exact player_id, then
+        on a spelling-insensitive key with first-name aliases ("JaMarr Chase",
+        "Hollywood Brown"; see ``utils.matching.resolve_roster_player``). A
+        roster hit returns the roster's own ``player_id`` so the quote joins
+        the projection at tier 1.
+
+        A name on neither roster falls back to the home-club guess, which is
+        wrong for every away player, so the result carries
+        ``team_guessed=True`` and downstream matching must treat the team as
+        unknown rather than as evidence.
         """
 
         # Basic extraction (format varies by sportsbook)
@@ -829,17 +839,51 @@ class NFLPropScraper:
             player_name = player_description.strip()
             team_info = ""
 
-        team = team_for_player(player_name, (home_team, away_team), roster_ids)
+        team, player_id = resolve_roster_player(
+            player_name,
+            (home_team, away_team),
+            roster_ids,
+            self._loose_roster_index(roster_ids),
+        )
+        team_guessed = False
         if not team:
             self.last_weekly_audit["team_unresolved"] = (
                 self.last_weekly_audit.get("team_unresolved", 0) + 1
             )
-            team = self._guess_team(player_name, home_team, away_team, team_info)
+            team = self._team_from_info(team_info)
+            if not team:
+                team = self._guess_team(player_name, home_team, away_team, team_info)
+                team_guessed = True
+            player_id = make_player_id(player_name, team)
 
         # Try to determine position (would need player database for accuracy)
         position = self._guess_position(player_name)
 
-        return {"name": player_name, "team": team, "position": position}
+        return {
+            "name": player_name,
+            "team": team,
+            "position": position,
+            "player_id": player_id,
+            "team_guessed": team_guessed,
+        }
+
+    def _loose_roster_index(self, roster_ids: Container[str]) -> LooseRosterIndex:
+        """Loose-name index of ``roster_ids``, built once per roster object."""
+        cached = getattr(self, "_loose_index_cache", None)
+        if cached is not None and cached[0] is roster_ids:
+            return cached[1]
+        index = (
+            build_loose_roster_index(roster_ids) if isinstance(roster_ids, Iterable) else {}
+        )
+        self._loose_index_cache = (roster_ids, index)
+        return index
+
+    def _team_from_info(self, team_info: str) -> str:
+        """The club a book named next to the player ("Name - Denver Broncos")."""
+        for full_name, abbrev in self.team_mapping.items():
+            if team_info and full_name.lower() in team_info.lower():
+                return abbrev
+        return ""
 
     def _guess_team(self, player_name: str, home_team: str, away_team: str, team_info: str) -> str:
         """Guess player's team (simplified - would need player database)"""
