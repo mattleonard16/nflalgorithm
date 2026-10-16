@@ -1,7 +1,10 @@
 """Populate the player_dim canonical dimension table.
 
-Reads the latest row per player_id from player_stats_enhanced
-(ranked by season DESC, week DESC) and upserts into player_dim.
+Reads the latest row per player from player_stats_enhanced (ranked by
+season DESC, week DESC) and upserts into player_dim. A player is his nflverse
+gsis_id, falling back to player_id when the stats row has none: player_id
+embeds the team, so partitioning on it wrote one row per club a traded player
+had ever been on.
 """
 
 from __future__ import annotations
@@ -32,7 +35,7 @@ def populate_player_dim() -> int:
             SELECT
                 player_id, gsis_id, name, position, team, season, week,
                 ROW_NUMBER() OVER (
-                    PARTITION BY player_id
+                    PARTITION BY COALESCE(NULLIF(gsis_id, ''), player_id)
                     ORDER BY season DESC, week DESC
                 ) AS rn
             FROM player_stats_enhanced
