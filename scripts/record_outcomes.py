@@ -23,6 +23,7 @@ from utils.grading import (
     calculate_profit_units,
     get_confidence_tier,
     grade_bet,
+    known_bet_ids,
 )
 from utils.live_odds import kickoffs_from_games
 from utils.nfl_markets import MARKET_TO_STAT, synthesize_anytime_td
@@ -98,6 +99,20 @@ def grade_bets(season: int, week: int, include_unfinished: bool = False) -> List
     """
     actuals = read_dataframe(actuals_query, params=(season, week))
 
+    # Identity sources for this week. The snapshot records the id each player
+    # was projected (and therefore bet) under that week; the roster is the
+    # season-current id, rewritten on a trade, so it only fills gaps.
+    roster = read_dataframe(
+        "SELECT gsis_id, player_id FROM nfl_roster_players WHERE season = ?",
+        params=(season,),
+    )
+    snapshots = read_dataframe(
+        "SELECT season, week, gsis_id, player_id FROM nfl_player_context_snapshots "
+        "WHERE season = ? AND week = ?",
+        params=(season, week),
+    )
+    known_ids = known_bet_ids(roster, snapshots)
+
     if actuals.empty:
         print(f"WARNING: No actual stats found for {season} Week {week}")
         print("All bets will be marked as pushes")
@@ -106,17 +121,14 @@ def grade_bets(season: int, week: int, include_unfinished: bool = False) -> List
         # Bets and stats mint `player_id` from different spellings of the same
         # name, so matching on it alone finds nothing and grades the week as
         # pushes. Re-key the stats onto the bets' ids via nflverse's gsis_id.
-        roster = read_dataframe(
-            "SELECT gsis_id, player_id FROM nfl_roster_players WHERE season = ?",
-            params=(season,),
-        )
-        if roster.empty:
+        if roster.empty and snapshots.empty:
             print(
-                f"WARNING: no roster rows for {season}; cannot align stat ids to bet ids, "
-                "so bets will only match where the two already agree"
+                f"WARNING: no roster or context-snapshot rows for {season} Week {week}; "
+                "cannot align stat ids to bet ids, so bets will only match where the "
+                "two already agree"
             )
         else:
-            actuals = align_actuals_to_bets(actuals, roster)
+            actuals = align_actuals_to_bets(actuals, roster, snapshots)
         matched = actuals["player_id"].isin(set(predictions["player_id"])).sum()
         print(f"Matched {matched} of {len(actuals)} stat rows to bets")
         actuals = synthesize_anytime_td(actuals)
@@ -148,6 +160,7 @@ def grade_bets(season: int, week: int, include_unfinished: bool = False) -> List
 
     # Grade each bet
     outcomes = []
+    unmatched: List[str] = []
 
     for _, pred in predictions.iterrows():
         player_id = pred["player_id"]
@@ -171,8 +184,19 @@ def grade_bets(season: int, week: int, include_unfinished: bool = False) -> List
         # Find actual result
         player_actuals = actuals[actuals["player_id"] == player_id]
 
+        if player_actuals.empty and known_ids and player_id not in known_ids:
+            # Nothing ties this id to a player: no stat row, no snapshot, no
+            # roster entry. Usually a traded player whose bet predates the
+            # roster rewrite. A push would book 0 profit as if it settled, so
+            # leave it ungraded and say so; a re-run after the identity is
+            # repaired grades it.
+            unmatched.append(f"{player_id} {market} {pred['sportsbook']} {side}")
+            continue
+
         if player_actuals.empty:
-            # No actual data - treat as push
+            # Identified player with no stat row (inactive, DNP) - push. With
+            # no identity source at all the two cases cannot be told apart, so
+            # this also keeps the legacy push for that case.
             actual_result = None
             result = "push"
         else:
@@ -230,6 +254,13 @@ def grade_bets(season: int, week: int, include_unfinished: bool = False) -> List
         outcomes.append(outcome)
 
     print(f"Graded {len(outcomes)} bets")
+    if unmatched:
+        print(
+            f"WARNING: {len(unmatched)} bet(s) left ungraded: their player id matches no "
+            f"stat row, context snapshot or roster entry for {season} Week {week}"
+        )
+        for item in unmatched:
+            print(f"  unmatched: {item}")
 
     # Print summary
     if outcomes:
