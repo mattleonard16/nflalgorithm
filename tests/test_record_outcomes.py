@@ -199,6 +199,60 @@ def test_a_player_without_a_stat_row_in_a_finished_game_is_a_push(final_game):
     assert inactive["actual_result"] is None
 
 
+def _snapshot(gsis_id: str, player_id: str, team: str) -> None:
+    execute(
+        "INSERT INTO nfl_player_context_snapshots "
+        "(season, week, gsis_id, player_id, team, position, prior_source, captured_at) "
+        "VALUES (?, ?, ?, ?, ?, 'WR', 'test', ?)",
+        (SEASON, WEEK, gsis_id, player_id, team, NOW.isoformat()),
+    )
+
+
+def test_a_traded_player_is_graded_under_the_id_of_the_graded_week(db):
+    # Bet minted as NYJ_garrett_wilson; the roster upsert has since rewritten
+    # the season row to his new club. The week's snapshot still holds NYJ.
+    _game("2025_05_NYJ_BUF", PAST_KICKOFF)
+    _roster("00-0037000", "DAL_garrett_wilson", "DAL")
+    _snapshot("00-0037000", "NYJ_garrett_wilson", "NYJ")
+    _bet("NYJ_garrett_wilson", event_id="2025_05_NYJ_BUF", line=64.5)
+    _stat("NYJ_g_wilson", "NYJ", gsis_id="00-0037000", receiving_yards=90.0)
+
+    [outcome] = grade_bets(SEASON, WEEK)
+
+    assert outcome["result"] == "win"
+    assert outcome["actual_result"] == pytest.approx(90.0)
+
+
+def test_a_bet_no_identity_source_knows_is_left_ungraded_not_pushed(final_game, capsys):
+    # The roster only knows the post-trade id and there is no snapshot, so the
+    # bet's id ties to no player. It must not be booked as a settled push.
+    _roster("00-0037000", "DAL_garrett_wilson", "DAL")
+    _roster("00-0000002", "BUF_receiver_a", "BUF")
+    _bet("BUF_receiver_a")
+    _bet("NYJ_garrett_wilson")
+    _stat("BUF_r_a", "BUF", gsis_id="00-0000002", receiving_yards=71.0)
+    _stat("DAL_g_wilson", "DAL", gsis_id="00-0037000", receiving_yards=90.0)
+
+    outcomes = grade_bets(SEASON, WEEK)
+
+    assert [o["player_id"] for o in outcomes] == ["BUF_receiver_a"]
+    assert "1 bet(s) left ungraded" in capsys.readouterr().out
+
+
+def test_an_identified_player_without_a_stat_row_is_still_a_push(final_game):
+    _roster("00-0000002", "BUF_receiver_a", "BUF")
+    _roster("00-0000003", "BUF_inactive_receiver", "BUF")
+    _bet("BUF_receiver_a")
+    _bet("BUF_inactive_receiver")
+    _stat("BUF_r_a", "BUF", gsis_id="00-0000002", receiving_yards=71.0)
+
+    outcomes = {o["player_id"]: o for o in grade_bets(SEASON, WEEK)}
+
+    assert outcomes["BUF_receiver_a"]["result"] == "win"
+    assert outcomes["BUF_inactive_receiver"]["result"] == "push"
+    assert outcomes["BUF_inactive_receiver"]["profit_units"] == 0.0
+
+
 def test_an_under_bet_wins_when_the_stat_lands_below_the_line(final_game):
     _bet("BUF_receiver_a", side="under", line=64.5)
     _stat("BUF_receiver_a", "BUF", receiving_yards=50.0)
