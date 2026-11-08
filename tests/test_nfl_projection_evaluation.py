@@ -418,3 +418,45 @@ def test_gate_with_backtest_ceilings_blocks_only_real_regressions() -> None:
     assert steady["passed"] is True
     assert slipped["passed"] is False
     assert slipped["blockers"] == ["WR MAE 29.00 exceeds threshold 26.62 over 200 projections"]
+
+
+def test_load_inputs_aligns_stat_ids_to_projection_ids_through_gsis(tmp_path, monkeypatch) -> None:
+    """Projections use roster-form ids and stats initial-form; gsis_id bridges them."""
+    import sqlite3
+
+    from config import config
+    from scripts.evaluate_nfl_projections import DATABASE_STAT_COLUMNS, _load_inputs
+
+    db_path = str(tmp_path / "eval.db")
+    monkeypatch.setenv("DB_BACKEND", "sqlite")
+    monkeypatch.setenv("SQLITE_DB_PATH", db_path)
+    monkeypatch.setattr(config.database, "backend", "sqlite")
+    monkeypatch.setattr(config.database, "path", db_path)
+
+    projections, _, games, runs = _inputs()
+    projections = projections.iloc[[0]].assign(season=2026, player_id="BUF_josh_allen")
+    stats = pd.DataFrame(
+        [
+            {
+                "season": 2026,
+                "week": 1,
+                "player_id": "BUF_j_allen",
+                "gsis_id": "00-0034857",
+                "position": "WR",
+                **{column: 0.0 for column in DATABASE_STAT_COLUMNS},
+            }
+        ]
+    )
+    roster = pd.DataFrame(
+        [{"season": 2026, "gsis_id": "00-0034857", "player_id": "BUF_josh_allen"}]
+    )
+    with sqlite3.connect(db_path) as conn:
+        projections.to_sql("weekly_projections", conn, index=False)
+        games.assign(season=2026).to_sql("games", conn, index=False)
+        runs.assign(season=2026).to_sql("pipeline_runs", conn, index=False)
+        stats.to_sql("player_stats_enhanced", conn, index=False)
+        roster.to_sql("nfl_roster_players", conn, index=False)
+
+    loaded_projections, loaded_actuals, _, _ = _load_inputs(2026, [1])
+
+    assert list(loaded_actuals["player_id"]) == list(loaded_projections["player_id"])
