@@ -417,13 +417,13 @@ def _normalize_name_for_merge(name: str) -> str:
     """
     if name is None or (isinstance(name, float) and pd.isna(name)):
         return ""
-    s = str(name).lower()
-    # Drop common suffixes after a space
-    for suf in (" jr", " sr", " ii", " iii", " iv", " v"):
-        if s.endswith(suf):
-            s = s[: -len(suf)]
-    # Keep only letters/digits
-    return "".join(ch for ch in s if ch.isalnum())
+    # Punctuation becomes a space before the suffix check: snap_counts writes
+    # "Jr." and "Sr.", and matching only " jr" left those players at 0 snaps
+    # (2026: 16% of WR and 18% of RB player-weeks).
+    tokens = "".join(ch if ch.isalnum() else " " for ch in str(name).lower()).split()
+    if len(tokens) > 1 and tokens[-1] in {"jr", "sr", "ii", "iii", "iv", "v"}:
+        tokens = tokens[:-1]
+    return "".join(tokens)
 
 
 def _merge_snap_counts(df: pd.DataFrame, snaps: pd.DataFrame) -> pd.DataFrame:
@@ -1871,7 +1871,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     count = ingest_seasons(seasons, through_week=args.through_week)
     logger.info(f"Ingested {count} player stat rows")
-    logger.info(f"Ready for Week {args.through_week + 1} predictions")
 
 
 if __name__ == "__main__":
