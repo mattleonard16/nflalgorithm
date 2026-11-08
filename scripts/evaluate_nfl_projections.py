@@ -15,6 +15,7 @@ import pandas as pd
 
 from config import config
 from utils.db import read_dataframe
+from utils.grading import align_actuals_to_bets
 from utils.nfl_markets import (
     DATABASE_STAT_COLUMNS,
     error_summary,
@@ -537,10 +538,25 @@ def _load_inputs(season: int, weeks: Iterable[int]) -> tuple[pd.DataFrame, ...]:
     )
     actual_columns = ", ".join(DATABASE_STAT_COLUMNS)
     actuals = read_dataframe(
-        f"SELECT season, week, player_id, position, {actual_columns} "
+        f"SELECT season, week, player_id, gsis_id, position, {actual_columns} "
         f"FROM player_stats_enhanced WHERE {where}",
         params=params,
     )
+    # Projections carry the roster spelling of player_id and stats the abbreviated
+    # one (2026: 0 of 5,706 rows match), so re-key stats through gsis_id exactly as
+    # grading does.
+    roster = read_dataframe(
+        "SELECT gsis_id, player_id FROM nfl_roster_players WHERE season = ?",
+        params=(season,),
+    )
+    if roster.empty:
+        print(
+            f"WARNING: no roster rows for {season}; cannot align stat ids to projection ids, "
+            "so rows only match where the two already agree"
+        )
+    else:
+        actuals = align_actuals_to_bets(actuals, roster)
+    actuals = actuals.drop(columns="gsis_id")
     games = read_dataframe(
         f"SELECT season, week, home_team, away_team, kickoff_utc FROM games WHERE {where}",
         params=params,
