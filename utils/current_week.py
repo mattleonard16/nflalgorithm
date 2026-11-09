@@ -42,6 +42,14 @@ _SCHEDULE_QUERY = """
 _REQUIRED_COLUMNS = ("season", "week", "kickoff_utc")
 
 
+class SeasonOverError(ValueError):
+    """Every scheduled game has kicked off: the offseason, not a broken schedule.
+
+    Callers that skip quietly in the offseason catch only this, so an empty or
+    unreadable schedule still fails loud.
+    """
+
+
 class UpcomingWeek(NamedTuple):
     """The next unplayed week, plus the game that pins it down."""
 
@@ -123,7 +131,7 @@ def next_week_from_schedule(games: pd.DataFrame, now: Any = None) -> UpcomingWee
     upcoming = parseable.loc[parseable["_kickoff_ts"] >= reference]
     if upcoming.empty:
         latest = parseable["_kickoff_ts"].max()
-        raise ValueError(
+        raise SeasonOverError(
             f"cannot resolve the upcoming NFL week: every scheduled game has already kicked "
             f"off (latest kickoff {latest.isoformat()}, now {reference.isoformat()}). Ingest "
             f"the next season's schedule before scheduling a run."

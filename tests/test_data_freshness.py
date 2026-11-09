@@ -125,6 +125,13 @@ def test_offseason_skips_every_table(db):
     assert {r.status for r in results} == {"skip"}
 
 
+def test_missing_schedule_fails_every_table(db):
+    with sqlite3.connect(db) as conn:
+        conn.execute("DELETE FROM games")
+    results = check_data_freshness(now=NOW)
+    assert {r.status for r in results} == {"fail"}
+
+
 def test_preflight_exits_nonzero_on_a_stale_table(db, monkeypatch, capsys):
     # Empty tables with a live schedule: the real clock is past this fixture
     # schedule, so pin the clock the module reads.

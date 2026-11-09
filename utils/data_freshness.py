@@ -15,7 +15,7 @@ from typing import Any, NamedTuple
 
 import pandas as pd
 
-from utils.current_week import as_utc, next_week_from_schedule
+from utils.current_week import SeasonOverError, as_utc, next_week_from_schedule
 from utils.db import DBConnection, read_dataframe
 
 # A week's box scores land nightly; two days covers a late Monday-night ingest.
@@ -68,8 +68,11 @@ def check_data_freshness(
 
     try:
         upcoming = next_week_from_schedule(schedule, now=clock)
-    except ValueError as exc:
+    except SeasonOverError as exc:
         return _all(SKIP, f"offseason: {exc}")
+    except ValueError as exc:
+        # An empty or unreadable schedule is the failure this check exists to catch.
+        return _all(FAIL, f"cannot resolve the NFL week: {exc}")
     season, week = upcoming.season, upcoming.week
 
     this_season = schedule.loc[schedule["season"] == season]
