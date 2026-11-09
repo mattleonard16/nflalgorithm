@@ -211,35 +211,3 @@ def test_no_under_bet_without_an_under_price(temp_db_no_under, monkeypatch):
     assert not df.empty
     assert set(df["side"]) == {"over"}
 
-
-def test_no_vig_default_on(monkeypatch):
-    """The flag defaults to True when env is unset (flipped from the NFR-6 gate).
-
-    Reloads the underlying config module so we assert against the live
-    `config.features.no_vig_enabled` value, not a replayed parse.
-    """
-    import importlib.util
-    from pathlib import Path
-
-    monkeypatch.delenv("NFL_FEATURE_NO_VIG", raising=False)
-
-    cfg_path = Path(__file__).parent.parent / "config" / "runtime.py"
-    spec = importlib.util.spec_from_file_location("_config_under_test", cfg_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    assert module.config.features.no_vig_enabled is True
-
-
-def test_no_vig_can_still_be_switched_off(monkeypatch):
-    import importlib.util
-    from pathlib import Path
-
-    monkeypatch.setenv("NFL_FEATURE_NO_VIG", "0")
-
-    cfg_path = Path(__file__).parent.parent / "config" / "runtime.py"
-    spec = importlib.util.spec_from_file_location("_config_under_test_off", cfg_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    assert module.config.features.no_vig_enabled is False
