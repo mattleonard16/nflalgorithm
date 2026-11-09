@@ -42,6 +42,7 @@
     "typescript": "^5"
   },
   "overrides": {
-    "postcss": "8.5.19"
+    "postcss": "8.5.32",
+    "eslint-plugin-react-hooks": "7.0.1"
   }
 }
