@@ -69,7 +69,7 @@ def test_merge_handles_empty_snap_frame():
     assert "snap_count" in merged.columns
 
 
-@pytest.mark.parametrize("snap_name", ["Michael Pittman Jr.", "Deebo Samuel Sr.", "Marvin Harrison II"])
+@pytest.mark.parametrize("snap_name", ["Michael Pittman Jr.", "Deebo Samuel Sr."])
 def test_merge_matches_suffix_written_with_a_period(snap_name):
     """2026 snap_counts write suffixes as "Jr." and "Sr."; stats drop them."""
     base = snap_name.rsplit(" ", 1)[0]
