@@ -218,7 +218,7 @@ mae-gate:
 # Hyperparameter optimization with environment detection
 optimize:
 	@echo "Running Optuna hyperparameter optimization with $(ENV_TYPE)..."
-	$(PYTHON) optuna_optimization.py
+	$(PYTHON) -m scripts.optuna_optimization
 	@echo "Optimization complete! Check optuna.db for results"
 
 
@@ -532,12 +532,12 @@ nba-grade:
 # Run NBA learning loop for a game date
 nba-learn:
 	@echo "Running NBA learning loop for $(GAME_DATE)..."
-	$(DB_ENV) $(PYTHON) nba_learning_loop.py learn --date $(GAME_DATE)
+	$(DB_ENV) $(PYTHON) -m scripts.nba_learning_loop learn --date $(GAME_DATE)
 
 # Generate NBA learning report for a date range
 nba-report:
 	@echo "Generating NBA learning report..."
-	$(DB_ENV) $(PYTHON) nba_learning_loop.py report --start-date $(NBA_DATE) --end-date $(GAME_DATE)
+	$(DB_ENV) $(PYTHON) -m scripts.nba_learning_loop report --start-date $(NBA_DATE) --end-date $(GAME_DATE)
 
 # Grade NBA bets and compute line accuracy for a given date
 nba-accuracy:
