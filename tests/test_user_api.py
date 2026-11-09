@@ -136,14 +136,6 @@ def test_registering_a_taken_email_is_a_client_error(client):
     assert response.json()["detail"] == "Email already registered"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "PUT /api/user/bankroll takes any float: -500 is stored, nan fails the NOT NULL "
-        "column with a 500, and inf is stored and then breaks JSON rendering of the "
-        "user, so /api/auth/me and login return 500 for that account from then on"
-    ),
-)
 @pytest.mark.parametrize("bankroll", ["-500", "inf", "nan"])
 def test_an_invalid_bankroll_is_rejected_and_the_account_still_loads(client, bankroll):
     response = client.put(f"/api/user/bankroll?bankroll={bankroll}", headers=ALICE)
@@ -151,3 +143,11 @@ def test_an_invalid_bankroll_is_rejected_and_the_account_still_loads(client, ban
     assert response.status_code == 422
     assert client.get("/api/auth/me", headers=ALICE).status_code == 200
     assert fetchone("SELECT bankroll FROM users WHERE id = 'user-alice'")[0] == 1000.0
+
+
+@pytest.mark.parametrize("bankroll", [0.0, 2500.5])
+def test_a_zero_or_positive_bankroll_is_stored(client, bankroll):
+    response = client.put(f"/api/user/bankroll?bankroll={bankroll}", headers=ALICE)
+
+    assert response.status_code == 200
+    assert fetchone("SELECT bankroll FROM users WHERE id = 'user-alice'")[0] == bankroll

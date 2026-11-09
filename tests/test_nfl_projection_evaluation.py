@@ -374,13 +374,6 @@ def test_backtest_thresholds_drop_small_sample_positions() -> None:
     assert thresholds_from_backtest(report, tolerance_pct=0.0) == {"WR": pytest.approx(24.2)}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "check_position_mae falls back to config.model.target_mae (3.0), not "
-        "POSITION_MAE_THRESHOLDS, for a position the backtest dropped"
-    ),
-)
 def test_regression_gate_uses_absolute_ceiling_for_dropped_position() -> None:
     """A position dropped as small-sample falls back to the absolute table."""
     ceilings = thresholds_from_backtest(
