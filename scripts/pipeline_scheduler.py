@@ -11,7 +11,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from config import config
 from pipeline_jobs.service import QUEUED_STATUSES, JobService
-from utils.current_week import resolve_current_week
+from utils.current_week import SeasonOverError, resolve_current_week
 from utils.db import fetchone
 
 config.logs_dir.mkdir(parents=True, exist_ok=True)
@@ -68,8 +68,9 @@ class PipelineScheduler:
         """Resolve the active NFL week and enqueue the fail-closed production path."""
         try:
             season, week = resolve_current_week()
-        except ValueError as exc:
-            # No unplayed game in the schedule means the season is over (or not loaded).
+        except SeasonOverError as exc:
+            # Only a fully played schedule is the offseason. A missing or
+            # unreadable schedule raises, so it cannot pass as a quiet skip.
             logger.info("Skipping pregame run, no upcoming NFL week: %s", exc)
             return {"success": True, "status": "skipped", "reason": "offseason"}
         if _has_active_job(season, week):

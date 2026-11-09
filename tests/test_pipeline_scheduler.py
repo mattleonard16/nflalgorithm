@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from scripts import pipeline_scheduler
+from utils.current_week import SeasonOverError
 
 T0 = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
 
@@ -23,8 +24,8 @@ def harness(monkeypatch):
     state = {"now": T0, "active": False, "week": (2026, 1), "calls": []}
 
     def resolve():
-        if state["week"] is None:
-            raise ValueError("every scheduled game has already kicked off")
+        if isinstance(state["week"], Exception):
+            raise state["week"]
         return state["week"]
 
     class FakeService:
@@ -84,12 +85,21 @@ def test_active_job_for_the_week_blocks_enqueue(harness) -> None:
 
 def test_offseason_blocks_enqueue(harness) -> None:
     scheduler, state = harness
-    state["week"] = None
+    state["week"] = SeasonOverError("every scheduled game has already kicked off")
     result = scheduler.run_pregame_pipeline()
 
     assert state["calls"] == []
     assert result["status"] == "skipped"
     assert result["reason"] == "offseason"
+
+
+def test_missing_schedule_fails_instead_of_passing_as_offseason(harness) -> None:
+    scheduler, state = harness
+    state["week"] = ValueError("the schedule frame is empty")
+
+    with pytest.raises(ValueError, match="schedule frame is empty"):
+        scheduler.run_pregame_pipeline()
+    assert state["calls"] == []
 
 
 def test_scheduler_surfaces_enqueue_failure(harness, monkeypatch) -> None:
