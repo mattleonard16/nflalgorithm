@@ -55,9 +55,13 @@ class PipelineScheduler:
         self.setup_jobs()
 
     def setup_jobs(self) -> None:
+        minutes = config.pipeline.update_interval_minutes
+        if minutes <= 0:
+            # The run key divides time by the interval; zero or less has no window.
+            raise ValueError(f"NFL_PIPELINE_INTERVAL_MINUTES must be positive, got {minutes}")
         self.scheduler.add_job(
             func=self.run_pregame_pipeline,
-            trigger=IntervalTrigger(minutes=config.pipeline.update_interval_minutes),
+            trigger=IntervalTrigger(minutes=minutes),
             id="canonical_pregame_refresh",
             name="Canonical NFL Pregame Refresh",
             replace_existing=True,

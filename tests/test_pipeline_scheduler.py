@@ -113,3 +113,11 @@ def test_scheduler_surfaces_enqueue_failure(harness, monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="database unavailable"):
         scheduler.run_pregame_pipeline()
+
+
+@pytest.mark.parametrize("minutes", [0, -5])
+def test_scheduler_refuses_an_interval_with_no_window(monkeypatch, minutes) -> None:
+    monkeypatch.setattr(pipeline_scheduler.config.pipeline, "update_interval_minutes", minutes)
+
+    with pytest.raises(ValueError, match="must be positive"):
+        pipeline_scheduler.PipelineScheduler()
