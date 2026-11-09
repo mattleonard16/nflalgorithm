@@ -542,9 +542,10 @@ def _load_inputs(season: int, weeks: Iterable[int]) -> tuple[pd.DataFrame, ...]:
         f"FROM player_stats_enhanced WHERE {where}",
         params=params,
     )
-    # Projections carry the roster spelling of player_id and stats the abbreviated
-    # one (2026: 0 of 5,706 rows match), so re-key stats through gsis_id exactly as
-    # grading does.
+    # 2026 projections carry the roster spelling of player_id and stats the
+    # abbreviated one (0 of 5,706 rows match), so stats are also re-keyed through
+    # gsis_id as grading does. 2025 projections use the abbreviated form (547 of 568
+    # match stats directly), so the original key is kept beside the re-keyed one.
     roster = read_dataframe(
         "SELECT gsis_id, player_id FROM nfl_roster_players WHERE season = ?",
         params=(season,),
@@ -555,7 +556,9 @@ def _load_inputs(season: int, weeks: Iterable[int]) -> tuple[pd.DataFrame, ...]:
             "so rows only match where the two already agree"
         )
     else:
-        actuals = align_actuals_to_bets(actuals, roster)
+        actuals = pd.concat(
+            [actuals, align_actuals_to_bets(actuals, roster)], ignore_index=True
+        ).drop_duplicates(["season", "week", "player_id"])
     actuals = actuals.drop(columns="gsis_id")
     games = read_dataframe(
         f"SELECT season, week, home_team, away_team, kickoff_utc FROM games WHERE {where}",
