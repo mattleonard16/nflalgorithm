@@ -1,7 +1,7 @@
 """Tests for T1 #8: no-vig probability for NFL value engine.
 
-NFR-6 gate: behavior must be off by default and toggle via
-`config.features.no_vig_enabled` (env NFL_FEATURE_NO_VIG).
+On by default; toggles via `config.features.no_vig_enabled`
+(env NFL_FEATURE_NO_VIG).
 """
 
 from __future__ import annotations
@@ -113,6 +113,9 @@ def test_no_vig_flag_off_uses_raw_implied_prob(temp_db_two_sided, monkeypatch):
 def test_no_vig_flag_on_lifts_edge_when_under_present(temp_db_two_sided, monkeypatch):
     """Flag on + symmetric -110/-110 quote → implied prob drops to exactly 0.5,
     which lifts edge_percentage vs the flag-off baseline."""
+    # With a market weight, mu itself moves with the implied prob, so p_win
+    # changes too. Weight 0 isolates the de-vig arithmetic this test pins.
+    monkeypatch.setattr(config.betting, "market_blend_weight", 0.0)
     monkeypatch.setattr(config.features, "no_vig_enabled", False)
     df_raw = rank_weekly_value(2024, 1, min_edge=-1.0).copy()
 
@@ -201,8 +204,16 @@ def test_no_vig_flag_on_falls_back_when_under_missing(temp_db_no_under, monkeypa
     )
 
 
-def test_no_vig_default_off(monkeypatch):
-    """NFR-6 gate: flag must default to False when env is unset.
+def test_no_under_bet_without_an_under_price(temp_db_no_under, monkeypatch):
+    """No quoted under means no under bet: 1 - raw_over understates its breakeven."""
+    monkeypatch.setattr(config.features, "no_vig_enabled", True)
+    df = rank_weekly_value(2024, 1, min_edge=-1.0)
+    assert not df.empty
+    assert set(df["side"]) == {"over"}
+
+
+def test_no_vig_default_on(monkeypatch):
+    """The flag defaults to True when env is unset (flipped from the NFR-6 gate).
 
     Reloads the underlying config module so we assert against the live
     `config.features.no_vig_enabled` value, not a replayed parse.
@@ -214,6 +225,20 @@ def test_no_vig_default_off(monkeypatch):
 
     cfg_path = Path(__file__).parent.parent / "config" / "runtime.py"
     spec = importlib.util.spec_from_file_location("_config_under_test", cfg_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.config.features.no_vig_enabled is True
+
+
+def test_no_vig_can_still_be_switched_off(monkeypatch):
+    import importlib.util
+    from pathlib import Path
+
+    monkeypatch.setenv("NFL_FEATURE_NO_VIG", "0")
+
+    cfg_path = Path(__file__).parent.parent / "config" / "runtime.py"
+    spec = importlib.util.spec_from_file_location("_config_under_test_off", cfg_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 

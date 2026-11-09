@@ -140,7 +140,12 @@ confidence = SimpleNamespace(
 )
 
 features = SimpleNamespace(
-    no_vig_enabled=env_flag("NFL_FEATURE_NO_VIG"),
+    # Default ON (user-approved flip from the NFR-6 default-off gate): with it
+    # off, an under's breakeven is 1 - raw_over, which understates it by the
+    # whole vig, and the 2026 W1 card was priced that way. Replaying W1 with
+    # it on moved the best-book card from -4.4 to -0.7 units. Set
+    # NFL_FEATURE_NO_VIG=0 to disable.
+    no_vig_enabled=env_flag("NFL_FEATURE_NO_VIG", True),
     # Default ON (user-approved flip from the NFR-6 default-off gate):
     # uncapped full Kelly oversizes real cards. Set NFL_FEATURE_KELLY_CAP=0
     # to disable.
