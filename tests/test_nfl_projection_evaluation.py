@@ -362,22 +362,35 @@ def test_backtest_thresholds_add_tolerance_to_each_position_mae() -> None:
 
 
 def test_backtest_thresholds_drop_small_sample_positions() -> None:
-    """A ceiling derived from a noisy group falls back to the absolute table."""
+    """A noisy group or a missing MAE yields no ceiling at all."""
     report = _backtest_report(
         {
             "WR": {"mae": 24.2, "count": 1800, "small_sample": False},
-            "FB": {"mae": 3.0, "count": 6, "small_sample": True},
+            "QB": {"mae": 50.8, "count": 6, "small_sample": True},
             "K": {"mae": None, "count": 90, "small_sample": False},
         }
     )
 
-    ceilings = thresholds_from_backtest(report, tolerance_pct=0.0)
+    assert thresholds_from_backtest(report, tolerance_pct=0.0) == {"WR": pytest.approx(24.2)}
 
-    assert ceilings == {"WR": pytest.approx(24.2)}
-    gate = check_position_mae(
-        _position_report({"FB": {"mae": 10.0, "projection_count": 40}}), ceilings
+
+def test_regression_gate_uses_absolute_ceiling_for_dropped_position() -> None:
+    """A position dropped as small-sample falls back to the absolute table."""
+    ceilings = thresholds_from_backtest(
+        _backtest_report(
+            {
+                "WR": {"mae": 24.2, "count": 1800, "small_sample": False},
+                "QB": {"mae": 50.8, "count": 6, "small_sample": True},
+            }
+        ),
+        tolerance_pct=0.0,
     )
-    assert gate["by_position"]["FB"]["threshold"] == POSITION_MAE_THRESHOLDS.get("FB", 3.0)
+
+    gate = check_position_mae(
+        _position_report({"QB": {"mae": 50.0, "projection_count": 40}}), ceilings
+    )
+
+    assert gate["by_position"]["QB"]["threshold"] == POSITION_MAE_THRESHOLDS["QB"]
 
 
 def test_backtest_thresholds_refuse_empty_or_negative_inputs() -> None:
@@ -405,3 +418,87 @@ def test_gate_with_backtest_ceilings_blocks_only_real_regressions() -> None:
     assert steady["passed"] is True
     assert slipped["passed"] is False
     assert slipped["blockers"] == ["WR MAE 29.00 exceeds threshold 26.62 over 200 projections"]
+
+
+def test_load_inputs_aligns_stat_ids_to_projection_ids_through_gsis(tmp_path, monkeypatch) -> None:
+    """Projections use roster-form ids and stats initial-form; gsis_id bridges them."""
+    import sqlite3
+
+    from config import config
+    from scripts.evaluate_nfl_projections import DATABASE_STAT_COLUMNS, _load_inputs
+
+    db_path = str(tmp_path / "eval.db")
+    monkeypatch.setenv("DB_BACKEND", "sqlite")
+    monkeypatch.setenv("SQLITE_DB_PATH", db_path)
+    monkeypatch.setattr(config.database, "backend", "sqlite")
+    monkeypatch.setattr(config.database, "path", db_path)
+
+    projections, _, games, runs = _inputs()
+    projections = projections.iloc[[0]].assign(season=2026, player_id="BUF_josh_allen")
+    stats = pd.DataFrame(
+        [
+            {
+                "season": 2026,
+                "week": 1,
+                "player_id": "BUF_j_allen",
+                "gsis_id": "00-0034857",
+                "position": "WR",
+                **{column: 0.0 for column in DATABASE_STAT_COLUMNS},
+            }
+        ]
+    )
+    roster = pd.DataFrame(
+        [{"season": 2026, "gsis_id": "00-0034857", "player_id": "BUF_josh_allen"}]
+    )
+    with sqlite3.connect(db_path) as conn:
+        projections.to_sql("weekly_projections", conn, index=False)
+        games.assign(season=2026).to_sql("games", conn, index=False)
+        runs.assign(season=2026).to_sql("pipeline_runs", conn, index=False)
+        stats.to_sql("player_stats_enhanced", conn, index=False)
+        roster.to_sql("nfl_roster_players", conn, index=False)
+
+    loaded_projections, loaded_actuals, _, _ = _load_inputs(2026, [1])
+
+    assert set(loaded_projections["player_id"]) <= set(loaded_actuals["player_id"])
+
+
+def test_load_inputs_keeps_stat_ids_that_projections_already_use(tmp_path, monkeypatch) -> None:
+    """2025 projections carry the stats' abbreviated id; the bridge must not re-key them away."""
+    import sqlite3
+
+    from config import config
+    from scripts.evaluate_nfl_projections import DATABASE_STAT_COLUMNS, _load_inputs
+
+    db_path = str(tmp_path / "eval.db")
+    monkeypatch.setenv("DB_BACKEND", "sqlite")
+    monkeypatch.setenv("SQLITE_DB_PATH", db_path)
+    monkeypatch.setattr(config.database, "backend", "sqlite")
+    monkeypatch.setattr(config.database, "path", db_path)
+
+    projections, _, games, runs = _inputs()
+    projections = projections.iloc[[0]].assign(season=2025, player_id="ARI_a_baccellia")
+    stats = pd.DataFrame(
+        [
+            {
+                "season": 2025,
+                "week": 1,
+                "player_id": "ARI_a_baccellia",
+                "gsis_id": "00-0036000",
+                "position": "WR",
+                **{column: 0.0 for column in DATABASE_STAT_COLUMNS},
+            }
+        ]
+    )
+    roster = pd.DataFrame(
+        [{"season": 2025, "gsis_id": "00-0036000", "player_id": "ARI_andre_baccellia"}]
+    )
+    with sqlite3.connect(db_path) as conn:
+        projections.to_sql("weekly_projections", conn, index=False)
+        games.assign(season=2025).to_sql("games", conn, index=False)
+        runs.assign(season=2025).to_sql("pipeline_runs", conn, index=False)
+        stats.to_sql("player_stats_enhanced", conn, index=False)
+        roster.to_sql("nfl_roster_players", conn, index=False)
+
+    loaded_projections, loaded_actuals, _, _ = _load_inputs(2025, [1])
+
+    assert set(loaded_projections["player_id"]) <= set(loaded_actuals["player_id"])

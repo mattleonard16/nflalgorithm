@@ -20,6 +20,7 @@ from typing import Any
 import pandas as pd
 
 from utils.db import read_dataframe
+from utils.odds_math import american_to_decimal
 
 
 # ---------------------------------------------------------------------------
@@ -93,12 +94,6 @@ def max_drawdown_from_bankroll(bankroll_series: list[float]) -> float:
     return max_dd
 
 
-def _american_to_decimal(odds: int) -> float:
-    if odds < 0:
-        return 1.0 + 100.0 / abs(odds)
-    return 1.0 + odds / 100.0
-
-
 def _grade_bet(side: str, line: float, actual: float) -> str:
     """Grade a bet as 'win', 'loss', or 'push'."""
     if side == "over":
@@ -120,7 +115,7 @@ def _profit_for_bet(grade: str, kelly: float, price: int) -> float:
     if grade == "push":
         return 0.0
     if grade == "win":
-        decimal = _american_to_decimal(price)
+        decimal = american_to_decimal(price)
         return kelly * (decimal - 1.0)
     # loss
     return -kelly

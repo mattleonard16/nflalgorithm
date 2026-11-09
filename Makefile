@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto week-auto-refresh install-week-refresh db-analyze nfl-backtest nfl-replay production-run health
+.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-freshness doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-train-predict week-refresh week-materialize week-grade week-lines week-research week-auto week-auto-refresh install-week-refresh db-analyze nfl-backtest nfl-replay production-run health
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -84,6 +84,7 @@ help:
 	@echo "  make migrate             Back up and migrate the local SQLite database"
 	@echo "  make doctor              Validate tools, config, database, migrations, keys, and modules (private files WARN on a public clone)"
 	@echo "  make doctor-production   Require live-odds key, private execution modules, and api/server.py"
+	@echo "  make doctor-freshness    Fail when stats, projections, odds, card, grading, or runs fall behind"
 	@echo "  make doctor-season SEASON=2026 WEEK=1 [SEASON_PHASE=post-run]"
 	@echo "  make doctor-preseason SEASON=2026 WEEK=1"
 	@echo ""
@@ -261,6 +262,11 @@ doctor:
 doctor-production:
 	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --check-frontend --require-live-odds --require-private-modules --require-demo-mode-off
 
+# Fail when a pipeline table has fallen behind the NFL calendar (stats, projections,
+# odds, card, grading, runs). Skips in the offseason. Safe to run from cron.
+doctor-freshness:
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-freshness
+
 doctor-season:
 	$(call require_season_week)
 	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-live-odds --require-private-modules --require-demo-mode-off --season $(SEASON) --week $(WEEK) --season-phase $(SEASON_PHASE)
@@ -344,6 +350,11 @@ week-predict:
 	$(call require_season_week)
 	@echo "Running canonical roster-backed prediction refresh for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.prepare_nfl_week --season $(SEASON) --week $(WEEK)
+
+# Wednesday: retrain on the weeks the walk-forward backtest scores, then predict.
+week-train-predict:
+	$(call require_season_week)
+	$(DB_ENV) $(PYTHON) -m scripts.prepare_nfl_week --season $(SEASON) --week $(WEEK) --retrain
 
 week-refresh:
 	$(call require_season_week)

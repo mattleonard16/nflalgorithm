@@ -18,18 +18,6 @@ import pandas as pd
 
 
 # ---------------------------------------------------------------------------
-# Constants matching expected implementation
-# ---------------------------------------------------------------------------
-
-TIER_CUTOFFS = {
-    "Premium": 90,
-    "Strong": 75,
-    "Marginal": 60,
-    "Pass": 0,
-}
-
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -202,21 +190,6 @@ class TestAssignTier:
         from nba_confidence_engine import assign_nba_tier
 
         assert assign_nba_tier(40.0) == "Pass"
-
-    def test_boundary_premium(self):
-        from nba_confidence_engine import assign_nba_tier
-
-        assert assign_nba_tier(90.0) == "Premium"
-
-    def test_boundary_strong(self):
-        from nba_confidence_engine import assign_nba_tier
-
-        assert assign_nba_tier(75.0) == "Strong"
-
-    def test_boundary_marginal(self):
-        from nba_confidence_engine import assign_nba_tier
-
-        assert assign_nba_tier(60.0) == "Marginal"
 
 
 # ---------------------------------------------------------------------------

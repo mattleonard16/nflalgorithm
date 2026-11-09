@@ -295,6 +295,8 @@ from tracked modules only.
   book's row, which scaled the 2026 week 1 best-line stakes down to 230.81 of a 1000 bankroll.
 - Season ROI and win rate come from `utils/grading.settled_roi_pct` and `settled_win_rate_pct`:
   profit over settled bets, pushes left out. Do not average weekly `roi_pct` values.
+- The Wednesday `make week-auto` job retrains the models before it predicts
+  (`make week-train-predict`, same window as the backtest). Saturday's refresh does not retrain.
 - The Wednesday `make week-auto` job runs from launchd in this checkout, on whatever branch is
   checked out. A failed step posts a macOS notification and every run writes
   `logs/week_auto_status.json`. See the `week-auto` step in docs/OPERATIONS.md.
@@ -323,9 +325,10 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 7. Premium features dropped from the model. The old pointer, `_CONTEXTUAL_COLS` at weekly.py:44, no
    longer exists. The feature lists are now `_OUTCOME_CONTEXT_COLS`, `_ROLE_ACTIVITY_COLS`, and
    `_GAME_CONTEXT_COLS`. Re-audit which features are missing before working this item.
-8. [RESOLVED] No vig removal — `implied_probability_no_vig` now lives in `value_betting_engine.py`
-   and is what `utils/clv.py` uses for probability-space CLV. Both inputs are now actually
-   captured: `utils/two_sided_odds.py` pairs an Over with the Under **at the same line** (the
+8. [RESOLVED] No vig removal — `implied_probability_no_vig` lives in tracked `utils/odds_math.py`
+   and is what `utils/clv.py` uses for probability-space CLV, so CI tests it. The private
+   `value_betting_engine.py` should import it from there (see docs/DEPLOYMENT_MANIFEST.md).
+   Both inputs are now actually captured: `utils/two_sided_odds.py` pairs an Over with the Under **at the same line** (the
    scraper previously matched on player name alone, which crosses alternate lines — a
    `DraftKings_Alt` book is already in the DB), and `utils/odds_snapshot.build_snapshot_row`
    carries `under_price` into storage. It had been NULL on every row because the writer in

@@ -13,7 +13,9 @@ from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
+from config import config
 from utils.db import read_dataframe
+from utils.grading import align_actuals_to_bets
 from utils.nfl_markets import (
     DATABASE_STAT_COLUMNS,
     error_summary,
@@ -53,20 +55,6 @@ MIN_POSITION_SAMPLE = 30
 YARDAGE_MARKETS = frozenset({"rushing_yards", "receiving_yards", "passing_yards"})
 
 UNKNOWN_POSITION = "UNKNOWN"
-
-
-def _default_position_threshold() -> float:
-    """Fallback ceiling for a position with no explicit threshold.
-
-    `config` is a gitignored proprietary module, so it is imported lazily:
-    this file's gate logic must remain importable in CI, where config.py is
-    absent.
-    """
-    try:
-        from config import config
-    except ImportError:
-        return 3.0
-    return float(config.model.target_mae)
 
 
 def _timestamps(values: pd.Series) -> pd.Series:
@@ -350,16 +338,18 @@ def check_position_mae(
 
     Args:
         report: An `evaluate_projections` report.
-        thresholds: Per-position MAE ceilings. Defaults to
-            POSITION_MAE_THRESHOLDS; positions absent from it fall back to
+        thresholds: Per-position MAE ceilings that override
+            POSITION_MAE_THRESHOLDS. A position in neither falls back to
             `config.model.target_mae`.
         min_sample: Minimum eligible projections for a position to be judged.
 
     Returns:
         `{"passed", "blockers", "skipped", "by_position"}`.
     """
-    ceilings = dict(POSITION_MAE_THRESHOLDS if thresholds is None else thresholds)
-    fallback = _default_position_threshold()
+    # Overlay, not replace: thresholds_from_backtest drops small-sample
+    # positions, and those must still meet their absolute ceiling.
+    ceilings = {**POSITION_MAE_THRESHOLDS, **(thresholds or {})}
+    fallback = float(config.model.target_mae)
 
     metrics = report.get("metrics")
     by_position = metrics.get("by_position") if isinstance(metrics, Mapping) else None
@@ -548,10 +538,28 @@ def _load_inputs(season: int, weeks: Iterable[int]) -> tuple[pd.DataFrame, ...]:
     )
     actual_columns = ", ".join(DATABASE_STAT_COLUMNS)
     actuals = read_dataframe(
-        f"SELECT season, week, player_id, position, {actual_columns} "
+        f"SELECT season, week, player_id, gsis_id, position, {actual_columns} "
         f"FROM player_stats_enhanced WHERE {where}",
         params=params,
     )
+    # 2026 projections carry the roster spelling of player_id and stats the
+    # abbreviated one (0 of 5,706 rows match), so stats are also re-keyed through
+    # gsis_id as grading does. 2025 projections use the abbreviated form (547 of 568
+    # match stats directly), so the original key is kept beside the re-keyed one.
+    roster = read_dataframe(
+        "SELECT gsis_id, player_id FROM nfl_roster_players WHERE season = ?",
+        params=(season,),
+    )
+    if roster.empty:
+        print(
+            f"WARNING: no roster rows for {season}; cannot align stat ids to projection ids, "
+            "so rows only match where the two already agree"
+        )
+    else:
+        actuals = pd.concat(
+            [actuals, align_actuals_to_bets(actuals, roster)], ignore_index=True
+        ).drop_duplicates(["season", "week", "player_id"])
+    actuals = actuals.drop(columns="gsis_id")
     games = read_dataframe(
         f"SELECT season, week, home_team, away_team, kickoff_utc FROM games WHERE {where}",
         params=params,

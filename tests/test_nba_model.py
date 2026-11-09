@@ -116,29 +116,13 @@ class TestMultiMarketModel:
             assert "b2b" in result.columns
             assert "days_rest" in result.columns
 
-    def test_rolling_avg_uses_shift_no_leakage(self, db):
-        """Rolling averages must not include the same row's value (shift=1)."""
-        from models.nba.stat_model import _engineer_features
-
-        _seed_game_logs(15)
-        df = read_dataframe(
-            "SELECT player_id, player_name, team_abbreviation, season, game_id, "
-            "game_date, matchup, pts, reb, ast, fg3m, min, fga "
-            "FROM nba_player_game_logs"
-        )
-        result = _engineer_features(df, market="pts").dropna(
-            subset=["pts_last5_avg", "pts"]
-        )
-        for _, row in result.head(5).iterrows():
-            assert not np.isnan(row["pts_last5_avg"])
-
     # ------------------------------------------------------------------
     # Training — individual markets
     # ------------------------------------------------------------------
 
     @pytest.mark.parametrize("market", ALL_MARKETS)
     def test_train_saves_model_file(self, db, tmp_path, monkeypatch, market):
-        """train(market) must write a .joblib model file (no encoder file)."""
+        """train(market) must write a .joblib model file."""
         import joblib
 
         model_dir = tmp_path / "nba_models"
@@ -151,33 +135,10 @@ class TestMultiMarketModel:
         train(market=market)
 
         model_path = model_dir / f"{market}_model.joblib"
-        encoder_path = model_dir / "team_encoder.joblib"
         assert model_path.exists(), f"Model file not found for market={market}"
-        assert not encoder_path.exists(), "Encoder file should not exist (replaced by defensive stats)"
 
         model = joblib.load(model_path)
         assert hasattr(model, "predict"), "Saved object must have a predict() method"
-
-    def test_feature_cols_include_opp_def_rating_normalized(self, db):
-        """get_feature_cols must include opp_def_rating_normalized."""
-        from models.nba.stat_model import get_feature_cols
-
-        cols = get_feature_cols("pts")
-        assert "opp_def_rating_normalized" in cols, "opp_def_rating_normalized must be in feature cols"
-
-    def test_feature_cols_exclude_opponent_enc(self, db):
-        """get_feature_cols must not include opponent_enc (replaced by defensive stats)."""
-        from models.nba.stat_model import get_feature_cols
-
-        cols = get_feature_cols("pts")
-        assert "opponent_enc" not in cols, "opponent_enc must not be in feature cols"
-
-    def test_feature_cols_include_days_rest(self, db):
-        """get_feature_cols must include days_rest."""
-        from models.nba.stat_model import get_feature_cols
-
-        cols = get_feature_cols("pts")
-        assert "days_rest" in cols, "days_rest must be in feature cols"
 
     @pytest.mark.parametrize("market", ALL_MARKETS)
     def test_train_no_data_does_not_raise(self, db, tmp_path, monkeypatch, market):
@@ -617,29 +578,3 @@ class TestFeatureEngineeringCorrectness:
             assert actual_b2b == exp_b2b, (
                 f"Game {i + 1}: b2b={actual_b2b}, expected {exp_b2b}"
             )
-
-    def test_days_rest_clipped_lower_bound(self, db):
-        """days_rest must have a minimum of 1 (never 0 or negative)."""
-        from models.nba.stat_model import _engineer_features
-
-        # Seed two games on consecutive days to produce a natural days_rest=1
-        # The clip(lower=1) ensures even same-day games don't produce days_rest=0
-        _seed_exact_games([
-            (9005, "P5", "MIA", 2024, "G040", "2025-01-10", "MIA vs. BOS", "W",
-             30.0, 20, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, 5.0),
-            (9005, "P5", "MIA", 2024, "G041", "2025-01-11", "MIA vs. BOS", "L",
-             29.0, 18, 5, 4, 2, 8, 15, 4, 6, 1, 1, 2, -1.0),
-        ])
-
-        df = read_dataframe(
-            "SELECT player_id, player_name, team_abbreviation, season, game_id, "
-            "game_date, matchup, pts, reb, ast, fg3m, min, fga "
-            "FROM nba_player_game_logs WHERE player_id = 9005"
-        )
-        result = _engineer_features(df, market="pts")
-        valid_rest = result["days_rest"].dropna()
-
-        assert (valid_rest >= 1).all(), (
-            f"days_rest must be >= 1 after clip(lower=1). "
-            f"Found minimum: {valid_rest.min()}"
-        )

@@ -103,6 +103,7 @@ DEFAULT_PROJECTIONS = _projections(
     [
         (72.4, 72.5),
         (72.2, 72.0),
+        # Python's round() would put 16.25 at 16.0 and 16.75 at 17.0 (banker's rounding).
         (16.25, 16.5),
         (16.75, 17.0),
         (17.0, 17.0),
@@ -112,13 +113,6 @@ DEFAULT_PROJECTIONS = _projections(
 )
 def test_round_to_line_rounds_half_up(mu: float, expected: float) -> None:
     assert round_to_line(mu) == expected
-
-
-def test_round_to_line_avoids_bankers_rounding() -> None:
-    # Python's round() sends both of these to an even multiple, which would put
-    # 16.25 at 16.0 and 16.75 at 17.0 — inconsistent by eye.
-    assert round(16.25 * 2) / 2 == 16.0
-    assert round_to_line(16.25) == 16.5
 
 
 def test_round_to_line_rejects_a_non_positive_increment() -> None:

@@ -648,6 +648,34 @@ def check_nfl_week_readiness(season: int, week: int, *, phase: str) -> list[Diag
     return evaluate_nfl_week_readiness(season, week, phase=phase, counts=counts)
 
 
+def check_data_freshness() -> list[Diagnostic]:
+    """Report one diagnostic per pipeline table; a stale table is a failure."""
+    from utils.data_freshness import FAIL, SKIP, check_data_freshness as run_checks
+
+    try:
+        results = run_checks()
+    except Exception as exc:
+        return [
+            _result(
+                "freshness",
+                "fail",
+                f"Freshness could not be evaluated: {type(exc).__name__}: {exc}",
+                "Run `make migrate` and load the `games` schedule.",
+            )
+        ]
+    return [
+        _result(
+            f"freshness_{item.table}",
+            "fail" if item.status == FAIL else "skip" if item.status == SKIP else "pass",
+            item.reason,
+            "Run the weekly pipeline (`make production-run` or `make week-auto`) and re-check."
+            if item.status == FAIL
+            else None,
+        )
+        for item in results
+    ]
+
+
 def _node_version() -> tuple[int, int, int] | None:
     node = shutil.which("node")
     if not node:
@@ -712,6 +740,7 @@ def collect_diagnostics(
     *,
     check_schema: bool = False,
     check_frontend_dependencies: bool = False,
+    check_freshness: bool = False,
     require_live_odds: bool = False,
     require_private_modules: bool = False,
     require_demo_mode_off: bool = False,
@@ -727,6 +756,8 @@ def collect_diagnostics(
         diagnostics.extend(database_diagnostics)
         if not any(item.failed for item in database_diagnostics):
             diagnostics.extend(check_sqlite_wal(config))
+        if check_freshness and not any(item.failed for item in database_diagnostics):
+            diagnostics.extend(check_data_freshness())
         diagnostics.append(check_odds_key(config, required=require_live_odds))
         diagnostics.append(check_demo_mode(config, production=require_demo_mode_off))
         diagnostics.append(check_allowed_origins(production=require_demo_mode_off))
@@ -756,7 +787,7 @@ def print_diagnostics(diagnostics: Iterable[Diagnostic], *, as_json: bool = Fals
         )
         return
 
-    labels = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}
+    labels = {"pass": "PASS", "warn": "WARN", "fail": "FAIL", "skip": "SKIP"}
     for item in items:
         print(f"[{labels[item.status]}] {item.name}: {item.message}")
         if item.action:
@@ -768,6 +799,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--check-schema", action="store_true", help="Require migrated API tables")
     parser.add_argument(
         "--check-frontend", action="store_true", help="Check Node/npm/frontend install"
+    )
+    parser.add_argument(
+        "--check-freshness",
+        action="store_true",
+        help="Fail if any pipeline table is behind the current NFL week",
     )
     parser.add_argument("--season", type=int, help="NFL season for weekly readiness checks")
     parser.add_argument("--week", type=int, help="NFL week for weekly readiness checks")
@@ -802,6 +838,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     diagnostics = collect_diagnostics(
         check_schema=args.check_schema,
         check_frontend_dependencies=args.check_frontend,
+        check_freshness=args.check_freshness,
         require_live_odds=args.require_live_odds,
         require_private_modules=args.require_private_modules,
         require_demo_mode_off=args.require_demo_mode_off,

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 
 def test_tracked_config_loads_without_private_override(tmp_path: Path) -> None:
@@ -104,3 +107,18 @@ def test_odds_safety_requirements_are_environment_configurable(tmp_path: Path) -
         "sportsbooks": 3,
         "required": ["player_pass_yds", "player_reception_yds"],
     }
+
+
+@pytest.mark.parametrize(("env_value", "expected"), [(None, True), ("0", False)])
+def test_no_vig_pricing_is_on_unless_switched_off(monkeypatch, env_value, expected) -> None:
+    """With it off, the under's breakeven is 1 - raw_over and misses the whole vig."""
+    if env_value is None:
+        monkeypatch.delenv("NFL_FEATURE_NO_VIG", raising=False)
+    else:
+        monkeypatch.setenv("NFL_FEATURE_NO_VIG", env_value)
+    runtime_path = Path(__file__).parent.parent / "config" / "runtime.py"
+    spec = importlib.util.spec_from_file_location("_runtime_under_test", runtime_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.config.features.no_vig_enabled is expected

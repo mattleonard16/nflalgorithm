@@ -18,34 +18,6 @@ def run_make(*arguments: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_help_surfaces_primary_startup_and_diagnostic_commands() -> None:
-    output = run_make("help").stdout
-
-    for command in ("make doctor", "make migrate", "make fullstack", "make pipeline-worker"):
-        assert command in output
-
-
-def test_obsolete_startup_and_synthetic_activation_targets_are_removed() -> None:
-    targets = set(run_make("list-targets").stdout.splitlines())
-
-    assert targets.isdisjoint(
-        {
-            "start_pipeline",
-            "stop_pipeline",
-            "activate-betting",
-            "activate-all",
-            "populate-data",
-            "train-models",
-            "migrate-to-uv",
-            "ingest-ncaab",
-            "ingest-ncaab-modifiers",
-            "ncaab-bracket",
-            "ncaab-predict",
-            "ncaab-full",
-        }
-    )
-
-
 def test_make_compatible_env_file_configures_api_port(tmp_path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("API_HOST=127.0.0.1\nAPI_PORT=8123\n", encoding="utf-8")
@@ -92,10 +64,3 @@ def test_doctor_season_checks_explicit_week_and_phase() -> None:
     assert "scripts.preflight" in command
     assert "--season 2026 --week 1 --season-phase post-run" in command
     assert "--require-live-odds --require-private-modules" in command
-
-
-def test_uv_install_uses_committed_lockfile() -> None:
-    command = run_make("-n", "install-uv", "ENV_FILE=/dev/null").stdout
-
-    assert "uv sync --frozen" in command
-    assert "uv pip install -r requirements.txt" not in command

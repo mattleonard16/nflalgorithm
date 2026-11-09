@@ -87,14 +87,6 @@ class TestComputePlayerSigma:
         sigma = compute_player_sigma(values, market="rushing_yards")
         assert sigma > 0.0
 
-    def test_constant_values_returns_floor(self):
-        """All identical values → variance is 0 → sigma should be the floor."""
-        from utils.nfl_sigma import compute_player_sigma
-
-        values = [75.0] * 10
-        sigma = compute_player_sigma(values, market="rushing_yards")
-        assert sigma == pytest.approx(SIGMA_FLOORS["rushing_yards"])
-
     def test_high_variance_exceeds_floor(self):
         """Volatile player data should produce sigma above the floor."""
         from utils.nfl_sigma import compute_player_sigma

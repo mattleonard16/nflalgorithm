@@ -14,6 +14,7 @@ from utils.season_priors import (
     is_volume_crash,
     regular_season_training_weeks,
     season_prior_weights,
+    training_weeks_before,
 )
 
 
@@ -131,6 +132,21 @@ def test_regular_season_training_weeks_are_last_two_seasons_without_playoffs() -
         (2024, 1),
         (2025, 1),
         (2025, 18),
+    ]
+
+
+def test_training_weeks_before_keeps_two_prior_seasons_and_stops_before_the_target() -> None:
+    available = pd.DataFrame(
+        {
+            "season": [2023, 2024, 2024, 2025, 2026, 2026, 2026],
+            "week": [22, 1, 22, 9, 3, 4, 5],
+        }
+    )
+    assert training_weeks_before(available, 2026, 4) == [
+        (2024, 1),
+        (2024, 22),
+        (2025, 9),
+        (2026, 3),
     ]
 
 
