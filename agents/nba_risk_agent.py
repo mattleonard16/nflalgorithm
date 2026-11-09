@@ -14,6 +14,7 @@ from agents import AgentReport
 from agents.nba_base_agent import NbaBaseAgent
 from config import config
 from nba_risk_manager import assess_risk, detect_team_stacks
+from utils.best_line import best_line_per_bet
 
 
 class NbaRiskAgent(NbaBaseAgent):
@@ -45,7 +46,10 @@ class NbaRiskAgent(NbaBaseAgent):
         bankroll = config.betting.bankroll
         value_df = value_df.assign(stake=value_df["kelly_fraction"] * bankroll)
 
-        assessed = assess_risk(value_df, bankroll)
+        # The card prices one bet at several books. Assess each bet once, or
+        # its copies flag each other as a same-team stack.
+        bets = best_line_per_bet(value_df, keys=("player_id", "market"))
+        assessed = assess_risk(bets, bankroll)
         stacks = detect_team_stacks(assessed)
 
         reports: List[AgentReport] = []

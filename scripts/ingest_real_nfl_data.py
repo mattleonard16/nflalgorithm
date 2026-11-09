@@ -15,12 +15,14 @@ import logging
 
 # Add project root to path
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Sequence
 
 import nflreadpy as nfl
 import pandas as pd
+import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -154,7 +156,7 @@ def _load_nflverse_by_season(
     optional_missing = set(optional_missing_seasons)
     for season in dict.fromkeys(seasons):
         try:
-            frame = loader([season]).to_pandas()
+            frame = _load_season_with_retry(loader, season, dataset_name)
         except Exception as exc:
             missing_optional_feed = season in optional_missing and _is_missing_feed_error(exc)
             if suppress_errors or missing_optional_feed:
@@ -170,6 +172,67 @@ def _load_nflverse_by_season(
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True, sort=False)
+
+
+DOWNLOAD_ATTEMPTS = 3
+DOWNLOAD_RETRY_BASE_SECONDS = 2.0
+_TRANSIENT_REQUEST_ERRORS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
+
+
+def _load_season_with_retry(
+    loader: Callable[[List[int]], Any], season: int, dataset_name: str
+) -> pd.DataFrame:
+    """Load one season, retrying a dropped connection, timeout, or server error.
+
+    nflreadpy makes a single request with no retry, and one connection reset on a
+    history file killed the 2026-09-30 Wednesday run. After the last attempt the
+    original error is raised, so history still fails loud.
+    """
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        try:
+            return loader([season]).to_pandas()
+        except Exception as exc:
+            if attempt == DOWNLOAD_ATTEMPTS or not _is_transient_download_error(exc):
+                raise
+            delay = DOWNLOAD_RETRY_BASE_SECONDS * 2 ** (attempt - 1)
+            logger.warning(
+                "Download of %s for %s failed (%s); retrying in %.0fs (attempt %d of %d)",
+                dataset_name,
+                season,
+                type(exc).__name__,
+                delay,
+                attempt + 1,
+                DOWNLOAD_ATTEMPTS,
+            )
+            time.sleep(delay)
+    raise AssertionError("unreachable")
+
+
+def _is_transient_download_error(exc: Exception) -> bool:
+    """Return whether a download failed in a way that a retry can fix.
+
+    nflreadpy wraps every requests failure in the builtin ConnectionError, a 404
+    included, so the cause decides. A missing feed is never transient.
+    """
+    if _is_missing_feed_error(exc):
+        return False
+    saw_request_error = False
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, _TRANSIENT_REQUEST_ERRORS):
+            return True
+        if isinstance(current, requests.exceptions.RequestException):
+            saw_request_error = True
+            status = getattr(getattr(current, "response", None), "status_code", None)
+            if status is not None and (status == 429 or status >= 500):
+                return True
+        current = current.__cause__
+    # A bare reset or refused connection that never went through requests.
+    return not saw_request_error and isinstance(exc, ConnectionError)
 
 
 def _is_missing_feed_error(exc: Exception) -> bool:
@@ -354,13 +417,13 @@ def _normalize_name_for_merge(name: str) -> str:
     """
     if name is None or (isinstance(name, float) and pd.isna(name)):
         return ""
-    s = str(name).lower()
-    # Drop common suffixes after a space
-    for suf in (" jr", " sr", " ii", " iii", " iv", " v"):
-        if s.endswith(suf):
-            s = s[: -len(suf)]
-    # Keep only letters/digits
-    return "".join(ch for ch in s if ch.isalnum())
+    # Punctuation becomes a space before the suffix check: snap_counts writes
+    # "Jr." and "Sr.", and matching only " jr" left those players at 0 snaps
+    # (2026: 16% of WR and 18% of RB player-weeks).
+    tokens = "".join(ch if ch.isalnum() else " " for ch in str(name).lower()).split()
+    if len(tokens) > 1 and tokens[-1] in {"jr", "sr", "ii", "iii", "iv", "v"}:
+        tokens = tokens[:-1]
+    return "".join(tokens)
 
 
 def _merge_snap_counts(df: pd.DataFrame, snaps: pd.DataFrame) -> pd.DataFrame:
@@ -1169,6 +1232,7 @@ CONTEXT_SNAPSHOT_COLUMNS = (
     "injury_status",
     "practice_status",
     "primary_injury",
+    "injury_report_week",
     "expected_snap_count",
     "expected_snap_percentage",
     "expected_rushing_attempts",
@@ -1219,6 +1283,11 @@ def _availability_adjustment(
     if "LIMITED" in practice:
         return 0.90, 1.15
     return 1.0, 1.0
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    number = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    return None if pd.isna(number) else int(number)
 
 
 def build_player_context_snapshots(
@@ -1288,8 +1357,17 @@ def build_player_context_snapshots(
     injury_by_player: dict[tuple[int, str], dict[str, Any]] = {}
     if injuries is not None and not injuries.empty and "gsis_id" in injuries:
         injury = injuries.copy()
+        if "team" not in injury.columns:
+            raise ValueError("Injury context must include team")
         injury["week"] = pd.to_numeric(injury["week"], errors="coerce").fillna(0).astype(int)
         injury = injury[injury["week"] <= target_week]
+        # Clubs must list every player who is limited or out, so once a club files its report for
+        # the target week, a player missing from it has been cleared. Until it files, last week's
+        # status is the best guess. Players moved to injured reserve drop off the report too, but
+        # the roster marks them reserve and they get no projection.
+        club_week = pd.MultiIndex.from_frame(injury[["season", "team"]])
+        filed = club_week[(injury["week"] == target_week).to_numpy()]
+        injury = injury[(injury["week"] == target_week) | ~club_week.isin(filed)]
         injury = injury.dropna(subset=["season", "gsis_id"]).sort_values("week")
         injury = injury.drop_duplicates(["season", "gsis_id"], keep="last")
         injury_by_player = {
@@ -1419,6 +1497,7 @@ def build_player_context_snapshots(
                 "injury_status": None if pd.isna(injury_status) else str(injury_status),
                 "practice_status": None if pd.isna(practice_status) else str(practice_status),
                 "primary_injury": None if pd.isna(primary_injury) else str(primary_injury),
+                "injury_report_week": _optional_int(injury_row.get("week")),
                 "expected_snap_count": expected_snap_percentage * 0.65,
                 "expected_snap_percentage": expected_snap_percentage,
                 "expected_rushing_attempts": expected("rushing_attempts"),
@@ -1475,6 +1554,18 @@ def upsert_player_context_snapshots(snapshots: pd.DataFrame) -> int:
     return len(rows)
 
 
+def load_snapshot_history() -> pd.DataFrame:
+    """Every GSIS-linked stat row the snapshot builder reads role history from."""
+    return read_dataframe("""
+        SELECT gsis_id, season, week, team, snap_count, snap_percentage,
+               rushing_attempts, targets, passing_attempts, target_share,
+               air_yards, yac_yards, red_zone_touches
+        FROM player_stats_enhanced
+        WHERE gsis_id IS NOT NULL
+        ORDER BY gsis_id, season, week
+        """)
+
+
 def refresh_player_context_snapshots(
     rosters: pd.DataFrame,
     depth_charts: pd.DataFrame,
@@ -1485,18 +1576,13 @@ def refresh_player_context_snapshots(
     """Persist causal roster context for the requested week only.
 
     Prior weeks are never reconstructed with today's capture timestamp; they
-    remain immutable evidence for historical replay.
+    remain immutable evidence for historical replay. The same holds inside the
+    week: a team whose game has kicked off keeps the snapshot its pregame
+    projections were built from, and every other team is refreshed.
     """
     if rosters is None or rosters.empty:
         return 0
-    history = read_dataframe("""
-        SELECT gsis_id, season, week, team, snap_count, snap_percentage,
-               rushing_attempts, targets, passing_attempts, target_share,
-               air_yards, yac_yards, red_zone_touches
-        FROM player_stats_enhanced
-        WHERE gsis_id IS NOT NULL
-        ORDER BY gsis_id, season, week
-        """)
+    history = load_snapshot_history()
     games = read_dataframe(
         """
         SELECT season, home_team, away_team, spread_line, kickoff_utc
@@ -1505,16 +1591,24 @@ def refresh_player_context_snapshots(
         """,
         params=(through_week,),
     )
+    captured_at = datetime.now(timezone.utc).isoformat()
+    captured_timestamp = pd.Timestamp(captured_at)
+    # A run after Thursday night still owes Sunday's teams Friday's injury report and depth chart.
+    # Depth charts are cut off at the next kickoff still to come, not the first of the week.
+    started_teams: set[tuple[int, str]] = set()
     target_cutoffs: dict[int, str] = {}
     if not games.empty:
-        games_with_kickoff = games.dropna(subset=["kickoff_utc"]).copy()
-        if not games_with_kickoff.empty:
-            games_with_kickoff["kickoff_utc"] = pd.to_datetime(
-                games_with_kickoff["kickoff_utc"], errors="coerce", utc=True
-            )
-            earliest = games_with_kickoff.dropna(subset=["kickoff_utc"]).groupby("season")["kickoff_utc"].min()
-            target_cutoffs = {int(season): cutoff.isoformat() for season, cutoff in earliest.items()}
-    captured_at = datetime.now(timezone.utc).isoformat()
+        kickoffs = games.assign(
+            kickoff_utc=pd.to_datetime(games["kickoff_utc"], errors="coerce", utc=True)
+        ).dropna(subset=["kickoff_utc"])
+        for game in kickoffs[kickoffs["kickoff_utc"] <= captured_timestamp].itertuples():
+            for team in (game.home_team, game.away_team):
+                started_teams.add((int(game.season), canonicalize_team(str(team))))
+        upcoming = kickoffs[kickoffs["kickoff_utc"] > captured_timestamp]
+        target_cutoffs = {
+            int(season): cutoff.isoformat()
+            for season, cutoff in upcoming.groupby("season")["kickoff_utc"].min().items()
+        }
     snapshots = build_player_context_snapshots(
         rosters,
         depth_charts,
@@ -1525,19 +1619,19 @@ def refresh_player_context_snapshots(
         captured_at=captured_at,
         schedule=games,
     )
-    captured_timestamp = pd.Timestamp(captured_at)
-    blocked_seasons = {
-        season
-        for season, cutoff in target_cutoffs.items()
-        if captured_timestamp >= pd.Timestamp(cutoff)
-    }
-    if blocked_seasons:
-        snapshots = snapshots[~snapshots["season"].isin(blocked_seasons)].copy()
-    if snapshots.empty:
-        logger.warning(
-            "Skipping context refresh after kickoff for seasons %s",
-            sorted(blocked_seasons),
+    if started_teams:
+        keep = [
+            (int(season), team) not in started_teams
+            for season, team in zip(snapshots["season"], snapshots["team"])
+        ]
+        logger.info(
+            "Keeping the stored week %s context for %s players whose game has started",
+            through_week,
+            len(keep) - sum(keep),
         )
+        snapshots = snapshots.loc[keep]
+    if snapshots.empty:
+        logger.warning("No week %s context snapshots to write", through_week)
         return 0
     return upsert_player_context_snapshots(snapshots)
 
@@ -1777,7 +1871,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     count = ingest_seasons(seasons, through_week=args.through_week)
     logger.info(f"Ingested {count} player stat rows")
-    logger.info(f"Ready for Week {args.through_week + 1} predictions")
 
 
 if __name__ == "__main__":

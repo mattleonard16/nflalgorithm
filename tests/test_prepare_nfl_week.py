@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
 from scripts import prepare_nfl_week
+from utils.db import execute
 
 
 def test_gsis_history_requires_high_coverage_in_every_requested_season(monkeypatch) -> None:
@@ -55,7 +56,7 @@ def test_history_count_applies_active_roster_filter(monkeypatch) -> None:
 
 def test_prepare_week_refreshes_history_roster_schedule_and_predictions(monkeypatch) -> None:
     ingest_calls: list[tuple[list[int], int, int | None]] = []
-    prediction_calls: list[tuple[int, int, bool]] = []
+    prediction_calls: list[tuple[int, int, bool, frozenset[str]]] = []
 
     monkeypatch.setattr(
         prepare_nfl_week,
@@ -69,8 +70,16 @@ def test_prepare_week_refreshes_history_roster_schedule_and_predictions(monkeypa
     monkeypatch.setattr(
         prepare_nfl_week,
         "predict_week",
-        lambda season, week, roster_backed: prediction_calls.append((season, week, roster_backed))
-        or pd.DataFrame({"player_id": ["BUF_season_ready"], "market": ["receiving_yards"]}),
+        lambda season, week, roster_backed, exclude_teams: prediction_calls.append(
+            (season, week, roster_backed, exclude_teams)
+        )
+        or pd.DataFrame(
+            {
+                "player_id": ["BUF_season_ready"],
+                "market": ["receiving_yards"],
+                "model_version": ["causal_asof_v1"],
+            }
+        ),
     )
 
     monkeypatch.setattr(prepare_nfl_week, "_count_roster_players", lambda season: 53)
@@ -90,7 +99,7 @@ def test_prepare_week_refreshes_history_roster_schedule_and_predictions(monkeypa
     )
 
     assert ingest_calls == [([2024, 2025], 22, None), ([2026], 1, 0)]
-    assert prediction_calls == [(2026, 1, True)]
+    assert prediction_calls == [(2026, 1, True, frozenset())]
     assert result == {
         "season": 2026,
         "week": 1,
@@ -108,7 +117,71 @@ def test_prepare_week_refreshes_history_roster_schedule_and_predictions(monkeypa
         "player_dim_updates": 40,
         "predictions": 1,
         "predicted_players": 1,
+        "model_versions": ["causal_asof_v1"],
+        "kicked_off_teams": [],
+        "trained_weeks": None,
     }
+
+
+def _stub_ready_week(monkeypatch, events: list[str]) -> None:
+    monkeypatch.setattr(prepare_nfl_week, "run_migrations", lambda: None)
+    monkeypatch.setattr(prepare_nfl_week, "_history_is_usable", lambda seasons: True)
+    monkeypatch.setattr(
+        prepare_nfl_week,
+        "ingest_seasons",
+        lambda seasons, through_week, stats_through_week=None: events.append("ingest") or 25,
+    )
+    monkeypatch.setattr(prepare_nfl_week, "populate_player_dim", lambda: 0)
+    monkeypatch.setattr(prepare_nfl_week, "_count_roster_players", lambda season: 53)
+    monkeypatch.setattr(prepare_nfl_week, "_count_roster_teams", lambda season: 32)
+    monkeypatch.setattr(prepare_nfl_week, "_count_prediction_eligible_roster", lambda season: 48)
+    monkeypatch.setattr(prepare_nfl_week, "_count_games", lambda season, week: 16)
+    monkeypatch.setattr(prepare_nfl_week, "_count_scheduled_teams", lambda season, week: 32)
+    monkeypatch.setattr(prepare_nfl_week, "_count_players_with_history", lambda season: 45)
+    monkeypatch.setattr(
+        prepare_nfl_week,
+        "predict_week",
+        lambda season, week, roster_backed, exclude_teams: events.append("predict")
+        or pd.DataFrame(
+            {"player_id": ["BUF_a"], "market": ["receiving_yards"], "model_version": ["v1"]}
+        ),
+    )
+    monkeypatch.setattr(
+        prepare_nfl_week,
+        "_stat_weeks",
+        lambda: pd.DataFrame({"season": [2023, 2024, 2025, 2026, 2026], "week": [5, 1, 22, 3, 4]}),
+    )
+
+
+def test_retraining_fits_the_backtest_window_after_ingest_and_before_predicting(
+    monkeypatch,
+) -> None:
+    events: list[str] = []
+    trained: list[list[tuple[int, int]]] = []
+    _stub_ready_week(monkeypatch, events)
+    model = SimpleNamespace(
+        train_weekly_models=lambda weeks: events.append("train")
+        or trained.append(weeks)
+        or {"receiving_yards": "receiving_yards_model.joblib"}
+    )
+    monkeypatch.setattr(prepare_nfl_week, "weekly_implementation", lambda: model)
+
+    result = prepare_nfl_week.prepare_week(2026, 4, history_seasons=[2025], retrain=True)
+
+    assert events == ["ingest", "train", "predict"]
+    assert trained == [[(2024, 1), (2025, 22), (2026, 3)]]
+    assert result["trained_weeks"] == 3
+
+
+def test_retraining_that_saves_no_model_stops_before_predicting(monkeypatch) -> None:
+    events: list[str] = []
+    _stub_ready_week(monkeypatch, events)
+    model = SimpleNamespace(train_weekly_models=lambda weeks: {})
+    monkeypatch.setattr(prepare_nfl_week, "weekly_implementation", lambda: model)
+
+    with pytest.raises(RuntimeError, match="saved no model"):
+        prepare_nfl_week.prepare_week(2026, 4, history_seasons=[2025], retrain=True)
+    assert "predict" not in events
 
 
 def test_prepare_week_fails_when_roster_context_is_missing(monkeypatch) -> None:
@@ -122,7 +195,7 @@ def test_prepare_week_fails_when_roster_context_is_missing(monkeypatch) -> None:
     monkeypatch.setattr(
         prepare_nfl_week,
         "predict_week",
-        lambda season, week, roster_backed: pd.DataFrame(),
+        lambda season, week, roster_backed, exclude_teams: pd.DataFrame(),
     )
     monkeypatch.setattr(prepare_nfl_week, "_count_roster_players", lambda season: 0)
     monkeypatch.setattr(prepare_nfl_week, "_count_roster_teams", lambda season: 0)
@@ -151,7 +224,9 @@ def test_prepare_week_reuses_existing_gsis_history_by_default(monkeypatch) -> No
     monkeypatch.setattr(
         prepare_nfl_week,
         "predict_week",
-        lambda season, week, roster_backed: pd.DataFrame({"player_id": ["BUF_season_ready"]}),
+        lambda season, week, roster_backed, exclude_teams: pd.DataFrame(
+            {"player_id": ["BUF_season_ready"], "model_version": ["causal_asof_v1"]}
+        ),
     )
 
     monkeypatch.setattr(prepare_nfl_week, "_history_is_usable", lambda seasons: True)
@@ -204,23 +279,31 @@ def test_prepare_week_rejects_incomplete_week_one_schedule(monkeypatch) -> None:
         prepare_nfl_week.prepare_week(2026, 1, history_seasons=[], refresh_history=False)
 
 
-def test_prepare_week_refuses_to_overwrite_predictions_after_kickoff(monkeypatch) -> None:
+def _pass_week_readiness_checks(monkeypatch) -> None:
     monkeypatch.setattr(prepare_nfl_week, "run_migrations", lambda: None)
     monkeypatch.setattr(
         prepare_nfl_week,
         "ingest_seasons",
         lambda seasons, through_week, stats_through_week=None: 0,
     )
+    monkeypatch.setattr(prepare_nfl_week, "populate_player_dim", lambda: 0)
     monkeypatch.setattr(prepare_nfl_week, "_count_roster_players", lambda season: 53)
     monkeypatch.setattr(prepare_nfl_week, "_count_roster_teams", lambda season: 32)
     monkeypatch.setattr(prepare_nfl_week, "_count_prediction_eligible_roster", lambda season: 48)
     monkeypatch.setattr(prepare_nfl_week, "_count_games", lambda season, week: 16)
     monkeypatch.setattr(prepare_nfl_week, "_count_scheduled_teams", lambda season, week: 32)
     monkeypatch.setattr(prepare_nfl_week, "_count_players_with_history", lambda season: 45)
+
+
+def test_prepare_week_refuses_once_every_game_has_kicked_off(monkeypatch) -> None:
+    _pass_week_readiness_checks(monkeypatch)
     monkeypatch.setattr(
         prepare_nfl_week,
-        "_earliest_kickoff",
-        lambda season, week: datetime(2020, 9, 10, tzinfo=timezone.utc),
+        "_week_games",
+        lambda season, week: [
+            ("GB", "ATL", "2020-09-25T00:15:00+00:00"),
+            ("BUF", "LAC", "2020-09-27T17:00:00+00:00"),
+        ],
     )
     monkeypatch.setattr(
         prepare_nfl_week,
@@ -229,4 +312,43 @@ def test_prepare_week_refuses_to_overwrite_predictions_after_kickoff(monkeypatch
     )
 
     with pytest.raises(RuntimeError, match="already kicked off"):
-        prepare_nfl_week.prepare_week(2020, 1, history_seasons=[], refresh_history=False)
+        prepare_nfl_week.prepare_week(2020, 3, history_seasons=[], refresh_history=False)
+
+
+def test_prepare_week_after_first_kickoff_predicts_only_games_still_to_come(monkeypatch) -> None:
+    excluded: list[frozenset[str]] = []
+    _pass_week_readiness_checks(monkeypatch)
+    monkeypatch.setattr(
+        prepare_nfl_week,
+        "_week_games",
+        lambda season, week: [
+            ("GB", "ATL", "2020-09-25T00:15:00+00:00"),
+            ("BUF", "LAC", "2099-09-27T17:00:00+00:00"),
+        ],
+    )
+    monkeypatch.setattr(
+        prepare_nfl_week,
+        "predict_week",
+        lambda season, week, roster_backed, exclude_teams: excluded.append(exclude_teams)
+        or pd.DataFrame({"player_id": ["BUF_j_allen"], "model_version": ["causal_asof_v1"]}),
+    )
+
+    result = prepare_nfl_week.prepare_week(2026, 3, history_seasons=[], refresh_history=False)
+
+    assert excluded == [frozenset({"ATL", "GB"})]
+    assert result["kicked_off_teams"] == ["ATL", "GB"]
+
+
+def test_a_history_season_cut_short_by_an_earlier_run_is_not_usable(matrix_database) -> None:
+    # Predicting a week of 2025 ingests 2025 only up to that week. Treating it
+    # as history later would drop the rest of the season without a word.
+    execute("DELETE FROM player_stats_enhanced")
+    for season, week in ((2024, 1), (2024, 18), (2025, 1), (2025, 4)):
+        execute(
+            "INSERT INTO player_stats_enhanced (player_id, season, week, name, team, position) "
+            "VALUES ('BUF_p', ?, ?, 'P', 'BUF', 'WR')",
+            (season, week),
+        )
+
+    assert prepare_nfl_week._history_seasons_are_complete([2024]) is True
+    assert prepare_nfl_week._history_seasons_are_complete([2024, 2025]) is False

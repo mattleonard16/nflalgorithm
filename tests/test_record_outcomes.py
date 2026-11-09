@@ -393,3 +393,70 @@ def test_a_regrade_without_clv_keeps_the_stored_weekly_clv(final_game):
     total_bets, clv_avg = _weekly_performance("total_bets, clv_avg")
     assert total_bets == 1
     assert clv_avg == pytest.approx(12.5)
+
+
+# A second fixture: one bet priced at several books, graded once.
+CARD_GAME = "2026_01_KC_BUF"
+
+
+@pytest.fixture()
+def card_database(tmp_path, monkeypatch) -> str:
+    db_path = str(tmp_path / "record-outcomes.db")
+    monkeypatch.setenv("DB_BACKEND", "sqlite")
+    monkeypatch.setenv("SQLITE_DB_PATH", db_path)
+    monkeypatch.setattr(config.database, "backend", "sqlite")
+    monkeypatch.setattr(config.database, "path", db_path)
+    MigrationManager(db_path).run()
+
+    execute(
+        "INSERT INTO games (game_id, season, week, home_team, away_team, kickoff_utc, game_date) "
+        "VALUES (?, 2026, 1, 'BUF', 'KC', '2026-09-13T17:00:00Z', '2026-09-13')",
+        (CARD_GAME,),
+    )
+    execute(
+        "INSERT INTO nfl_roster_players (season, gsis_id, player_id, player_name, team, "
+        "position, updated_at) VALUES (2026, 'G1', 'p1', 'Player One', 'KC', 'WR', "
+        "'2026-09-01T00:00:00Z')"
+    )
+    execute(
+        "INSERT INTO player_stats_enhanced (player_id, gsis_id, season, week, name, team, "
+        "position, receiving_yards) VALUES ('p1', 'G1', 2026, 1, 'Player One', 'KC', 'WR', 80)"
+    )
+    return db_path
+
+
+def _card_row(sportsbook: str, line: float, edge: float, side: str = "over") -> None:
+    execute(
+        """
+        INSERT INTO materialized_value_view (
+            season, week, player_id, event_id, team, market, sportsbook,
+            line, price, side, mu, sigma, p_win, edge_percentage, expected_roi,
+            kelly_fraction, stake, generated_at
+        ) VALUES (2026, 1, 'p1', ?, 'KC', 'receiving_yards', ?, ?, -110, ?,
+                  72.0, 10.0, 0.6, ?, 0.1, 0.02, 5.0, '2026-09-10T12:00:00Z')
+        """,
+        (CARD_GAME, sportsbook, line, side, edge),
+    )
+
+
+def test_a_bet_priced_at_several_books_is_graded_once_at_the_best_one(card_database) -> None:
+    _card_row("DraftKings", 64.5, 0.08)
+    _card_row("FanDuel", 63.5, 0.12)
+    _card_row("Bovada", 65.5, 0.06)
+    _card_row("FanDuel", 90.5, 0.09, side="under")
+
+    outcomes = grade_bets(2026, 1)
+
+    graded = sorted((o["side"], o["sportsbook"], o["line"]) for o in outcomes)
+    assert graded == [("over", "FanDuel", 63.5), ("under", "FanDuel", 90.5)]
+
+
+def test_synthetic_lines_are_never_graded(card_database) -> None:
+    # SimBook lines come from the week's own stats, so their edge is circular.
+    # The dashboard hides them; grading one would count a bet nobody was shown.
+    _card_row("SimBook", 60.5, 0.40)
+    _card_row("DraftKings", 64.5, 0.08)
+
+    outcomes = grade_bets(2026, 1)
+
+    assert [o["sportsbook"] for o in outcomes] == ["DraftKings"]

@@ -16,6 +16,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from config import config
+from utils.best_line import best_line_per_bet
 from utils.clv import STATUS_OK, compute_clv, resolve_closing_lines
 from utils.db import execute, executemany, get_backend, get_connection, read_dataframe
 from utils.game_completion import classify_games
@@ -24,9 +25,11 @@ from utils.grading import (
     calculate_profit_units,
     get_confidence_tier,
     grade_bet,
+    settled_roi_pct,
 )
 from utils.live_odds import kickoffs_from_games
 from utils.nfl_markets import MARKET_TO_STAT, synthesize_anytime_td
+from utils.odds_quality import SYNTHETIC_SPORTSBOOK, is_synthetic_book
 
 
 def make_bet_id(
@@ -88,6 +91,17 @@ def grade_bets(season: int, week: int, include_unfinished: bool = False) -> List
 
     print(f"Found {len(predictions)} predictions")
 
+    # SimBook lines are derived from this week's actual stats, so a bet against
+    # one wins by construction. The dashboard never shows them; neither should
+    # the graded record.
+    synthetic = predictions["sportsbook"].map(is_synthetic_book)
+    if synthetic.any():
+        print(f"Skipping {int(synthetic.sum())} synthetic {SYNTHETIC_SPORTSBOOK} line(s)")
+        predictions = predictions[~synthetic]
+        if predictions.empty:
+            print("No real sportsbook lines to grade")
+            return []
+
     # Load actual stats
     actuals_query = """
         SELECT
@@ -146,6 +160,12 @@ def grade_bets(season: int, week: int, include_unfinished: bool = False) -> List
         if predictions.empty:
             print("No bets in the finished games")
             return []
+
+    # The card holds one row per book, so a bet priced at five books would be
+    # graded five times. Grade the row the dashboard shows: the best line.
+    rows = len(predictions)
+    predictions = best_line_per_bet(predictions)
+    print(f"Grading {len(predictions)} bet(s) at their best line ({rows} card rows)")
 
     # Grade each bet
     outcomes = []
@@ -369,6 +389,11 @@ def save_outcomes(outcomes: List[Dict]) -> None:
 
     print(f"Saving {len(outcomes)} outcomes to database...")
 
+    # Cast out of numpy scalars: sqlite3 stores an unconverted np.int64 as a
+    # BLOB, which silently breaks every later season/week lookup.
+    season = int(outcomes[0]["season"])
+    week = int(outcomes[0]["week"])
+
     # Insert into bet_outcomes. Re-grading a week must overwrite in place on
     # both backends; `INSERT OR REPLACE` would fail outright on MySQL.
     bet_outcomes_columns = """
@@ -441,15 +466,28 @@ def save_outcomes(outcomes: List[Dict]) -> None:
         for o in outcomes
     ]
 
-    executemany(insert_sql, outcome_tuples)
+    # This run's outcomes replace the week's, as weekly_performance below already
+    # does. An upsert alone kept rows a later run no longer grades, such as the
+    # extra books of a bet once graded per book, and every reader counted them.
+    graded_ids = {o["bet_id"] for o in outcomes}
+    with get_connection() as conn:
+        existing = read_dataframe(
+            "SELECT bet_id FROM bet_outcomes WHERE season = ? AND week = ?",
+            params=(season, week),
+            conn=conn,
+        )
+        stale = [(bet_id,) for bet_id in existing["bet_id"] if bet_id not in graded_ids]
+        if stale:
+            executemany("DELETE FROM clv_weekly WHERE bet_id = ?", stale, conn=conn)
+            executemany("DELETE FROM bet_outcomes WHERE bet_id = ?", stale, conn=conn)
+        executemany(insert_sql, outcome_tuples, conn=conn)
+        conn.commit()
+    if stale:
+        print(f"Removed {len(stale)} outcomes from an earlier grading of this week")
     print(f"Inserted {len(outcome_tuples)} outcomes into bet_outcomes")
 
     # Aggregate weekly performance
     df = pd.DataFrame(outcomes)
-    # Cast out of numpy scalars: sqlite3 stores an unconverted np.int64 as a
-    # BLOB, which silently breaks every later season/week lookup.
-    season = int(df["season"].iloc[0])
-    week = int(df["week"].iloc[0])
 
     total_bets = len(outcomes)
     wins = len(df[df["result"] == "win"])
@@ -457,9 +495,7 @@ def save_outcomes(outcomes: List[Dict]) -> None:
     pushes = len(df[df["result"] == "push"])
     profit_units = float(df["profit_units"].sum())
 
-    # ROI calculation: profit / units risked (excluding pushes)
-    units_risked = wins + losses  # Each bet risks 1 unit
-    roi_pct = (profit_units / units_risked * 100) if units_risked > 0 else 0.0
+    roi_pct = settled_roi_pct(wins, losses, profit_units)
 
     avg_edge = float(df["edge_at_placement"].mean())
 
@@ -542,7 +578,7 @@ def save_outcomes(outcomes: List[Dict]) -> None:
     print(f"  Record: {wins}-{losses}-{pushes}")
     print(f"  Profit: {profit_units:.2f} units")
     print(f"  ROI: {roi_pct:.2f}%")
-    print(f"  Avg edge: {avg_edge:.2f}%")
+    print(f"  Avg edge: {avg_edge * 100:.1f}%")
     print(f"  Avg CLV: {f'{clv_avg:.1f} bp' if clv_avg is not None else 'unavailable'}")
 
 

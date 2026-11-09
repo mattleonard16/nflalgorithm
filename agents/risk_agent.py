@@ -12,6 +12,7 @@ import pandas as pd
 
 from agents import AgentReport
 from agents.base_agent import BaseAgent
+from utils.best_line import best_line_per_bet
 from risk_manager import (
     assess_risk,
     detect_team_stacks,
@@ -21,8 +22,8 @@ from risk_manager import (
 class RiskAgent(BaseAgent):
     """Enforces exposure rules and reports correlation warnings."""
 
-    def __init__(self) -> None:
-        super().__init__("risk_agent")
+    def __init__(self, *, run_id: str | None = None, attempt: int | None = None) -> None:
+        super().__init__("risk_agent", run_id=run_id, attempt=attempt)
 
     def analyze(
         self,
@@ -46,7 +47,10 @@ class RiskAgent(BaseAgent):
             )
             return _fallback_reports(self.name, value_df)
 
-        assessed = assess_risk(value_df)
+        # The card prices one bet at several books. Assess each bet once, or
+        # its copies flag each other as a same-team stack and its stake counts
+        # once per book.
+        assessed = assess_risk(best_line_per_bet(value_df))
         stacks = detect_team_stacks(assessed)
 
         reports: List[AgentReport] = []

@@ -3,46 +3,24 @@
 The grading path previously used SQLite-only `INSERT OR REPLACE`, which MySQL
 rejects outright. Re-grading a week has to overwrite in place rather than
 duplicate or fail, so these run against whichever backend TEST_DB_BACKEND
-selects (MySQL side skips when no server is configured).
+selects.
 """
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
-from config import config
-from schema_migrations import MigrationManager
 from scripts.record_outcomes import save_outcomes
 from utils.db import execute, fetchone, get_connection
 
 
 @pytest.fixture()
-def graded_database(tmp_path, monkeypatch) -> str:
-    backend = os.getenv("TEST_DB_BACKEND", "sqlite").lower()
-    if backend == "sqlite":
-        db_path = str(tmp_path / "grading-parity.db")
-        monkeypatch.setenv("DB_BACKEND", "sqlite")
-        monkeypatch.setenv("SQLITE_DB_PATH", db_path)
-        monkeypatch.setattr(config.database, "backend", "sqlite")
-        monkeypatch.setattr(config.database, "path", db_path)
-        MigrationManager(db_path).run()
-    else:
-        test_db_url = os.getenv("TEST_DB_URL")
-        if not test_db_url:
-            pytest.skip("TEST_DB_BACKEND=mysql requires TEST_DB_URL")
-        monkeypatch.setenv("DB_BACKEND", "mysql")
-        monkeypatch.setenv("DB_URL", test_db_url)
-        monkeypatch.setattr(config.database, "backend", "mysql")
-        monkeypatch.setattr(config.database, "db_url", test_db_url)
-        MigrationManager("unused-mysql-path").run()
-
+def graded_database(matrix_database: str) -> str:
     with get_connection() as conn:
         for table in ("clv_weekly", "bet_outcomes", "weekly_performance", "weekly_odds"):
             execute(f"DELETE FROM {table}", conn=conn)
         conn.commit()
-    return backend
+    return matrix_database
 
 
 def _outcome(**overrides) -> dict:
@@ -152,3 +130,41 @@ def test_clv_weekly_upsert_overwrites_in_place(graded_database) -> None:
 
     save_outcomes([_outcome()])
     assert fetchone("SELECT COUNT(*) FROM clv_weekly")[0] == 1
+
+
+def _clv_row(bet_id: str) -> None:
+    execute(
+        "INSERT INTO clv_weekly (bet_id, close_line, close_price, clv_bp, closed_at) "
+        "VALUES (?, 64.5, -115, 12.0, '2026-09-21T10:00:00+00:00')",
+        (bet_id,),
+    )
+
+
+def test_regrade_drops_bets_no_longer_on_the_graded_card(graded_database) -> None:
+    # A card graded once per book, then re-graded once per bet, must not keep
+    # the old per-book rows alongside the new ones.
+    save_outcomes([_outcome(), _outcome(bet_id="bet-other-book", sportsbook="FanDuel")])
+
+    save_outcomes([_outcome()])
+
+    assert fetchone("SELECT COUNT(*) FROM bet_outcomes")[0] == 1
+    assert fetchone("SELECT bet_id FROM bet_outcomes")[0] == "bet-parity-1"
+
+
+def test_regrade_drops_clv_rows_of_removed_bets(graded_database) -> None:
+    save_outcomes([_outcome(), _outcome(bet_id="bet-other-book", sportsbook="FanDuel")])
+    _clv_row("bet-parity-1")
+    _clv_row("bet-other-book")
+
+    save_outcomes([_outcome()])
+
+    assert fetchone("SELECT COUNT(*) FROM clv_weekly WHERE bet_id = ?", ("bet-other-book",))[0] == 0
+    assert fetchone("SELECT COUNT(*) FROM clv_weekly WHERE bet_id = ?", ("bet-parity-1",))[0] == 1
+
+
+def test_regrade_leaves_other_weeks_alone(graded_database) -> None:
+    save_outcomes([_outcome(bet_id="bet-week-2", week=2)])
+
+    save_outcomes([_outcome()])
+
+    assert fetchone("SELECT COUNT(*) FROM bet_outcomes WHERE week = 2")[0] == 1

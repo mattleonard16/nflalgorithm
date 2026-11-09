@@ -1,7 +1,7 @@
 """Tests for T1 #8: no-vig probability for NFL value engine.
 
-NFR-6 gate: behavior must be off by default and toggle via
-`config.features.no_vig_enabled` (env NFL_FEATURE_NO_VIG).
+On by default; toggles via `config.features.no_vig_enabled`
+(env NFL_FEATURE_NO_VIG).
 """
 
 from __future__ import annotations
@@ -15,10 +15,8 @@ import pytest
 
 from config import config
 from schema_migrations import MigrationManager
-from value_betting_engine import _implied_probability, rank_weekly_value
-
-# The no-vig math itself is tested in tests/test_odds_math.py, which runs without
-# the private engine.
+from utils.odds_math import implied_probability
+from value_betting_engine import rank_weekly_value
 
 # ---------------------------------------------------------------------------
 # Integration: rank_weekly_value branches on the flag
@@ -108,13 +106,16 @@ def test_no_vig_flag_off_uses_raw_implied_prob(temp_db_two_sided, monkeypatch):
     # Raw -110 implied = 100/210 ≈ 0.5238
     # Our row would not have an under_price effect at all
     assert df.iloc[0]["edge_percentage"] == pytest.approx(
-        df.iloc[0]["p_win"] - _implied_probability(-110), abs=1e-9
+        df.iloc[0]["p_win"] - implied_probability(-110), abs=1e-9
     )
 
 
 def test_no_vig_flag_on_lifts_edge_when_under_present(temp_db_two_sided, monkeypatch):
     """Flag on + symmetric -110/-110 quote → implied prob drops to exactly 0.5,
     which lifts edge_percentage vs the flag-off baseline."""
+    # With a market weight, mu itself moves with the implied prob, so p_win
+    # changes too. Weight 0 isolates the de-vig arithmetic this test pins.
+    monkeypatch.setattr(config.betting, "market_blend_weight", 0.0)
     monkeypatch.setattr(config.features, "no_vig_enabled", False)
     df_raw = rank_weekly_value(2024, 1, min_edge=-1.0).copy()
 
@@ -125,7 +126,7 @@ def test_no_vig_flag_on_lifts_edge_when_under_present(temp_db_two_sided, monkeyp
     edge_novig = df_novig.iloc[0]["edge_percentage"]
     # No-vig fair prob = 0.5 < 0.5238 raw → edge increases by ~2.38 pp
     assert edge_novig > edge_raw
-    assert edge_novig - edge_raw == pytest.approx(_implied_probability(-110) - 0.5, abs=1e-9)
+    assert edge_novig - edge_raw == pytest.approx(implied_probability(-110) - 0.5, abs=1e-9)
 
 
 @pytest.fixture
@@ -199,24 +200,14 @@ def test_no_vig_flag_on_falls_back_when_under_missing(temp_db_no_under, monkeypa
     df = rank_weekly_value(2024, 1, min_edge=-1.0)
     assert not df.empty
     assert df.iloc[0]["edge_percentage"] == pytest.approx(
-        df.iloc[0]["p_win"] - _implied_probability(-110), abs=1e-9
+        df.iloc[0]["p_win"] - implied_probability(-110), abs=1e-9
     )
 
 
-def test_no_vig_default_off(monkeypatch):
-    """NFR-6 gate: flag must default to False when env is unset.
+def test_no_under_bet_without_an_under_price(temp_db_no_under, monkeypatch):
+    """No quoted under means no under bet: 1 - raw_over understates its breakeven."""
+    monkeypatch.setattr(config.features, "no_vig_enabled", True)
+    df = rank_weekly_value(2024, 1, min_edge=-1.0)
+    assert not df.empty
+    assert set(df["side"]) == {"over"}
 
-    Reloads the underlying config module so we assert against the live
-    `config.features.no_vig_enabled` value, not a replayed parse.
-    """
-    import importlib.util
-    from pathlib import Path
-
-    monkeypatch.delenv("NFL_FEATURE_NO_VIG", raising=False)
-
-    cfg_path = Path(__file__).parent.parent / "config" / "runtime.py"
-    spec = importlib.util.spec_from_file_location("_config_under_test", cfg_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    assert module.config.features.no_vig_enabled is False

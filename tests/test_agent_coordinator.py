@@ -19,16 +19,20 @@ from agents import AgentReport, VALID_RECOMMENDATIONS, validate_report
 from agents.coordinator import (
     CONSENSUS_THRESHOLD,
     _group_reports,
+    _persist_decisions,
     _resolve_consensus,
     run_all_agents,
 )
 from agents.odds_agent import (
+    OddsAgent,
     _best_prices,
     _detect_steam_moves,
 )
 from agents.model_diagnostics_agent import (
     _flag_suspicious,
 )
+from agents.risk_agent import RiskAgent
+from utils.db import execute, read_dataframe
 
 
 # ======================================================================
@@ -299,6 +303,51 @@ class TestResolveConsensus:
         assert len(result["agent_reports"]) == 1
         assert result["agent_reports"][0]["agent"] == "odds"
 
+    def test_an_agent_votes_once_however_many_reports_it_sends(self):
+        # The threshold counts agents. Three reports from one agent are not
+        # three agents agreeing.
+        reports = [
+            _make_report("odds", "APPROVE"),
+            _make_report("model", "APPROVE"),
+            *[_make_report("risk", "REJECT") for _ in range(3)],
+        ]
+        result = _resolve_consensus(reports)
+        assert result["votes"] == {"APPROVE": 2, "REJECT": 1, "NEUTRAL": 0}
+
+    def test_an_agent_split_on_one_prop_votes_its_most_cautious_report(self):
+        reports = [_make_report("risk", "APPROVE"), _make_report("risk", "REJECT")]
+        result = _resolve_consensus(reports)
+        assert result["votes"] == {"APPROVE": 0, "REJECT": 1, "NEUTRAL": 0}
+
+
+class TestRiskAgent:
+    def test_a_bet_priced_at_several_books_gets_one_report(self, monkeypatch):
+        # Each book's copy of a bet shares its team, so the copies used to flag
+        # each other as a same-team stack and reject the bet.
+        card = pd.DataFrame(
+            [
+                {
+                    "player_id": "P001",
+                    "market": "receiving_yards",
+                    "side": "over",
+                    "team": "KC",
+                    "event_id": "2026_01_KC_BUF",
+                    "sportsbook": book,
+                    "price": -110,
+                    "p_win": 0.58,
+                    "edge_percentage": edge,
+                    "kelly_fraction": 0.01,
+                    "stake": 10.0,
+                }
+                for book, edge in (("DraftKings", 0.08), ("FanDuel", 0.12), ("Bovada", 0.06))
+            ]
+        )
+        monkeypatch.setattr(RiskAgent, "_load_value_view", lambda self, *args: card)
+
+        reports = RiskAgent().analyze(2026, 1)
+
+        assert [r.recommendation for r in reports] == ["APPROVE"]
+
 
 # ======================================================================
 # Report grouping
@@ -375,6 +424,25 @@ class TestSteamMoveDetection:
         ])
         result = _detect_steam_moves(df)
         assert result.empty
+
+
+class TestOddsAgent:
+    def test_a_line_move_flags_only_the_market_that_moved(self, monkeypatch):
+        odds = pd.DataFrame(
+            [
+                ("receiving_yards", 64.5, "2026-09-10T12:00:00Z"),
+                ("receiving_yards", 68.5, "2026-09-12T12:00:00Z"),
+                ("receptions", 5.5, "2026-09-10T12:00:00Z"),
+                ("receptions", 5.5, "2026-09-12T12:00:00Z"),
+            ],
+            columns=["market", "line", "as_of"],
+        ).assign(player_id="P001", sportsbook="DraftKings", price=-110)
+        monkeypatch.setattr(OddsAgent, "_load_odds", lambda self, *args: odds)
+
+        reports = OddsAgent().analyze(2026, 1)
+
+        verdicts = {r.market: r.recommendation for r in reports}
+        assert verdicts == {"receiving_yards": "REJECT", "receptions": "APPROVE"}
 
 
 class TestBestPrices:
@@ -538,6 +606,85 @@ class TestCoordinatorOutput:
         decisions = run_all_agents(2025, 13)
         # Should still produce decisions from the 3 working agents
         assert len(decisions) >= 1
+
+
+class TestPersistDecisions:
+    """Rerunning a week's agents replaces each verdict, on SQLite and MySQL."""
+
+    @pytest.fixture()
+    def decisions_database(self, matrix_database):
+        execute("DELETE FROM agent_decisions")
+        return matrix_database
+
+    @staticmethod
+    def _decision(verdict: str, player_id: str = "P001") -> dict:
+        return {
+            "player_id": player_id,
+            "market": "rushing_yards",
+            "decision": verdict,
+            "merged_confidence": 0.7,
+            "votes": {"APPROVE": 3, "REJECT": 1, "NEUTRAL": 0},
+            "rationale": "test",
+            "override": False,
+            "agent_reports": [],
+        }
+
+    def test_rerunning_a_week_replaces_the_verdict(self, decisions_database):
+        _persist_decisions([self._decision("APPROVED")], 2026, 1)
+
+        written = _persist_decisions([self._decision("REJECTED")], 2026, 1)
+
+        assert written == 1
+        rows = read_dataframe("SELECT decision FROM agent_decisions")
+        assert rows["decision"].tolist() == ["REJECTED"]
+
+    def test_a_full_rerun_drops_verdicts_for_bets_that_left_the_card(
+        self, decisions_database
+    ):
+        _persist_decisions(
+            [self._decision("APPROVED", "P001"), self._decision("APPROVED", "P002")], 2026, 1
+        )
+        _persist_decisions([self._decision("APPROVED", "P009")], 2026, 2)
+
+        _persist_decisions([self._decision("REJECTED", "P001")], 2026, 1, replace_week=True)
+
+        rows = read_dataframe(
+            "SELECT week, player_id, decision FROM agent_decisions ORDER BY week, player_id"
+        )
+        assert rows.values.tolist() == [[1, "P001", "REJECTED"], [2, "P009", "APPROVED"]]
+
+    def test_a_full_rerun_with_an_empty_card_clears_the_week(self, decisions_database):
+        _persist_decisions([self._decision("APPROVED")], 2026, 1)
+
+        _persist_decisions([], 2026, 1, replace_week=True)
+
+        assert read_dataframe("SELECT * FROM agent_decisions").empty
+
+    def test_a_single_player_run_keeps_the_rest_of_the_week(
+        self, decisions_database, monkeypatch
+    ):
+        _persist_decisions(
+            [self._decision("APPROVED", "P001"), self._decision("APPROVED", "P002")], 2026, 1
+        )
+        report = AgentReport(
+            agent_name="odds_agent",
+            recommendation="REJECT",
+            confidence=0.7,
+            rationale="test",
+            player_id="P001",
+            market="rushing_yards",
+        )
+        for name in ("OddsAgent", "ModelDiagnosticsAgent", "MarketBiasAgent", "RiskAgent"):
+            agent = MagicMock()
+            agent.analyze.return_value = [report] if name == "OddsAgent" else []
+            monkeypatch.setattr(f"agents.coordinator.{name}", lambda *a, _a=agent, **k: _a)
+
+        run_all_agents(2026, 1, player_id="P001")
+
+        rows = read_dataframe(
+            "SELECT player_id, decision FROM agent_decisions ORDER BY player_id"
+        )
+        assert rows.values.tolist() == [["P001", "REJECTED"], ["P002", "APPROVED"]]
 
 
 # ======================================================================

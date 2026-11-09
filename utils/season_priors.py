@@ -37,6 +37,7 @@ __all__ = [
     "regular_season_training_weeks",
     "season_feature_cols",
     "season_prior_weights",
+    "training_weeks_before",
 ]
 
 DEFAULT_WR_ROLE_PRIORS: dict[str, float] = {
@@ -155,6 +156,26 @@ def regular_season_training_weeks(available: pd.DataFrame) -> list[tuple[int, in
         ["season", "week"],
     ]
     pairs = {(int(season), int(week)) for season, week in weeks.itertuples(index=False)}
+    return sorted(pairs)
+
+
+def training_weeks_before(
+    available: pd.DataFrame, season: int, week: int, history_seasons: int = 2
+) -> list[tuple[int, int]]:
+    """Weeks strictly before ``season``/``week``, back ``history_seasons`` seasons.
+
+    Playoff weeks stay in. The walk-forward backtest scores this window, and the
+    Wednesday job trains on it, so the served model is the one the backtest measured.
+    """
+    if available is None or available.empty:
+        return []
+    if not {"season", "week"}.issubset(available.columns):
+        raise ValueError("available must include season and week")
+    seasons = available["season"].map(int)
+    weeks = available["week"].map(int)
+    before = (seasons < season) | ((seasons == season) & (weeks < week))
+    keep = available.loc[before & (seasons >= season - history_seasons), ["season", "week"]]
+    pairs = {(int(s), int(w)) for s, w in keep.itertuples(index=False)}
     return sorted(pairs)
 
 

@@ -86,7 +86,7 @@ class OddsAgent(BaseAgent):
         steam = _detect_steam_moves(odds_df)
         best = _best_prices(odds_df)
 
-        steam_ids = set(steam["player_id"]) if not steam.empty else set()
+        steam_keys = set(zip(steam["player_id"], steam["market"])) if not steam.empty else set()
 
         reports: List[AgentReport] = []
 
@@ -97,7 +97,7 @@ class OddsAgent(BaseAgent):
         )
 
         for pid, market in player_markets:
-            is_steam = pid in steam_ids
+            is_steam = (pid, market) in steam_keys
             best_row = (
                 best[(best["player_id"] == pid) & (best["market"] == market)]
                 if not best.empty

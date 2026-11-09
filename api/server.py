@@ -32,9 +32,12 @@ from api.auth import (
     validate_session,
 )
 from api.pipeline_router import require_pipeline_operator, require_pipeline_reader
+from api.records import json_records
 from api.value_visibility import value_visibility_scope
 from config import config
+from utils.best_line import best_line_per_bet
 from utils.db import execute, fetchall, fetchone, get_connection, read_dataframe
+from utils.grading import settled_roi_pct, settled_win_rate_pct
 
 logger = logging.getLogger(__name__)
 
@@ -320,13 +323,10 @@ async def get_value_bets(
                 },
             }
 
-        # If best_line_only, group by player_id + market and keep best edge
         if best_line_only:
-            df = df.sort_values("edge_percentage", ascending=False)
-            df = df.groupby(["player_id", "market", "side"]).first().reset_index()
+            df = best_line_per_bet(df)
 
-        # Convert to records
-        bets = df.to_dict(orient="records")
+        bets = json_records(df)
 
         # Attach explainability payloads if requested
         if include_why:
@@ -364,8 +364,8 @@ async def get_value_bets(
 
         return result
     except Exception as e:
-        logger.error(f"Error fetching value bets: {e}")
-        raise HTTPException(status_code=500, detail=f"Error fetching value bets: {str(e)}")
+        logger.exception("Error fetching value bets")
+        raise HTTPException(status_code=500, detail="Value bets unavailable") from e
 
 
 @app.get("/api/performance")
@@ -411,7 +411,7 @@ async def get_performance(season: Optional[int] = Query(None, description="Filte
                 "win_rate": 0.0,
             }
 
-        weeks = df.to_dict(orient="records")
+        weeks = json_records(df)
 
         # Calculate summary
         total_bets = int(df["total_bets"].sum())
@@ -419,7 +419,6 @@ async def get_performance(season: Optional[int] = Query(None, description="Filte
         total_losses = int(df["losses"].sum())
         total_pushes = int(df["pushes"].sum())
         total_profit = float(df["profit_units"].sum())
-        win_rate = (total_wins / total_bets * 100) if total_bets > 0 else 0.0
 
         return {
             "weeks": weeks,
@@ -428,8 +427,8 @@ async def get_performance(season: Optional[int] = Query(None, description="Filte
             "total_losses": total_losses,
             "total_pushes": total_pushes,
             "total_profit": total_profit,
-            "overall_roi": float(df["roi_pct"].mean()) if not df.empty else 0.0,
-            "win_rate": win_rate,
+            "overall_roi": settled_roi_pct(total_wins, total_losses, total_profit),
+            "win_rate": settled_win_rate_pct(total_wins, total_losses),
         }
     except Exception as e:
         logger.error(f"Error fetching performance: {e}")
@@ -478,7 +477,7 @@ async def get_outcomes(
         df = read_dataframe(query, params=[season, week])
 
         return {
-            "outcomes": df.to_dict(orient="records") if not df.empty else [],
+            "outcomes": json_records(df),
             "total": len(df),
         }
     except Exception as e:
@@ -527,7 +526,7 @@ async def get_health(
                 "overall_status": "unknown",
             }
 
-        feeds = df.to_dict(orient="records")
+        feeds = json_records(df)
 
         # Determine overall status based on freshness
         now = datetime.now(timezone.utc)
@@ -563,6 +562,17 @@ async def get_health(
         }
 
 
+def _summarize_bets(bets: pd.DataFrame, by: str) -> pd.DataFrame:
+    """Count bets per group with their mean edge, expected ROI, and win probability."""
+    summary = bets.groupby(by, as_index=False).agg(
+        bet_count=("player_id", "size"),
+        avg_edge=("edge_percentage", "mean"),
+        avg_roi=("expected_roi", "mean"),
+        avg_p_win=("p_win", "mean"),
+    )
+    return summary.sort_values("bet_count", ascending=False, kind="mergesort")
+
+
 @app.get("/api/analytics/edge-distribution")
 async def get_edge_distribution(
     season: int = Query(..., description="NFL season year"),
@@ -573,12 +583,12 @@ async def get_edge_distribution(
     try:
         visibility_sql, visibility_params = value_visibility_scope()
         query = f"""
-            SELECT v.edge_percentage
+            SELECT v.player_id, v.market, v.side, v.sportsbook, v.edge_percentage
             FROM materialized_value_view v
             WHERE {visibility_sql}
               AND v.season = ? AND v.week = ?
         """
-        df = read_dataframe(query, params=[*visibility_params, season, week])
+        df = best_line_per_bet(read_dataframe(query, params=[*visibility_params, season, week]))
 
         if df.empty:
             return {
@@ -616,11 +626,9 @@ async def get_by_position(
         visibility_sql, visibility_params = value_visibility_scope()
         query = f"""
             SELECT
-                COALESCE(pd.position, ps.position) as position,
-                COUNT(*) as bet_count,
-                AVG(v.edge_percentage) as avg_edge,
-                AVG(v.expected_roi) as avg_roi,
-                AVG(v.p_win) as avg_p_win
+                v.player_id, v.market, v.side, v.sportsbook,
+                v.edge_percentage, v.expected_roi, v.p_win,
+                COALESCE(pd.position, ps.position) as position
             FROM materialized_value_view v
             LEFT JOIN player_dim pd ON v.player_id = pd.player_id
             LEFT JOIN (
@@ -631,13 +639,11 @@ async def get_by_position(
             WHERE {visibility_sql}
               AND v.season = ? AND v.week = ?
               AND COALESCE(pd.position, ps.position) IS NOT NULL
-            GROUP BY COALESCE(pd.position, ps.position)
-            ORDER BY bet_count DESC
         """
-        df = read_dataframe(query, params=[*visibility_params, season, week])
+        df = best_line_per_bet(read_dataframe(query, params=[*visibility_params, season, week]))
 
         return {
-            "by_position": df.to_dict(orient="records") if not df.empty else [],
+            "by_position": json_records(_summarize_bets(df, "position")),
         }
     except Exception as e:
         logger.error(f"Error fetching by-position stats: {e}")
@@ -656,21 +662,16 @@ async def get_by_market(
         visibility_sql, visibility_params = value_visibility_scope()
         query = f"""
             SELECT
-                v.market,
-                COUNT(*) as bet_count,
-                AVG(v.edge_percentage) as avg_edge,
-                AVG(v.expected_roi) as avg_roi,
-                AVG(v.p_win) as avg_p_win
+                v.player_id, v.market, v.side, v.sportsbook,
+                v.edge_percentage, v.expected_roi, v.p_win
             FROM materialized_value_view v
             WHERE {visibility_sql}
               AND v.season = ? AND v.week = ?
-            GROUP BY v.market
-            ORDER BY bet_count DESC
         """
-        df = read_dataframe(query, params=[*visibility_params, season, week])
+        df = best_line_per_bet(read_dataframe(query, params=[*visibility_params, season, week]))
 
         return {
-            "by_market": df.to_dict(orient="records") if not df.empty else [],
+            "by_market": json_records(_summarize_bets(df, "market")),
         }
     except Exception as e:
         logger.error(f"Error fetching by-market stats: {e}")
@@ -703,7 +704,7 @@ async def get_weekly_summary(
         df = read_dataframe(query, params=[weeks])
 
         return {
-            "weeks": df.to_dict(orient="records") if not df.empty else [],
+            "weeks": json_records(df),
         }
     except Exception as e:
         logger.error(f"Error fetching weekly summary: {e}")
@@ -796,8 +797,8 @@ async def get_explainability(
         payload = build_why_payload(season, week, player_id, market)
         return {"player_id": player_id, "market": market, "why": payload}
     except Exception as e:
-        logger.error(f"Error building explainability: {e}")
-        raise HTTPException(status_code=500, detail=f"Explainability error: {str(e)}")
+        logger.exception("Error building explainability")
+        raise HTTPException(status_code=500, detail="Explanation unavailable") from e
 
 
 # ── Risk & correlation endpoints (Feature 5) ─────────────────────────
@@ -814,14 +815,15 @@ async def get_correlation_analysis(
 
         visibility_sql, visibility_params = value_visibility_scope()
         query = f"""
-            SELECT v.player_id, pd.player_name, pd.position, v.team, v.market, v.sportsbook,
-                   v.event_id, v.stake, v.edge_percentage, v.kelly_fraction, v.price, v.p_win
+            SELECT v.player_id, pd.player_name, pd.position, v.team, v.market, v.side,
+                   v.sportsbook, v.event_id, v.stake, v.edge_percentage, v.kelly_fraction,
+                   v.price, v.p_win
             FROM materialized_value_view v
             LEFT JOIN player_dim pd ON v.player_id = pd.player_id
             WHERE {visibility_sql}
               AND v.season = ? AND v.week = ?
         """
-        df = read_dataframe(query, params=[*visibility_params, season, week])
+        df = best_line_per_bet(read_dataframe(query, params=[*visibility_params, season, week]))
 
         if df.empty:
             return {"correlation_groups": [], "team_stacks": []}
@@ -866,8 +868,8 @@ async def get_correlation_analysis(
 
         return {"correlation_groups": groups, "team_stacks": team_stack_list}
     except Exception as e:
-        logger.error(f"Error in correlation analysis: {e}")
-        raise HTTPException(status_code=500, detail=f"Correlation analysis error: {str(e)}")
+        logger.exception("Error in correlation analysis")
+        raise HTTPException(status_code=500, detail="Correlation analysis unavailable") from e
 
 
 @app.get("/api/analytics/risk-summary")
@@ -881,14 +883,15 @@ async def get_risk_summary(
 
         visibility_sql, visibility_params = value_visibility_scope()
         query = f"""
-            SELECT v.player_id, pd.player_name, v.team, v.market, v.sportsbook,
+            SELECT v.player_id, pd.player_name, v.team, v.market, v.side, v.sportsbook,
                    v.event_id, v.stake, v.kelly_fraction, v.edge_percentage, v.price, v.p_win
             FROM materialized_value_view v
             LEFT JOIN player_dim pd ON v.player_id = pd.player_id
             WHERE {visibility_sql}
               AND v.season = ? AND v.week = ?
         """
-        df = read_dataframe(query, params=[*visibility_params, season, week])
+        # The card lists every book's price for a bet; exposure is one stake per bet.
+        df = best_line_per_bet(read_dataframe(query, params=[*visibility_params, season, week]))
 
         if df.empty:
             return {
@@ -947,8 +950,8 @@ async def get_risk_summary(
             "warnings": warnings,
         }
     except Exception as e:
-        logger.error(f"Error in risk summary: {e}")
-        raise HTTPException(status_code=500, detail=f"Risk summary error: {str(e)}")
+        logger.exception("Error in risk summary")
+        raise HTTPException(status_code=500, detail="Risk summary unavailable") from e
 
 
 # ── Export endpoints (P1: UX polish) ─────────────────────────────
@@ -1009,8 +1012,8 @@ async def export_csv(
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
     except Exception as e:
-        logger.error(f"Error exporting CSV: {e}")
-        raise HTTPException(status_code=500, detail=f"Export error: {str(e)}")
+        logger.exception("Error exporting CSV")
+        raise HTTPException(status_code=500, detail="CSV export unavailable") from e
 
 
 @app.get("/api/export/bundle")
@@ -1039,7 +1042,7 @@ async def export_bundle(
             bets_query,
             params=[*visibility_params, season, week],
         )
-        bets_list = bets_df.to_dict(orient="records") if not bets_df.empty else []
+        bets_list = json_records(bets_df)
 
         if config.api.demo_mode:
             run_row = fetchone(
@@ -1078,10 +1081,10 @@ async def export_bundle(
 
         # Try to include correlation and risk data
         try:
-            from risk_manager import compute_exposure, detect_correlations, detect_team_stacks
+            from risk_manager import detect_team_stacks
 
             risk_query = f"""
-                SELECT v.player_id, pd.player_name, pd.position, v.team, v.market,
+                SELECT v.player_id, pd.player_name, pd.position, v.team, v.market, v.side,
                        v.sportsbook, v.event_id, v.stake, v.edge_percentage,
                        v.kelly_fraction, v.price, v.p_win
                 FROM materialized_value_view v
@@ -1089,16 +1092,17 @@ async def export_bundle(
                 WHERE {visibility_sql}
                   AND v.season = ? AND v.week = ?
             """
-            risk_df = read_dataframe(
-                risk_query,
-                params=[*visibility_params, season, week],
+            # Stacks and stake count each bet once, as the risk summary does.
+            risk_df = best_line_per_bet(
+                read_dataframe(risk_query, params=[*visibility_params, season, week])
             )
             if not risk_df.empty:
                 stacks = detect_team_stacks(risk_df)
                 bundle["team_stacks"] = {team: len(idxs) for team, idxs in stacks.items()}
                 bundle["total_stake"] = float(risk_df["stake"].sum())
         except Exception:
-            pass
+            # The bundle is still useful without these fields, so export it anyway.
+            logger.exception("Export bundle for %s week %s left out risk data", season, week)
 
         content = json.dumps(bundle, indent=2, default=str)
         filename = f"run_bundle_s{season}_w{week}.json"
@@ -1108,8 +1112,8 @@ async def export_bundle(
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
     except Exception as e:
-        logger.error(f"Error exporting bundle: {e}")
-        raise HTTPException(status_code=500, detail=f"Export bundle error: {str(e)}")
+        logger.exception("Error exporting bundle")
+        raise HTTPException(status_code=500, detail="Export bundle unavailable") from e
 
 
 # ── Agent review endpoint (P2: Agent teamwork) ──────────────────
@@ -1503,7 +1507,7 @@ async def get_user_bets(
         df = read_dataframe(query, params=params)
 
         return {
-            "bets": df.to_dict(orient="records") if not df.empty else [],
+            "bets": json_records(df),
             "total": len(df),
         }
     except Exception as e:
@@ -1671,7 +1675,7 @@ async def backtest_summary(
             model_beats_line_pct = None
             total_bets = 0
 
-        recent_picks = picks_df.to_dict(orient="records") if not picks_df.empty else []
+        recent_picks = json_records(picks_df)
 
         return {
             "summary": {

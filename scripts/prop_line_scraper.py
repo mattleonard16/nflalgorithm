@@ -125,12 +125,22 @@ class NFLPropScraper:
         return status, age, created_at
 
     @staticmethod
+    def _week_kickoffs(schedule: pd.DataFrame) -> pd.Series:
+        """Parse the requested week's kickoffs, failing loud when any is unknown."""
+        if schedule.empty or "kickoff_utc" not in schedule:
+            raise RuntimeError("Requested-week schedule has no kickoff timestamps")
+        kickoffs = pd.to_datetime(schedule["kickoff_utc"], errors="coerce", utc=True)
+        if kickoffs.isna().any():
+            raise RuntimeError("Requested-week schedule contains missing kickoff timestamps")
+        return kickoffs
+
+    @staticmethod
     def _select_scheduled_events(
         events: List[Dict],
         schedule: pd.DataFrame,
         now: pd.Timestamp | None = None,
     ) -> List[Dict]:
-        """Return every API event whose kickoff belongs to the requested NFL week.
+        """Return every API event of the requested NFL week that has not kicked off.
 
         Coverage is only required for games that have not kicked off yet. The
         Odds API's events endpoint lists upcoming games, so a Thursday game is
@@ -142,22 +152,19 @@ class NFLPropScraper:
 
         ``now`` is injectable so tests can pin the clock.
         """
-        if schedule.empty or "kickoff_utc" not in schedule:
-            raise RuntimeError("Requested-week schedule has no kickoff timestamps")
-        kickoffs = pd.to_datetime(schedule["kickoff_utc"], errors="coerce", utc=True)
-        if kickoffs.isna().any():
-            raise RuntimeError("Requested-week schedule contains missing kickoff timestamps")
+        kickoffs = NFLPropScraper._week_kickoffs(schedule)
+        as_of = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now).tz_convert("UTC")
         # Compare timezone-aware timestamps directly. Pandas 3 may store a
         # Series at microsecond resolution while scalar ``Timestamp.value`` is
         # nanoseconds, which made equivalent kickoffs compare unequal.
-        scheduled_kickoffs = set(kickoffs.tolist())
+        # A game under way can still be listed, but its quotes are in-game lines.
+        upcoming_kickoffs = set(kickoffs[kickoffs > as_of].tolist())
         selected = []
         for event in events:
             kickoff = pd.to_datetime(event.get("commence_time"), errors="coerce", utc=True)
-            if pd.notna(kickoff) and kickoff in scheduled_kickoffs:
+            if pd.notna(kickoff) and kickoff in upcoming_kickoffs:
                 selected.append(event)
 
-        as_of = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now).tz_convert("UTC")
         upcoming = int((kickoffs > as_of).sum())
         started = len(schedule) - upcoming
         if len(selected) < upcoming:
@@ -342,12 +349,12 @@ class NFLPropScraper:
             if fallback_snapshot:
                 logger.warning(
                     "Failed to fetch NFL events (%s); using fallback snapshot",
-                    e,
+                    redact_api_key(str(e)),
                 )
                 events = fallback_snapshot.get("events", [])
                 source_statuses.add("FALLBACK-SNAPSHOT")
             else:
-                logger.error(f"Failed to fetch NFL events: {e}")
+                logger.error("Failed to fetch NFL events: %s", redact_api_key(str(e)))
                 return []
 
         snapshot["events"] = events
@@ -359,8 +366,12 @@ class NFLPropScraper:
             """,
             params=(season, week),
         )
-        self.last_weekly_audit["scheduled_events"] = len(schedule)
-        events = self._select_scheduled_events(events, schedule)
+        as_of = pd.Timestamp.now(tz="UTC")
+        # The validator divides by this count, so it holds only the games the scrape is required
+        # to cover. After Thursday night the whole week would read as a partial slate.
+        required_events = int((self._week_kickoffs(schedule) > as_of).sum())
+        self.last_weekly_audit["scheduled_events"] = required_events
+        events = self._select_scheduled_events(events, schedule, now=as_of)
         roster_ids = self._roster_player_ids(season)
         self.last_weekly_audit["team_unresolved"] = 0
 
@@ -539,7 +550,7 @@ class NFLPropScraper:
             "response_timestamps": response_timestamps,
             "snapshot_at": datetime.now(timezone.utc).isoformat(),
             "responses_observed": responses_observed,
-            "scheduled_events": len(schedule),
+            "scheduled_events": required_events,
             "covered_events": len({event_id for event_id, _market in covered_pairs}),
             "covered_event_markets": len(covered_pairs),
             "sportsbooks_per_event_market": {

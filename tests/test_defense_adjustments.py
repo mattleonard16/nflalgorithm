@@ -527,3 +527,38 @@ class TestDbEntryPoint:
         monkeypatch.setattr(da, "_load_schedule", lambda season: pd.DataFrame())
         assert da.compute_defense_vs_position_multipliers(2025, 4) == {}
 
+
+
+class TestRepeatCalls:
+    """The pipeline asks once per player and market, so results are reused between calls."""
+
+    def test_changed_stats_between_calls_are_picked_up(self, monkeypatch):
+        monkeypatch.setattr(da, "_load_schedule", lambda season: TestDbEntryPoint._schedule())
+        stats = [pd.DataFrame(TestDbEntryPoint._stats_rows())]
+        monkeypatch.setattr(da, "read_dataframe", lambda query: stats[0])
+        assert da.compute_defense_vs_position_multipliers(2025, 4)
+
+        stats[0] = pd.DataFrame(TestDbEntryPoint._stats_rows("XXX", "YYY"))
+
+        assert da.compute_defense_vs_position_multipliers(2025, 4) == {}
+
+    def test_changed_schedule_between_calls_is_picked_up(self, monkeypatch):
+        schedule = [TestDbEntryPoint._schedule()]
+        monkeypatch.setattr(da, "_load_schedule", lambda season: schedule[0])
+        monkeypatch.setattr(
+            da, "read_dataframe", lambda query: pd.DataFrame(TestDbEntryPoint._stats_rows())
+        )
+        assert da.compute_defense_vs_position_multipliers(2025, 4)
+
+        schedule[0] = schedule[0].assign(home_team="CCC", away_team="DDD")
+
+        assert da.compute_defense_vs_position_multipliers(2025, 4) == {}
+
+    def test_mutating_a_result_does_not_change_the_next_one(self, monkeypatch):
+        monkeypatch.setattr(da, "_load_schedule", lambda season: TestDbEntryPoint._schedule())
+        monkeypatch.setattr(
+            da, "read_dataframe", lambda query: pd.DataFrame(TestDbEntryPoint._stats_rows())
+        )
+        da.compute_defense_vs_position_multipliers(2025, 4).clear()
+
+        assert da.compute_defense_vs_position_multipliers(2025, 4)

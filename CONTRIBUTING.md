@@ -13,15 +13,22 @@ and `models/position_specific/weekly.py`. They hold the model and the pricing lo
 Everything else is public, including the API (`api/server.py`) and the player matching
 (`prop_integration.py`). Both were published on 2026-09-05.
 
-Working without the private files:
+Without the private files, a clone runs public baselines instead:
+`models/position_specific/baseline.py` for projections and `utils/value_ranking.py` for the card.
+The full workflow works, from `make week-predict` through `make nfl-backtest`. `make doctor`
+prints `WARN` for `private_modules`. That is expected, not a failure. See docs/TROUBLESHOOTING.md.
 
-- `make install`, `make migrate`, `make doctor`, `make test`
-- `make api`, `make fullstack`
-- `make ingest-nfl`, `make nfl-backtest`, `make frontend-build`
+To work on the model, change the baseline and measure it:
 
-`make week-predict` and the other live projection runs need the model, so they will not work on a
-clone. `make doctor` prints `WARN` for `private_modules`. That is expected, not a failure. See
-docs/TROUBLESHOOTING.md for the full table.
+```bash
+make ingest-nfl NFL_SEASONS=2024,2025 THROUGH_WEEK=22   # finished seasons, a few minutes
+make nfl-backtest SEASON=2025 OUTPUT=before.json  # before your change
+make nfl-backtest SEASON=2025 OUTPUT=after.json   # after it
+uv run python -m scripts.run_nfl_backtest compare before.json after.json
+```
+
+The baseline scores yardage MAE 28.78 on 2025. A change that lowers it without raising bias is
+worth a pull request.
 
 Because CI never sees the private files, logic that CI must verify belongs in a tracked module.
 `utils/clv.py` is the pattern: the math lives in a tracked file with tests, and the private

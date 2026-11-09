@@ -67,16 +67,17 @@ needs the private modules and real data.
 1. `make migrate && make doctor` — 47 tables, WAL on, no `[FAIL]` rows. `private_modules`
    must PASS here, unlike on a tracked-only clone.
 2. Confirm the private wiring listed in `docs/DEPLOYMENT_MANIFEST.md`, especially the
-   context-factors section (added 2026-09-02, unverified) — the cron turns that flag on.
+   rows for the ruled-out drop and the two default-off flags.
 3. `make ingest-nfl NFL_SEASONS=2024,2025 THROUGH_WEEK=22` then
    `make doctor-preseason SEASON=2026 WEEK=1`.
-4. Validate context factors before the cron uses them (CLAUDE.md item 31):
+4. Context factors are off in `week-auto` since 2026-10-02 (CLAUDE.md item 31). To re-test them
+   after a model change:
    ```bash
    make nfl-backtest SEASON=2025 CONTEXT_FACTORS=off OUTPUT=logs/metrics/bt-2025-off.json
    make nfl-backtest SEASON=2025 CONTEXT_FACTORS=on LABEL=ctx OUTPUT=logs/metrics/bt-2025-on.json
    uv run python -m scripts.run_nfl_backtest compare logs/metrics/bt-2025-off.json logs/metrics/bt-2025-on.json
    ```
-   No improvement means remove `NFL_FEATURE_CONTEXT_FACTORS=1` from `week-auto` before Wednesday.
+   Turn them back on in `scripts/week_auto.py` only if yardage MAE drops.
 5. `make week-refresh SEASON=2026 WEEK=1` and `make doctor-season SEASON=2026 WEEK=1`.
 6. After week 1 results land, pull the actuals and then grade:
    ```bash
@@ -105,10 +106,59 @@ needs the private modules and real data.
    `weekly_performance.clv_avg`. `--include-unfinished` restores the old behavior and exists only
    for backfilling a historical week whose schedule rows are incomplete.
 
-   `make mae-gate` without `BASELINE` uses absolute ceilings 2-3x below the measured baseline and
-   will block every position.
+   `make mae-gate` without `BASELINE` uses the absolute ceilings in
+   `scripts/evaluate_nfl_projections.py` (QB 64, RB 26, WR 29, TE 26), each about 10% above that
+   position's worst week in the 2025 walk-forward backtest.
 7. `make week-auto` is the Wednesday entrypoint from week 2 on; it grades the previous week and
    writes its research memo, degrading to a warning so a results hiccup never blocks new lines.
+
+   It ingests only the target season, through `week-predict`. Finished history seasons are
+   re-downloaded only when the stored history fails the usability check, so run
+   `make ingest-nfl` by hand when history needs a refresh. Before 2026-10-02 the job ran a full
+   `make ingest-nfl` first, and a dropped download of a 2024 file was enough to skip the week.
+
+   The Wednesday prediction step is `make week-train-predict`. After the new stats load, it
+   retrains the models on the window the walk-forward backtest scores: the two prior seasons,
+   playoffs included, plus this season's earlier weeks. Then it predicts. Saturday's refresh
+   reuses Wednesday's models. Before 2026-10-12 nothing retrained in season, and the 2026 week 5
+   card came from models trained on 2026-09-07 from ten 2025 weeks. Retraining cut yardage MAE
+   from 26.93 to 26.50 on 2025 (14 of 18 weeks better) and from 26.58 to 26.25 on 2026 weeks 1
+   to 4. The durable `make production-run` path does not retrain yet.
+
+   The schedule is `~/Library/LaunchAgents/com.nflalgorithm.week-auto.plist`: Wednesdays at 09:00,
+   in this checkout, on whatever branch is checked out at that moment, logging to
+   `logs/week_auto.log`. `make week-auto` runs `scripts/week_auto.py`, which writes
+   `logs/week_auto_status.json` on every run (week, `ok`, `failed_step`, `exit_code`, warnings)
+   and posts a macOS notification titled "NFL week-auto" when a step fails. A failed prediction
+   or lines step stops the run, so that week gets no internal lines and the previous week is not
+   graded; a failed grade or memo is recorded as a warning. Check the status file after each
+   Wednesday, since a notification can be missed or silenced in System Settings.
+
+   A second job, `com.nflalgorithm.week-refresh`, runs `make week-auto-refresh` on Saturdays at
+   09:00. It re-predicts the week with Friday's final injury report and republishes lines, skipping
+   teams whose game has started, and records its result in `logs/week_refresh_status.json`. Its
+   plist is tracked at `ops/launchd/com.nflalgorithm.week-refresh.plist`; install or reinstall it
+   with `make install-week-refresh`.
+
+   `week-auto` does not scrape sportsbook odds or build the value card. Only
+   `make production-run` does, and nothing schedules it. A week nobody runs it for has no
+   `weekly_odds` rows, and odds that were never captured cannot be graded later. That is why 2026
+   week 2 has no card.
+
+   The 2026 week 2 and week 3 runs both failed this way. The checkout was on a `main` from before
+   `context_factor_lookup` returned `{}` for markets it does not model, so `receptions` raised
+   `ValueError: Unsupported market` inside `week-predict`.
+   The fix reached `origin/main` on 2026-09-15, but this checkout stayed on the 2026-09-07 `main`
+   until the evening of 09-23, after the job had run. Pushing a fix does not update the code the
+   job runs. Week 3 was recovered on 2026-09-24 with a late run, after the Thursday game had
+   started.
+
+   A late run is safe. When some of the week's games have started, `week-predict` skips the teams
+   playing in them, keeps their stored pregame projections, and predicts the rest. The JSON it
+   prints names the skipped teams under `kicked_off_teams`. It refuses only once every game of
+   the week has started. The context refresh follows the same rule, so the teams still to play
+   get the newest injury report and depth chart, and the log line `Keeping the stored week N
+   context for M players whose game has started` counts the players it left alone.
 
 ## Migrations: re-run forward, no rollback
 

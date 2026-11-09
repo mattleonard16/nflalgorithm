@@ -1,7 +1,7 @@
 # NFL Algorithm Professional Pipeline Makefile - UV Enhanced
 # Supports both UV and traditional venv for seamless transition
 
-.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-refresh week-materialize week-grade week-lines week-research week-auto db-analyze nfl-backtest production-run health
+.PHONY: help list-targets install install-uv install-venv runtime-preflight runtime-production-preflight doctor doctor-production doctor-freshness doctor-season doctor-preseason migrate test lint format validate mae-gate optimize dashboard api-preflight api-serve api api-prod-serve api-prod pipeline-worker pipeline-worker-once frontend-install frontend-dev frontend-build fullstack clean report validate-report backfill-accuracy run-agents ingest-nfl ingest-nba nba-train nba-predict nba-odds nba-value nba-risk nba-agents nba-full nba-train-pts nba-train-reb nba-train-ast nba-train-fg3m nba-grade nba-injuries nba-learn nba-report nba-tune nfl-train nfl-tune demo nba-importance nba-drift nba-calibrate nba-backtest week week-update week-predict week-train-predict week-refresh week-materialize week-grade week-lines week-research week-auto week-auto-refresh install-week-refresh db-analyze nfl-backtest nfl-replay production-run health
 
 # Load a Make-compatible local environment file without adding a dotenv dependency.
 ENV_FILE ?= .env
@@ -84,6 +84,7 @@ help:
 	@echo "  make migrate             Back up and migrate the local SQLite database"
 	@echo "  make doctor              Validate tools, config, database, migrations, keys, and modules (private files WARN on a public clone)"
 	@echo "  make doctor-production   Require live-odds key, private execution modules, and api/server.py"
+	@echo "  make doctor-freshness    Fail when stats, projections, odds, card, grading, or runs fall behind"
 	@echo "  make doctor-season SEASON=2026 WEEK=1 [SEASON_PHASE=post-run]"
 	@echo "  make doctor-preseason SEASON=2026 WEEK=1"
 	@echo ""
@@ -261,6 +262,11 @@ doctor:
 doctor-production:
 	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --check-frontend --require-live-odds --require-private-modules --require-demo-mode-off
 
+# Fail when a pipeline table has fallen behind the NFL calendar (stats, projections,
+# odds, card, grading, runs). Skips in the offseason. Safe to run from cron.
+doctor-freshness:
+	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-freshness
+
 doctor-season:
 	$(call require_season_week)
 	$(DB_ENV) $(PYTHON) -m scripts.preflight --check-schema --require-live-odds --require-private-modules --require-demo-mode-off --season $(SEASON) --week $(WEEK) --season-phase $(SEASON_PHASE)
@@ -345,6 +351,11 @@ week-predict:
 	@echo "Running canonical roster-backed prediction refresh for season $(SEASON), week $(WEEK)..."
 	$(DB_ENV) $(PYTHON) -m scripts.prepare_nfl_week --season $(SEASON) --week $(WEEK)
 
+# Wednesday: retrain on the weeks the walk-forward backtest scores, then predict.
+week-train-predict:
+	$(call require_season_week)
+	$(DB_ENV) $(PYTHON) -m scripts.prepare_nfl_week --season $(SEASON) --week $(WEEK) --retrain
+
 week-refresh:
 	$(call require_season_week)
 	@echo "Refreshing roster, schedule, history, and predictions for $(SEASON) week $(WEEK)..."
@@ -378,26 +389,21 @@ week-research:
 	$(DB_ENV) $(PYTHON) -m scripts.weekly_research --season $(SEASON) --week $(WEEK)
 
 # The Wednesday cron entrypoint: resolve the upcoming week from the schedule,
-# refresh data and projections (with context factors on), publish internal
+# refresh data and projections (context factors off), publish internal
 # lines, then grade the completed week and write its research memo. Grading
 # and research degrade to a warning so a results hiccup never blocks the
 # new week's lines.
 week-auto:
-	@set -e; \
-	SW=$$($(DB_ENV) $(PYTHON) -c 'from utils.current_week import resolve_current_week; s, w = resolve_current_week(); print(s, w)'); \
-	SEASON=$${SW% *}; WEEK=$${SW#* }; \
-	echo "Resolved upcoming week: $$SEASON W$$WEEK"; \
-	$(MAKE) ingest-nfl; \
-	$(MAKE) db-analyze; \
-	NFL_FEATURE_CONTEXT_FACTORS=1 $(MAKE) week-predict SEASON=$$SEASON WEEK=$$WEEK; \
-	$(MAKE) week-lines SEASON=$$SEASON WEEK=$$WEEK; \
-	if [ "$$WEEK" -gt 1 ]; then \
-		PREV=$$((WEEK - 1)); \
-		$(MAKE) week-grade SEASON=$$SEASON WEEK=$$PREV || echo "WARN: grading $$SEASON W$$PREV failed; lines were still published"; \
-		$(MAKE) week-research SEASON=$$SEASON WEEK=$$PREV || echo "WARN: research memo for $$SEASON W$$PREV failed; lines were still published"; \
-	else \
-		echo "Week 1: no completed week to grade or research yet"; \
-	fi
+	$(DB_ENV) $(PYTHON) -m scripts.week_auto
+
+# Saturday: re-predict with Friday's final injury report and republish lines.
+week-auto-refresh:
+	$(DB_ENV) $(PYTHON) -m scripts.week_auto --refresh
+
+install-week-refresh:
+	sed 's#__REPO__#$(CURDIR)#g' ops/launchd/com.nflalgorithm.week-refresh.plist > $(HOME)/Library/LaunchAgents/com.nflalgorithm.week-refresh.plist
+	launchctl unload $(HOME)/Library/LaunchAgents/com.nflalgorithm.week-refresh.plist 2>/dev/null || true
+	launchctl load $(HOME)/Library/LaunchAgents/com.nflalgorithm.week-refresh.plist
 
 backfill-accuracy:
 	@echo "Running historical line accuracy backfill..."
@@ -412,7 +418,16 @@ backfill-accuracy:
 # Usage: make nfl-backtest SEASON=2025 [WEEKS="5 6 7"] [LABEL=baseline] [CONTEXT_FACTORS=on] [OUTPUT=logs/metrics/nfl-backtest-2025-ctx.json]
 nfl-backtest:
 	@test -n "$(SEASON)" || { echo "SEASON is required, e.g. make nfl-backtest SEASON=2025"; exit 1; }
-	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest run --season $(SEASON) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),)
+	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest run --season $(SEASON) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),) $(if $(strip $(ROWS_OUTPUT)),--rows-output $(ROWS_OUTPUT),)
+
+# Replay: like nfl-backtest, but predicts through the roster path with each week's injury report
+# and depth chart as of its first kickoff. It rewrites rosters and snapshots, so DATABASE must be a
+# scratch copy (sqlite3 nfl_data.db ".backup <scratch>"); it refuses nfl_data.db itself.
+# Usage: make nfl-replay SEASON=2025 DATABASE=/tmp/replay.db [WEEKS="5 6"] [LABEL=replay] [OUTPUT=...]
+nfl-replay:
+	@test -n "$(SEASON)" || { echo "SEASON is required, e.g. make nfl-replay SEASON=2025 DATABASE=/tmp/replay.db"; exit 1; }
+	@test -n "$(DATABASE)" || { echo "DATABASE is required: a scratch copy of nfl_data.db"; exit 1; }
+	$(DB_ENV) $(PYTHON) -m scripts.run_nfl_backtest replay --season $(SEASON) --database $(DATABASE) $(if $(strip $(WEEKS)),--weeks $(WEEKS),) $(if $(strip $(LABEL)),--label $(LABEL),) $(if $(strip $(CONTEXT_FACTORS)),--context-factors $(CONTEXT_FACTORS),) $(if $(strip $(OUTPUT)),--output $(OUTPUT),) $(if $(strip $(ROWS_OUTPUT)),--rows-output $(ROWS_OUTPUT),)
 
 run-agents:
 	$(call require_season_week)

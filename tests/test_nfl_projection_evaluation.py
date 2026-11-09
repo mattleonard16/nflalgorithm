@@ -298,7 +298,7 @@ def test_position_gate_blocks_position_above_threshold() -> None:
     gate = check_position_mae(report)
 
     assert gate["passed"] is False
-    assert "TE MAE 30.25 exceeds threshold 27.00 over 70 projections" in gate["blockers"]
+    assert "TE MAE 30.25 exceeds threshold 26.00 over 70 projections" in gate["blockers"]
 
 
 def test_position_gate_skips_thin_samples_without_passing_them() -> None:
@@ -418,3 +418,87 @@ def test_gate_with_backtest_ceilings_blocks_only_real_regressions() -> None:
     assert steady["passed"] is True
     assert slipped["passed"] is False
     assert slipped["blockers"] == ["WR MAE 29.00 exceeds threshold 26.62 over 200 projections"]
+
+
+def test_load_inputs_aligns_stat_ids_to_projection_ids_through_gsis(tmp_path, monkeypatch) -> None:
+    """Projections use roster-form ids and stats initial-form; gsis_id bridges them."""
+    import sqlite3
+
+    from config import config
+    from scripts.evaluate_nfl_projections import DATABASE_STAT_COLUMNS, _load_inputs
+
+    db_path = str(tmp_path / "eval.db")
+    monkeypatch.setenv("DB_BACKEND", "sqlite")
+    monkeypatch.setenv("SQLITE_DB_PATH", db_path)
+    monkeypatch.setattr(config.database, "backend", "sqlite")
+    monkeypatch.setattr(config.database, "path", db_path)
+
+    projections, _, games, runs = _inputs()
+    projections = projections.iloc[[0]].assign(season=2026, player_id="BUF_josh_allen")
+    stats = pd.DataFrame(
+        [
+            {
+                "season": 2026,
+                "week": 1,
+                "player_id": "BUF_j_allen",
+                "gsis_id": "00-0034857",
+                "position": "WR",
+                **{column: 0.0 for column in DATABASE_STAT_COLUMNS},
+            }
+        ]
+    )
+    roster = pd.DataFrame(
+        [{"season": 2026, "gsis_id": "00-0034857", "player_id": "BUF_josh_allen"}]
+    )
+    with sqlite3.connect(db_path) as conn:
+        projections.to_sql("weekly_projections", conn, index=False)
+        games.assign(season=2026).to_sql("games", conn, index=False)
+        runs.assign(season=2026).to_sql("pipeline_runs", conn, index=False)
+        stats.to_sql("player_stats_enhanced", conn, index=False)
+        roster.to_sql("nfl_roster_players", conn, index=False)
+
+    loaded_projections, loaded_actuals, _, _ = _load_inputs(2026, [1])
+
+    assert set(loaded_projections["player_id"]) <= set(loaded_actuals["player_id"])
+
+
+def test_load_inputs_keeps_stat_ids_that_projections_already_use(tmp_path, monkeypatch) -> None:
+    """2025 projections carry the stats' abbreviated id; the bridge must not re-key them away."""
+    import sqlite3
+
+    from config import config
+    from scripts.evaluate_nfl_projections import DATABASE_STAT_COLUMNS, _load_inputs
+
+    db_path = str(tmp_path / "eval.db")
+    monkeypatch.setenv("DB_BACKEND", "sqlite")
+    monkeypatch.setenv("SQLITE_DB_PATH", db_path)
+    monkeypatch.setattr(config.database, "backend", "sqlite")
+    monkeypatch.setattr(config.database, "path", db_path)
+
+    projections, _, games, runs = _inputs()
+    projections = projections.iloc[[0]].assign(season=2025, player_id="ARI_a_baccellia")
+    stats = pd.DataFrame(
+        [
+            {
+                "season": 2025,
+                "week": 1,
+                "player_id": "ARI_a_baccellia",
+                "gsis_id": "00-0036000",
+                "position": "WR",
+                **{column: 0.0 for column in DATABASE_STAT_COLUMNS},
+            }
+        ]
+    )
+    roster = pd.DataFrame(
+        [{"season": 2025, "gsis_id": "00-0036000", "player_id": "ARI_andre_baccellia"}]
+    )
+    with sqlite3.connect(db_path) as conn:
+        projections.to_sql("weekly_projections", conn, index=False)
+        games.assign(season=2025).to_sql("games", conn, index=False)
+        runs.assign(season=2025).to_sql("pipeline_runs", conn, index=False)
+        stats.to_sql("player_stats_enhanced", conn, index=False)
+        roster.to_sql("nfl_roster_players", conn, index=False)
+
+    loaded_projections, loaded_actuals, _, _ = _load_inputs(2025, [1])
+
+    assert set(loaded_projections["player_id"]) <= set(loaded_actuals["player_id"])

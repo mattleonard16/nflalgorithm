@@ -19,12 +19,16 @@ from agents.market_bias_agent import MarketBiasAgent
 from agents.model_diagnostics_agent import ModelDiagnosticsAgent
 from agents.odds_agent import OddsAgent
 from agents.risk_agent import RiskAgent
-from utils.db import execute, get_connection
+from utils.db import execute, get_backend, get_connection
 
 logger = logging.getLogger(__name__)
 
 # Minimum number of agents that must agree for consensus approval
 CONSENSUS_THRESHOLD = 3
+
+# Lower is more cautious. An agent that rejects one report on a prop and
+# approves another has not approved the prop.
+_CAUTION = {"REJECT": 0, "NEUTRAL": 1, "APPROVE": 2}
 
 
 def _group_reports(
@@ -38,6 +42,20 @@ def _group_reports(
         key = (report.player_id, report.market)
         groups[key].append(report)
     return dict(groups)
+
+
+def _one_vote_per_agent(reports: List[AgentReport]) -> List[AgentReport]:
+    """Keep each agent's most cautious report, so the threshold counts agents.
+
+    The risk agent reads the value card, which can price one bet at several
+    books and list both sides of a prop. Each row used to be its own vote.
+    """
+    kept: Dict[str, AgentReport] = {}
+    for r in reports:
+        current = kept.get(r.agent_name)
+        if current is None or _CAUTION[r.recommendation] < _CAUTION[current.recommendation]:
+            kept[r.agent_name] = r
+    return list(kept.values())
 
 
 def _resolve_consensus(
@@ -59,7 +77,7 @@ def _resolve_consensus(
     rationale_parts: List[str] = []
     agent_summaries: List[Dict[str, Any]] = []
 
-    for r in reports:
+    for r in _one_vote_per_agent(reports):
         votes[r.recommendation] = votes.get(r.recommendation, 0) + 1
         weighted_conf_sum += r.confidence
         total_conf += 1.0
@@ -107,9 +125,15 @@ def _persist_decisions(
     decisions: List[Dict[str, Any]],
     season: int,
     week: int,
+    *,
+    replace_week: bool = False,
 ) -> int:
-    """Write decisions to the agent_decisions table. Returns row count."""
-    if not decisions:
+    """Write decisions to the agent_decisions table. Returns row count.
+
+    With ``replace_week`` the week's earlier verdicts go first, in the same
+    transaction, so a bet that left the card does not keep a stale verdict.
+    """
+    if not decisions and not replace_week:
         return 0
 
     now = datetime.now(timezone.utc).isoformat()
@@ -129,20 +153,49 @@ def _persist_decisions(
             now,
         ))
 
+    # `INSERT OR REPLACE` is SQLite-only; MySQL rejected every write here.
+    # Same upsert on the same primary key, spelled per backend.
+    columns = """
+        season, week, player_id, market, decision, merged_confidence, votes,
+        rationale, coordinator_override, agent_reports, decided_at
+    """
+    if get_backend() == "mysql":
+        sql = f"""
+            INSERT INTO agent_decisions ({columns})
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                decision=VALUES(decision),
+                merged_confidence=VALUES(merged_confidence),
+                votes=VALUES(votes),
+                rationale=VALUES(rationale),
+                coordinator_override=VALUES(coordinator_override),
+                agent_reports=VALUES(agent_reports),
+                decided_at=VALUES(decided_at)
+        """
+    else:
+        sql = f"""
+            INSERT INTO agent_decisions ({columns})
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(season, week, player_id, market) DO UPDATE SET
+                decision=excluded.decision,
+                merged_confidence=excluded.merged_confidence,
+                votes=excluded.votes,
+                rationale=excluded.rationale,
+                coordinator_override=excluded.coordinator_override,
+                agent_reports=excluded.agent_reports,
+                decided_at=excluded.decided_at
+        """
+
     try:
         with get_connection() as conn:
-            for row in rows:
+            if replace_week:
                 execute(
-                    """
-                    INSERT OR REPLACE INTO agent_decisions
-                    (season, week, player_id, market, decision,
-                     merged_confidence, votes, rationale, coordinator_override,
-                     agent_reports, decided_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    row,
+                    "DELETE FROM agent_decisions WHERE season = ? AND week = ?",
+                    (season, week),
                     conn=conn,
                 )
+            for row in rows:
+                execute(sql, row, conn=conn)
             conn.commit()
         return len(rows)
     except Exception as exc:
@@ -154,6 +207,9 @@ def run_all_agents(
     season: int,
     week: int,
     player_id: Optional[str] = None,
+    *,
+    run_id: Optional[str] = None,
+    attempt: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Run all agents, merge reports, resolve conflicts, persist results.
 
@@ -163,6 +219,9 @@ def run_all_agents(
     week : int
     player_id : str, optional
         Limit analysis to a single player.
+    run_id, attempt : optional
+        A durable run's attempt. Agents then judge the card it staged
+        instead of the published one.
 
     Returns
     -------
@@ -175,7 +234,7 @@ def run_all_agents(
         OddsAgent(),
         ModelDiagnosticsAgent(),
         MarketBiasAgent(),
-        RiskAgent(),
+        RiskAgent(run_id=run_id, attempt=attempt),
     ]
 
     all_reports: List[AgentReport] = []
@@ -196,18 +255,18 @@ def run_all_agents(
 
     if not all_reports:
         logger.warning("No agent reports produced for s=%d w=%d", season, week)
-        return []
-
-    grouped = _group_reports(all_reports)
 
     decisions: List[Dict[str, Any]] = []
-    for (pid, market), reports in grouped.items():
+    for (pid, market), reports in _group_reports(all_reports).items():
         consensus = _resolve_consensus(reports)
         consensus["player_id"] = pid
         consensus["market"] = market
         decisions.append(consensus)
 
-    persisted = _persist_decisions(decisions, season, week)
+    # A single-player run must not wipe the rest of the week's verdicts.
+    persisted = _persist_decisions(
+        decisions, season, week, replace_week=player_id is None
+    )
     logger.info(
         "Coordinator: %d decisions (%d approved, %d rejected), %d persisted",
         len(decisions),

@@ -1,9 +1,9 @@
 """Opening/closing line derivation from append-only weekly_odds history.
 
-load_opening_lines picks MIN(as_of) and load_closing_lines picks MAX(as_of)
-per (season, week, player_id, market, sportsbook) key. Both compare as_of as
-SQLite TEXT — lexical, not chronological — which is correct only while all
-writers store consistently-formatted UTC timestamps (they do today).
+load_opening_lines picks the chronologically first snapshot and
+load_closing_lines the last one at or before kickoff, per
+(season, week, player_id, market, sportsbook) key. as_of is parsed, not
+compared as text.
 """
 
 import os
@@ -181,3 +181,57 @@ def test_load_closing_lines_empty_table_returns_empty_frame(tmp_path: Path) -> N
         result = load_closing_lines([2024])
 
     assert result.empty
+
+
+def _init_games_table(conn: sqlite3.Connection) -> None:
+    conn.execute("CREATE TABLE IF NOT EXISTS games (game_id TEXT, season INTEGER, kickoff_utc TEXT)")
+
+
+def test_load_closing_lines_ignores_post_kickoff_snapshot(tmp_path: Path) -> None:
+    db_path = tmp_path / "kickoff.db"
+    with sqlite3.connect(db_path) as conn:
+        _init_odds_table(conn)
+        _init_games_table(conn)
+        conn.execute("INSERT INTO games VALUES ('evt1', 2026, '2026-09-13T17:00:00Z')")
+        _insert_odds(
+            conn, season=2026, week=1, player_id="P", market="passing_yards",
+            sportsbook="Book", line=250.5, price=-110, as_of="2026-09-12T20:00:00Z",
+        )
+        _insert_odds(
+            conn, season=2026, week=1, player_id="P", market="passing_yards",
+            sportsbook="Book", line=262.5, price=-110, as_of="2026-09-13T05:06:00Z",
+        )
+        _insert_odds(
+            conn, season=2026, week=1, player_id="P", market="passing_yards",
+            sportsbook="Book", line=199.5, price=-110, as_of="2026-09-13T18:30:00Z",
+        )
+        conn.commit()
+
+    with use_database(db_path):
+        result = load_closing_lines([2026])
+
+    assert len(result) == 1
+    assert result.iloc[0]["line"] == 262.5
+    assert result.iloc[0]["as_of"] == "2026-09-13T05:06:00Z"
+
+
+def test_load_opening_lines_orders_by_parsed_timestamp(tmp_path: Path) -> None:
+    """09:00-05:00 is 14:00Z, later than 10:00Z though it sorts earlier as text."""
+    db_path = tmp_path / "offsets.db"
+    with sqlite3.connect(db_path) as conn:
+        _init_odds_table(conn)
+        _insert_odds(
+            conn, season=2024, week=1, player_id="P", market="passing_yards",
+            sportsbook="Book", line=250.5, price=-110, as_of="2024-09-01T10:00:00Z",
+        )
+        _insert_odds(
+            conn, season=2024, week=1, player_id="P", market="passing_yards",
+            sportsbook="Book", line=255.5, price=-110, as_of="2024-09-01T09:00:00-05:00",
+        )
+        conn.commit()
+
+    with use_database(db_path):
+        result = load_opening_lines([2024])
+
+    assert len(result) == 1
+    assert result.iloc[0]["open_line"] == 250.5

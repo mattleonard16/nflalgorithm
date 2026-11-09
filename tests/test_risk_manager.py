@@ -31,6 +31,7 @@ def _make_value_df(rows: list[dict]) -> pd.DataFrame:
         "event_id": "EVT1",
         "team": "KC",
         "market": "rushing_yards",
+        "side": "over",
         "sportsbook": "DraftKings",
         "line": 60.5,
         "price": -110,
@@ -225,6 +226,47 @@ class TestExposureCaps:
 # ── Portfolio-level stake normalization ───────────────────────────────
 
 class TestNormalizePortfolioStakes:
+
+    def test_a_bet_priced_at_five_books_counts_once_toward_the_cap(self):
+        # 2026 week 1: the cap summed every book's row, so best-line stakes
+        # were scaled down to 230.81 of a 1000 bankroll.
+        books = ["BookA", "BookB", "BookC", "BookD", "BookE"]
+        df = _make_value_df([
+            {"player_id": f"P{i}", "sportsbook": book, "stake": 100.0}
+            for i in range(4)
+            for book in books
+        ])
+
+        result = normalize_portfolio_stakes(df, bankroll=1000.0)
+
+        assert result["stake"].tolist() == df["stake"].tolist()
+
+    def test_best_line_stakes_over_the_bankroll_scale_to_it(self):
+        df = _make_value_df([
+            {"player_id": f"P{i}", "sportsbook": book, "stake": 200.0,
+             "edge_percentage": edge}
+            for i in range(8)
+            for book, edge in (("BookA", 0.12), ("BookB", 0.10))
+        ])
+
+        result = normalize_portfolio_stakes(df, bankroll=1000.0)
+
+        best = result[result["sportsbook"] == "BookA"]
+        assert best["stake"].sum() == pytest.approx(1000.0)
+
+    def test_scaling_keeps_each_bets_stakes_in_proportion_across_books(self):
+        df = _make_value_df([
+            {"player_id": f"P{i}", "sportsbook": book, "stake": stake,
+             "edge_percentage": edge}
+            for i in range(10)
+            for book, stake, edge in (("BookA", 150.0, 0.12), ("BookB", 120.0, 0.09))
+        ])
+
+        result = normalize_portfolio_stakes(df, bankroll=1000.0)
+
+        ratio = result["stake"] / df["stake"]
+        assert np.allclose(ratio, ratio.iloc[0])
+        assert ratio.iloc[0] == pytest.approx(1000.0 / 1500.0)
 
     def test_scales_proportionally_when_capped_bets_exceed_bankroll(self):
         """Per-bet capped stakes (10% each) can still sum past the bankroll."""
@@ -565,17 +607,25 @@ class TestRunRiskCheck:
              "event_id": "G1", "stake": 30.0, "kelly_fraction": 0.03,
              "p_win": 0.55, "price": -110},
         ])
-        monkeypatch.setattr(rm, "read_dataframe", lambda q, params=None: df)
+        monkeypatch.setattr("pipeline_jobs.cards.read_dataframe", lambda q, params=None: df)
         result = rm.run_risk_check(2025, 8)
         assert "risk_adjusted_kelly" in result.columns
         assert "correlation_group" in result.columns
         assert len(result) == 2
 
+    def test_a_bet_priced_at_several_books_is_assessed_once(self, monkeypatch):
+        import risk_manager as rm
+
+        df = _make_value_df([{"sportsbook": b} for b in ("DraftKings", "FanDuel", "Bovada")])
+        monkeypatch.setattr("pipeline_jobs.cards.read_dataframe", lambda q, params=None: df)
+
+        assert len(rm.run_risk_check(2025, 8)) == 1
+
     def test_empty_view_returns_empty(self, monkeypatch):
         import risk_manager as rm
 
         monkeypatch.setattr(
-            rm, "read_dataframe", lambda q, params=None: pd.DataFrame()
+            "pipeline_jobs.cards.read_dataframe", lambda q, params=None: pd.DataFrame()
         )
         assert rm.run_risk_check(2025, 8).empty
 
@@ -585,7 +635,7 @@ class TestRunRiskCheck:
         def boom(q, params=None):
             raise RuntimeError("db unavailable")
 
-        monkeypatch.setattr(rm, "read_dataframe", boom)
+        monkeypatch.setattr("pipeline_jobs.cards.read_dataframe", boom)
         assert rm.run_risk_check(2025, 8).empty
 
     def test_main_parses_args_and_dispatches(self, monkeypatch):

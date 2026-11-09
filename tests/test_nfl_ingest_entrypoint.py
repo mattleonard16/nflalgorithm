@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import polars as pl
 import pytest
+import requests
 
 from scripts import ingest_real_nfl_data
 from scripts.production_runner import stage_prepare_week
@@ -31,6 +32,7 @@ def _stub_optional_pregame_context(monkeypatch):
         "refresh_player_context_snapshots",
         lambda rosters, depth_charts, injuries, through_week: 0,
     )
+    monkeypatch.setattr("time.sleep", lambda seconds: None)
 
 
 def test_cli_defaults_include_current_season(monkeypatch) -> None:
@@ -603,6 +605,7 @@ def test_player_context_snapshot_combines_role_availability_and_priors() -> None
         {
             "season": [2026],
             "week": [1],
+            "team": ["BUF"],
             "gsis_id": ["veteran"],
             "report_status": ["Questionable"],
             "practice_status": ["Limited Participation in Practice"],
@@ -689,6 +692,130 @@ def test_player_context_excludes_depth_rows_after_target_week_cutoff() -> None:
     )
 
     assert snapshot.iloc[0]["depth_rank"] == 1
+
+
+def _week_three_status(injuries: pd.DataFrame) -> str | None:
+    return _week_three_snapshot(injuries)["injury_status"]
+
+
+def _week_three_snapshot(injuries: pd.DataFrame) -> pd.Series:
+    rosters = pd.DataFrame(
+        {
+            "season": [2026],
+            "week": [3],
+            "gsis_id": ["receiver"],
+            "full_name": ["Recovered Receiver"],
+            "team": ["MIN"],
+            "position": ["WR"],
+            "status": ["ACT"],
+        }
+    )
+    snapshot = ingest_real_nfl_data.build_player_context_snapshots(
+        rosters,
+        pd.DataFrame(),
+        injuries,
+        pd.DataFrame(),
+        target_week=3,
+        captured_at="2026-09-24T00:00:00Z",
+    )
+    return snapshot.iloc[0]
+
+
+def test_player_context_clears_last_weeks_status_once_the_team_files_this_weeks_report() -> None:
+    """A player left off his team's report for the week has been cleared to play."""
+    injuries = pd.DataFrame(
+        {
+            "season": [2026, 2026],
+            "week": [2, 3],
+            "team": ["MIN", "MIN"],
+            "gsis_id": ["receiver", "teammate"],
+            "report_status": ["Out", None],
+            "practice_status": ["Did Not Participate In Practice", "Limited Participation"],
+        }
+    )
+
+    assert _week_three_status(injuries) is None
+
+
+def test_player_context_keeps_last_weeks_status_until_the_team_files() -> None:
+    injuries = pd.DataFrame(
+        {
+            "season": [2026, 2026],
+            "week": [2, 3],
+            "team": ["MIN", "BUF"],
+            "gsis_id": ["receiver", "other_club_player"],
+            "report_status": ["Out", None],
+            "practice_status": ["Did Not Participate In Practice", "Limited Participation"],
+        }
+    )
+
+    assert _week_three_status(injuries) == "Out"
+
+
+def test_player_context_records_the_week_of_the_report_its_status_came_from() -> None:
+    filed = pd.DataFrame(
+        {
+            "season": [2026],
+            "week": [3],
+            "team": ["MIN"],
+            "gsis_id": ["receiver"],
+            "report_status": ["Out"],
+            "practice_status": ["Did Not Participate In Practice"],
+        }
+    )
+    carried = filed.assign(week=[2])
+
+    assert _week_three_snapshot(filed)["injury_report_week"] == 3
+    assert _week_three_snapshot(carried)["injury_report_week"] == 2
+
+
+def test_player_context_has_no_report_week_for_a_player_off_every_report() -> None:
+    injuries = pd.DataFrame(
+        {
+            "season": [2026],
+            "week": [3],
+            "team": ["MIN"],
+            "gsis_id": ["teammate"],
+            "report_status": ["Out"],
+            "practice_status": [None],
+        }
+    )
+
+    assert pd.isna(_week_three_snapshot(injuries)["injury_report_week"])
+
+
+def test_migration_adds_the_injury_report_week_without_losing_snapshots(
+    tmp_path, monkeypatch
+) -> None:
+    import sqlite3
+
+    import config as cfg
+    from schema_migrations import MigrationManager
+
+    db_path = str(tmp_path / "report-week.db")
+    monkeypatch.setenv("DB_BACKEND", "sqlite")
+    monkeypatch.setenv("SQLITE_DB_PATH", db_path)
+    monkeypatch.setattr(cfg.config.database, "path", db_path)
+    monkeypatch.setattr(cfg.config.database, "backend", "sqlite")
+    MigrationManager(db_path).run()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("ALTER TABLE nfl_player_context_snapshots DROP COLUMN injury_report_week")
+        conn.execute(
+            "INSERT INTO nfl_player_context_snapshots (season, week, gsis_id, player_id, team, "
+            "position, prior_source, captured_at) VALUES "
+            "(2026, 3, 'g1', 'MIN_receiver', 'MIN', 'WR', 'history', '2026-09-24')"
+        )
+
+    MigrationManager(db_path).run()
+    MigrationManager(db_path).run()
+
+    with sqlite3.connect(db_path) as conn:
+        columns = [
+            row[1] for row in conn.execute("PRAGMA table_info(nfl_player_context_snapshots)")
+        ]
+        rows = conn.execute("SELECT COUNT(*) FROM nfl_player_context_snapshots").fetchone()[0]
+    assert "injury_report_week" in columns
+    assert rows == 1
 
 
 def test_player_context_snapshots_preserve_week_history(tmp_path, monkeypatch) -> None:
@@ -865,3 +992,90 @@ def test_production_stage_reports_unexpected_ingestion_failure(monkeypatch) -> N
         "stage": "prepare_week",
         "error": "nflverse timed out",
     }
+
+
+def _wrapped_download_error(cause: Exception) -> ConnectionError:
+    """nflreadpy re-raises every requests failure as the builtin ConnectionError."""
+    try:
+        raise cause
+    except Exception as exc:
+        try:
+            raise ConnectionError(f"Failed to download feed: {exc}") from exc
+        except ConnectionError as wrapped:
+            return wrapped
+
+
+def _http_error(status: int) -> requests.HTTPError:
+    response = requests.Response()
+    response.status_code = status
+    return requests.HTTPError(f"{status} error", response=response)
+
+
+def _flaky_loader(failures: list[Exception]):
+    calls: list[list[int]] = []
+
+    def loader(seasons: list[int]) -> _PandasResult:
+        calls.append(seasons)
+        if failures:
+            raise failures.pop(0)
+        return _PandasResult(pd.DataFrame({"season": seasons, "week": [1]}))
+
+    return loader, calls
+
+
+def test_a_dropped_connection_is_retried_before_the_ingest_fails() -> None:
+    # 2026-09-30: a connection reset on a history-season file killed the Wednesday job.
+    reset = _wrapped_download_error(requests.exceptions.ConnectionError("Connection reset by peer"))
+    loader, calls = _flaky_loader([reset])
+
+    frame = ingest_real_nfl_data._load_nflverse_by_season(loader, [2024], "injuries")
+
+    assert len(calls) == 2
+    assert frame["season"].tolist() == [2024]
+
+
+def test_a_server_error_is_retried() -> None:
+    loader, calls = _flaky_loader([_wrapped_download_error(_http_error(503))])
+
+    ingest_real_nfl_data._load_nflverse_by_season(loader, [2024], "injuries")
+
+    assert len(calls) == 2
+
+
+def test_a_download_that_keeps_timing_out_raises_after_three_attempts() -> None:
+    timeouts = [
+        _wrapped_download_error(requests.exceptions.ReadTimeout("timed out")) for _ in range(5)
+    ]
+    loader, calls = _flaky_loader(timeouts)
+
+    with pytest.raises(ConnectionError, match="Failed to download"):
+        ingest_real_nfl_data._load_nflverse_by_season(loader, [2024], "injuries")
+
+    assert len(calls) == 3
+
+
+def test_a_missing_history_feed_is_not_retried() -> None:
+    loader, calls = _flaky_loader([_wrapped_download_error(_http_error(404))])
+
+    with pytest.raises(ConnectionError):
+        ingest_real_nfl_data._load_nflverse_by_season(loader, [2024], "injuries")
+
+    assert len(calls) == 1
+
+
+def test_a_forbidden_download_is_not_retried() -> None:
+    loader, calls = _flaky_loader([_wrapped_download_error(_http_error(403))])
+
+    with pytest.raises(ConnectionError):
+        ingest_real_nfl_data._load_nflverse_by_season(loader, [2024], "injuries")
+
+    assert len(calls) == 1
+
+
+def test_a_parse_error_is_not_retried() -> None:
+    loader, calls = _flaky_loader([ValueError("Failed to parse data")])
+
+    with pytest.raises(ValueError, match="Failed to parse"):
+        ingest_real_nfl_data._load_nflverse_by_season(loader, [2024], "injuries")
+
+    assert len(calls) == 1

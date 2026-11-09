@@ -15,6 +15,7 @@ import pandas as pd
 
 from config import config
 from utils.db import read_dataframe
+from utils.grading import align_actuals_to_bets
 from utils.nfl_markets import (
     DATABASE_STAT_COLUMNS,
     error_summary,
@@ -30,16 +31,17 @@ SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 # These are yardage-dominated markets, so the ceilings sit far above
 # config.model.target_mae; a position without an entry falls back to it.
 #
-# Calibrated from the 2025 walk-forward backtest (5,117 predictions,
-# reports/nfl_backtest_2025_baseline.json): each ceiling is ~10% above that
-# position's WORST single-week MAE (QB 59.5, RB 24.0, WR 26.0, TE 24.6), so
-# a normal bad week passes and a genuinely broken model trips the gate.
+# Calibrated from the 2025 walk-forward backtest with context factors off
+# (5,121 yardage predictions, reports/nfl_backtest_2025_current_off_rows.csv,
+# 2026-10-02): each ceiling is ~10% above that position's WORST single-week
+# MAE (QB 58.2, RB 23.4, WR 26.2, TE 23.9), rounded to a whole number, so a
+# normal bad week passes and a genuinely broken model trips the gate.
 # Re-derive from the latest walk-forward rows CSV before tightening.
 POSITION_MAE_THRESHOLDS = {
-    "QB": 65.0,
+    "QB": 64.0,
     "RB": 26.0,
     "WR": 29.0,
-    "TE": 27.0,
+    "TE": 26.0,
 }
 
 # Below this many eligible projections a position MAE is noise. Such positions
@@ -536,10 +538,28 @@ def _load_inputs(season: int, weeks: Iterable[int]) -> tuple[pd.DataFrame, ...]:
     )
     actual_columns = ", ".join(DATABASE_STAT_COLUMNS)
     actuals = read_dataframe(
-        f"SELECT season, week, player_id, position, {actual_columns} "
+        f"SELECT season, week, player_id, gsis_id, position, {actual_columns} "
         f"FROM player_stats_enhanced WHERE {where}",
         params=params,
     )
+    # 2026 projections carry the roster spelling of player_id and stats the
+    # abbreviated one (0 of 5,706 rows match), so stats are also re-keyed through
+    # gsis_id as grading does. 2025 projections use the abbreviated form (547 of 568
+    # match stats directly), so the original key is kept beside the re-keyed one.
+    roster = read_dataframe(
+        "SELECT gsis_id, player_id FROM nfl_roster_players WHERE season = ?",
+        params=(season,),
+    )
+    if roster.empty:
+        print(
+            f"WARNING: no roster rows for {season}; cannot align stat ids to projection ids, "
+            "so rows only match where the two already agree"
+        )
+    else:
+        actuals = pd.concat(
+            [actuals, align_actuals_to_bets(actuals, roster)], ignore_index=True
+        ).drop_duplicates(["season", "week", "player_id"])
+    actuals = actuals.drop(columns="gsis_id")
     games = read_dataframe(
         f"SELECT season, week, home_team, away_team, kickoff_utc FROM games WHERE {where}",
         params=params,

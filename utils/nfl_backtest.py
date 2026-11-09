@@ -264,6 +264,9 @@ def compare_walk_forward(
         blockers.append("season differs between baseline and candidate")
     if baseline.get("weeks_evaluated") != candidate.get("weeks_evaluated"):
         blockers.append("evaluated weeks differ between baseline and candidate")
+    # A replay predicts through the roster path, a walk-forward from history alone.
+    if baseline.get("mode", "walk_forward") != candidate.get("mode", "walk_forward"):
+        blockers.append("mode differs between baseline and candidate")
 
     def _delta(before: Mapping[str, Any], after: Mapping[str, Any]) -> dict[str, Any]:
         result: dict[str, Any] = {

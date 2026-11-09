@@ -94,7 +94,7 @@ yards, receptions count, and anytime touchdown expected scores (`anytime_td`).
 - Pass attempt volume incorporates game script using the canonical leading-reduces-volume convention:
   \(\text{script\_factor} = 1.0 - (\text{game\_script} \times 0.04)\), clamped to \([0.75, 1.25]\).
 - Starter probability gating (\(p_{\text{start}}\)) is computed from depth chart rank and injury
-  status (starter = 1.0; questionable = 0.70; doubtful = 0.25; out = 0.0; backup = 0.02). Non-starter
+  status (starter = 1.0; questionable = 0.75; doubtful = 0.25; out = 0.0; backup = 0.02). Non-starter
   expected attempts scale by \(p_{\text{start}}\), preventing backup QBs from inheriting starter volume.
 
 **Empirical Role Priors:**
@@ -119,8 +119,8 @@ yards, receptions count, and anytime touchdown expected scores (`anytime_td`).
 is too thin. An uncertainty multiplier scales it further at predict time.
 
 **Evaluation:** `scripts/evaluate_nfl_projections.py` reports MAE/RMSE overall and by market, model
-version, and position. `make mae-gate` enforces absolute per-position ceilings (QB 65.0, RB 26.0,
-WR 29.0, TE 27.0) and exits non-zero on breach. Each ceiling is ~10% above that position's worst
+version, and position. `make mae-gate` enforces absolute per-position ceilings (QB 64.0, RB 26.0,
+WR 29.0, TE 26.0) and exits non-zero on breach. Each ceiling is ~10% above that position's worst
 single-week MAE in the 2025 walk-forward baseline, so a normal bad week passes and a broken model
 trips the gate. Positions with fewer than 30 projections are reported as skipped rather than
 passed. `config.model.target_mae = 3.0` is the aspirational target, not the gate threshold.

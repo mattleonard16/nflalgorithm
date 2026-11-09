@@ -619,6 +619,72 @@ class TestTrainAndPredict:
         assert frame.iloc[0]["uncertainty_multiplier"] == pytest.approx(1.5)
         assert frame.iloc[0]["is_rookie"] == 1
 
+    def test_player_ruled_out_on_this_weeks_report_gets_no_row(self, tmp_db):
+        players = [
+            ("out_now", "BUF_out_now", "Out Now", 3),
+            ("out_last_week", "BUF_out_last_week", "Out Last Week", 2),
+        ]
+        with sqlite3.connect(tmp_db) as conn:
+            conn.execute("""
+                INSERT INTO games
+                    (game_id, season, week, home_team, away_team, game_date)
+                VALUES ('2026_03_MIA_BUF', 2026, 3, 'BUF', 'MIA', '2026-09-24')
+                """)
+            for gsis_id, player_id, name, report_week in players:
+                conn.execute(
+                    """
+                    INSERT INTO nfl_roster_players
+                        (season, gsis_id, player_id, player_name, team, position,
+                         roster_status, updated_at)
+                    VALUES (2026, ?, ?, ?, 'BUF', 'WR', 'ACT', 'now')
+                    """,
+                    (gsis_id, player_id, name),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO nfl_player_context_snapshots
+                        (season, week, gsis_id, player_id, team, position, injury_status,
+                         injury_report_week, expected_targets, prior_source, captured_at)
+                    VALUES (2026, 3, ?, ?, 'BUF', 'WR', 'Out', ?, 5, 'roster', 'now')
+                    """,
+                    (gsis_id, player_id, report_week),
+                )
+
+        frame = _build_roster_week_data(2026, 3)
+
+        assert frame["player_id"].tolist() == ["BUF_out_last_week"]
+
+    def test_a_backup_qb_gets_no_row(self, tmp_db):
+        with sqlite3.connect(tmp_db) as conn:
+            conn.execute("""
+                INSERT INTO games
+                    (game_id, season, week, home_team, away_team, game_date)
+                VALUES ('2026_03_MIA_BUF', 2026, 3, 'BUF', 'MIA', '2026-09-24')
+                """)
+            for gsis_id, depth, starter in (("qb1", 1, 1), ("qb2", 2, 0)):
+                conn.execute(
+                    """
+                    INSERT INTO nfl_roster_players
+                        (season, gsis_id, player_id, player_name, team, position,
+                         roster_status, updated_at)
+                    VALUES (2026, ?, ?, ?, 'BUF', 'QB', 'ACT', 'now')
+                    """,
+                    (gsis_id, f"BUF_{gsis_id}", gsis_id),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO nfl_player_context_snapshots
+                        (season, week, gsis_id, player_id, team, position, depth_rank,
+                         is_starter, expected_passing_attempts, prior_source, captured_at)
+                    VALUES (2026, 3, ?, ?, 'BUF', 'QB', ?, ?, 30, 'roster', 'now')
+                    """,
+                    (gsis_id, f"BUF_{gsis_id}", depth, starter),
+                )
+
+        frame = _build_roster_week_data(2026, 3)
+
+        assert frame["player_id"].tolist() == ["BUF_qb1"]
+
     def test_no_history_role_prior_generates_prediction_with_wider_uncertainty(self, monkeypatch):
         frame = pd.DataFrame(
             {
@@ -655,7 +721,7 @@ class TestTrainAndPredict:
             weekly_module, "compute_player_sigma", lambda history, market, **kwargs: 10.0
         )
         monkeypatch.setattr(weekly_module, "get_defense_multiplier", lambda **kwargs: 1.0)
-        monkeypatch.setattr(weekly_module, "_write_predictions", lambda *args: None)
+        monkeypatch.setattr(weekly_module, "_write_predictions", lambda *args, **kwargs: None)
 
         predictions = predict_week(2026, 1)
 
@@ -779,3 +845,77 @@ class TestTrainAndPredict:
         predictions = predict_week(2024, 1)
         assert isinstance(predictions, pd.DataFrame)
         assert predictions.empty
+
+
+class TestPartialWeekRefresh:
+    """A rerun after the week's first kickoff must leave the started games alone."""
+
+    def test_excluded_teams_get_no_predictions(self, monkeypatch):
+        frame = pd.DataFrame(
+            {
+                "player_id": ["BUF_receiver", "GB_receiver"],
+                "team": ["BUF", "GB"],
+                "opponent": ["LAC", "ATL"],
+                "position": ["WR", "WR"],
+                "season": [2026, 2026],
+                "week": [3, 3],
+                "expected_targets": [7.0, 7.0],
+                "expected_snap_percentage": [80.0, 80.0],
+            }
+        )
+
+        class FixedModel:
+            def predict(self, values):
+                return np.full(len(values), 60.0)
+
+        monkeypatch.setattr(weekly_module, "_load_week_data", lambda season, week: frame)
+        monkeypatch.setattr(
+            weekly_module, "_load_or_train_models", lambda: {"receiving_yards": FixedModel()}
+        )
+        monkeypatch.setattr(
+            weekly_module,
+            "_load_player_history_for_rolling",
+            lambda current, season, week: pd.DataFrame(),
+        )
+        monkeypatch.setattr(weekly_module, "get_defense_multiplier", lambda **kwargs: 1.0)
+        monkeypatch.setattr(weekly_module, "_write_predictions", lambda *args, **kwargs: None)
+
+        predictions = predict_week(2026, 3, exclude_teams=frozenset({"ATL", "GB"}))
+
+        assert predictions["player_id"].tolist() == ["BUF_receiver"]
+
+    def test_rewrite_keeps_stored_rows_for_excluded_teams(self, tmp_db):
+        stored = [
+            (2026, 3, "GB_receiver", "GB", "ATL", "receiving_yards", 71.0),
+            (2026, 3, "BUF_cut_receiver", "BUF", "LAC", "receiving_yards", 40.0),
+        ]
+        with sqlite3.connect(tmp_db) as conn:
+            conn.executemany(
+                "INSERT INTO weekly_projections (season, week, player_id, team, opponent, market,"
+                " mu, sigma, model_version, featureset_hash, generated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, 20.0, 'v', 'h', '2026-09-23T16:00:00+00:00')",
+                stored,
+            )
+        fresh = pd.DataFrame(
+            {
+                "player_id": ["BUF_receiver"],
+                "market": ["receiving_yards"],
+                "mu": [60.0],
+                "sigma": [20.0],
+                "model_version": ["v"],
+                "featureset_hash": ["h"],
+                "generated_at": ["2026-09-25T03:00:00+00:00"],
+            }
+        )
+        source = pd.DataFrame({"player_id": ["BUF_receiver"], "team": ["BUF"], "opponent": ["LAC"]})
+
+        weekly_module._write_predictions(
+            2026, 3, fresh, source, keep_teams=frozenset({"ATL", "GB"})
+        )
+
+        with sqlite3.connect(tmp_db) as conn:
+            rows = conn.execute(
+                "SELECT player_id, mu FROM weekly_projections WHERE season = 2026 AND week = 3"
+                " ORDER BY player_id"
+            ).fetchall()
+        assert rows == [("BUF_receiver", 60.0), ("GB_receiver", 71.0)]

@@ -1,7 +1,7 @@
 """Tests for nba_value_engine.py.
 
 Covers:
-- Math helper functions (implied_probability, american_to_decimal, prob_over,
+- Math helper functions (american_to_decimal, prob_over,
   kelly_fraction, expected_roi)
 - Sigma estimation logic
 - rank_nba_value integration tests
@@ -110,26 +110,6 @@ def _seed_odds(
 # ---------------------------------------------------------------------------
 # 1. Math helper tests
 # ---------------------------------------------------------------------------
-
-
-class TestImpliedProbability:
-    def test_negative_american_odds(self):
-        from nba_value_engine import implied_probability
-
-        result = implied_probability(-110)
-        assert abs(result - 0.5238) < 0.001
-
-    def test_positive_american_odds(self):
-        from nba_value_engine import implied_probability
-
-        result = implied_probability(150)
-        assert abs(result - 0.4) < 0.001
-
-    def test_pick_em_even_money(self):
-        from nba_value_engine import implied_probability
-
-        result = implied_probability(100)
-        assert abs(result - 0.5) < 0.001
 
 
 class TestAmericanToDecimal:

@@ -6,12 +6,13 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-import nflreadpy as nfl
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from config import config
-from pipeline_jobs.service import JobService
+from pipeline_jobs.service import QUEUED_STATUSES, JobService
+from utils.current_week import SeasonOverError, resolve_current_week
+from utils.db import fetchone
 
 config.logs_dir.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -24,6 +25,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_ACTIVE_STATUSES = (*QUEUED_STATUSES, "running")
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _has_active_job(season: int, week: int) -> bool:
+    """True when a queued, retry-scheduled or running job exists for the season/week."""
+    marks = ", ".join("?" for _ in _ACTIVE_STATUSES)
+    row = fetchone(
+        f"""
+        SELECT 1 FROM pipeline_jobs j
+        JOIN pipeline_runs r ON r.run_id = j.run_id
+        WHERE r.season = ? AND r.week = ? AND j.status IN ({marks})
+        LIMIT 1
+        """,
+        (season, week, *_ACTIVE_STATUSES),
+    )
+    return row is not None
+
 
 class PipelineScheduler:
     """Periodically run the same validated pregame path used by the CLI/API."""
@@ -33,9 +55,13 @@ class PipelineScheduler:
         self.setup_jobs()
 
     def setup_jobs(self) -> None:
+        minutes = config.pipeline.update_interval_minutes
+        if minutes <= 0:
+            # The run key divides time by the interval; zero or less has no window.
+            raise ValueError(f"NFL_PIPELINE_INTERVAL_MINUTES must be positive, got {minutes}")
         self.scheduler.add_job(
             func=self.run_pregame_pipeline,
-            trigger=IntervalTrigger(minutes=config.pipeline.update_interval_minutes),
+            trigger=IntervalTrigger(minutes=minutes),
             id="canonical_pregame_refresh",
             name="Canonical NFL Pregame Refresh",
             replace_existing=True,
@@ -44,10 +70,19 @@ class PipelineScheduler:
 
     def run_pregame_pipeline(self) -> dict[str, Any]:
         """Resolve the active NFL week and enqueue the fail-closed production path."""
-        season = int(nfl.get_current_season(roster=True))
-        week = int(nfl.get_current_week())
-        now = datetime.now(timezone.utc)
-        bucket = now.strftime("%Y%m%dT%H%M")
+        try:
+            season, week = resolve_current_week()
+        except SeasonOverError as exc:
+            # Only a fully played schedule is the offseason. A missing or
+            # unreadable schedule raises, so it cannot pass as a quiet skip.
+            logger.info("Skipping pregame run, no upcoming NFL week: %s", exc)
+            return {"success": True, "status": "skipped", "reason": "offseason"}
+        if _has_active_job(season, week):
+            logger.info("Skipping pregame run, a job is already active for %s week %s", season, week)
+            return {"success": True, "status": "skipped", "reason": "active_job"}
+        # One key per interval window, so repeated ticks in a window dedupe to one job.
+        window_seconds = config.pipeline.update_interval_minutes * 60
+        bucket = int(_utcnow().timestamp()) // window_seconds
         job = JobService().create_pipeline_job(
             season=season,
             week=week,

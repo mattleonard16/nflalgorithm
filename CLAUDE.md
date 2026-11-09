@@ -47,6 +47,15 @@ histories and never were gitignored. `api/server.py` and `prop_integration.py` w
 2026-09-05: neither held modeling edge, and hiding the API kept 182 tests out of CI. See
 `docs/plans/2026-09-05-003-open-the-public-contribution-boundary-plan.md`.
 
+**Public fallbacks (2026-10-03).** When `weekly.py` or `value_betting_engine.py` is absent, the
+tracked loaders run public baselines instead: `models/position_specific/baseline.py` (last-six-game
+EWMA, `model_version = public_baseline_ewma_v1`) through `weekly_implementation()`, and
+`utils/value_ranking.rank_weekly_value_baseline`. The private file always wins when present, and a
+broken import inside it still fails loud. Set `NFL_REQUIRE_PRIVATE_MODELS=1` on any deployment so a
+lost private file fails the run instead of publishing a baseline card (`render.yaml` sets it).
+`prepare_week` reports `model_versions`, so a baseline run is visible in every summary. 2025
+walk-forward, yardage only: baseline MAE 28.78, private 26.50.
+
 **Consequence for the gitignored set**: edits to those files live only on the local machine and in
 no commit — a fresh clone gets whatever the deployment supplies. When a change spans a gitignored
 module and a tracked one, only the tracked half reaches git. Say so explicitly instead of letting a
@@ -258,6 +267,8 @@ Key test files:
 - `tests/test_odds_quality.py` - screening unjoinable and circular snapshots out of grading
 - `tests/test_kelly_cap.py` - Kelly fraction capping
 - `tests/test_value_engine_side.py` - over/under side handling
+- `tests/test_best_line.py` - collapsing the per-book card to one row per bet
+- `tests/test_record_outcomes.py` - grading counts each bet once at its best line and skips SimBook
 - `tests/test_weekly_pipeline.py` - end-to-end ingest → train → predict → materialize. Seeds its
   own `games` rows: odds are keyed by game, so a club with no scheduled game gets no line and
   every later assertion would pass vacuously.
@@ -276,6 +287,19 @@ from tracked modules only.
   inside `_rebuild_mvv_pk_if_needed`; schema changes must land in both copies.
 - Most proprietary logic is gitignored, but not all — see the Proprietary Files section for the
   exact set and why it matters for CI.
+- `materialized_value_view` has one row per sportsbook for each (player, market, side). Anything
+  that counts, stakes, grades, or votes on bets goes through `utils/best_line.best_line_per_bet`
+  first, or a bet priced at five books counts five times. Grading, the API panels, the risk
+  agent, `make risk-check`, and the portfolio stake cap
+  (`risk_manager.normalize_portfolio_stakes`) already do. Before 2026-10-02 the cap summed every
+  book's row, which scaled the 2026 week 1 best-line stakes down to 230.81 of a 1000 bankroll.
+- Season ROI and win rate come from `utils/grading.settled_roi_pct` and `settled_win_rate_pct`:
+  profit over settled bets, pushes left out. Do not average weekly `roi_pct` values.
+- The Wednesday `make week-auto` job retrains the models before it predicts
+  (`make week-train-predict`, same window as the backtest). Saturday's refresh does not retrain.
+- The Wednesday `make week-auto` job runs from launchd in this checkout, on whatever branch is
+  checked out. A failed step posts a macOS notification and every run writes
+  `logs/week_auto_status.json`. See the `week-auto` step in docs/OPERATIONS.md.
 - Use `make fullstack` for complete local development environment
 - Front-end dashboard is in `/frontend` (Next.js + TypeScript)
 - Legacy Streamlit dashboard available via `make dashboard`
@@ -298,7 +322,9 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 6. [RESOLVED] Hardcoded fields — real `age` and `game_date` are ingested rather than defaulted.
 
 ### Tier 1 — HIGH IMPACT (MAE + ROI)
-7. Premium features dropped in `_CONTEXTUAL_COLS` (weekly.py:44).
+7. Premium features dropped from the model. The old pointer, `_CONTEXTUAL_COLS` at weekly.py:44, no
+   longer exists. The feature lists are now `_OUTCOME_CONTEXT_COLS`, `_ROLE_ACTIVITY_COLS`, and
+   `_GAME_CONTEXT_COLS`. Re-audit which features are missing before working this item.
 8. [RESOLVED] No vig removal — `implied_probability_no_vig` lives in tracked `utils/odds_math.py`
    and is what `utils/clv.py` uses for probability-space CLV, so CI tests it. The private
    `value_betting_engine.py` should import it from there (see docs/DEPLOYMENT_MANIFEST.md).
@@ -336,8 +362,12 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     no-oped, so production bundles and stored pregame evidence are untouched. The report includes
     `by_market_position` (the granularity `utils/nfl_sigma.py` buckets use) and `--rows-output`
     dumps the per-row scored frame for calibration analysis. A `compare` subcommand refuses to
-    compare runs with mismatched scope. 2025 full-season baseline (5,117 predictions, 18/18 weeks,
-    zero problems): overall MAE 26.88, bias +2.81. The item-25 mae-gate ceilings are now
+    compare runs with mismatched scope. The first 2025 full-season baseline (2026-08-28, yardage
+    markets only, 5,117 predictions, 18/18 weeks, zero problems) scored MAE 26.88, bias +2.81. The
+    current model on the same scope (2026-10-02, context factors off, 5,121 predictions) scores
+    MAE 26.50, bias +2.96, with passing_yards still at bias +13.22. The walk-forward predicts from
+    history, so it cannot see the roster-path QB starter gating in item 34. `make nfl-replay`
+    replays 2025 through the roster path for changes like that. The item-25 mae-gate ceilings are now
     calibrated from this run's per-week worst MAE (see item 25); re-derive them from the latest
     `--rows-output` CSV whenever the model or slate changes materially.
 11. [RESOLVED — by deletion] Universal model, no position split. Decision: the orphaned `RBModel` subclass was deleted rather than revived; `models/position_specific/weekly.py` is the single production model path. `BasePositionModel` is retained as the shared base. Revisit per-position splits as new work against weekly.py, not the old subclass.
@@ -354,21 +384,26 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
     `weekly.py`, priced (Poisson for anytime TD) in `value_betting_engine.py`, and graded in
     `utils/nfl_markets.py` / `scripts/record_outcomes.py`. Separately, `utils/context_factors.py`
     consumes `spread_line`/`total_line` as a game-script multiplier behind
-    `NFL_FEATURE_CONTEXT_FACTORS` (`config/runtime.py:144`, set by `week-auto`) — see item 31 for
-    its validation status. Still unused: FTN charting; pbp EPA.
+    `NFL_FEATURE_CONTEXT_FACTORS` (`config/runtime.py:151`, off in `week-auto`) — see item 31 for
+    its validation result. Still unused: FTN charting; pbp EPA.
 13. [RESOLVED] Kelly cap in ranking path — enforced at both levels. Per-bet: gitignored
     `value_betting_engine.py:273` caps at `config.betting.max_kelly` (0.10) behind
     `config.features.kelly_cap_enabled` (`NFL_FEATURE_KELLY_CAP`, default ON per
     `config/runtime.py`). Portfolio: tracked `materialized_value_view.py:140` scales the whole
     card to the bankroll via `risk_manager.normalize_portfolio_stakes`, so persisted stakes
     never sum past `config.betting.bankroll` even when per-bet caps individually pass.
-31. [RESOLVED] QB passing volume over-projection (diagnosed 2026-09 from the 2025 walk-forward rows CSV).
+34. [RESOLVED] QB passing volume over-projection (diagnosed 2026-09 from the 2025 walk-forward rows CSV).
     The headline +13.2 passing_yards bias has been eliminated via: (a) QB baseline attempts calibrated
     from 34.0 to 31.0 in `data_pipeline.py` based on clear-starter actuals; (b) script factor updated to
     the canonical convention where leading suppresses attempts (`1.0 - game_script * 0.04`); and (c) dual-factor
     starter gating in `models/position_specific/weekly.py`, where backup QBs (`depth_rank > 1`) have expected
-    attempts scaled by starter probability `p_start` (0.02 for healthy backups, 0.70 for questionable, etc.),
+    attempts scaled by starter probability `p_start` (0.02 for healthy backups, 0.75 for questionable, etc.),
     preventing non-starters from inheriting starter attempt baselines.
+    **Correction (2026-10-02):** the gating cut predicted attempts but not `mu`, because the history
+    `max()` in `_engineer_rolling_features` restores a backup's past starter volume. On the 2025
+    replay through the roster path, starters ran at +1.7 passing yards bias, but 114 backup-QB rows
+    ran at +61 and carried the whole +13 headline bias. Backup QBs (`utils/slate_eligibility.backup_qb`)
+    now get no projection; 2026 week 4 dropped 51 of them.
 
 ### Tier 2 — MEDIUM (correctness/ops)
 14. [RESOLVED] EWMA decay 0.65 / sigma calibration: the market-mu EWMA path in
@@ -392,6 +427,12 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 16. [RESOLVED] SQLite/MySQL parity — upserts in `schema_migrations.py` and
     `scripts/record_outcomes.py` carry both dialects; `tests/test_grading_upsert_parity.py` and the
     CI MySQL matrix (`tests/test_pipeline_database_matrix.py`) hold the line.
+    Agent verdicts (`agents/coordinator.py:_persist_decisions`) and agent performance
+    (`learning_loop.py`) carry both dialects too, and the same CI job runs their upsert tests.
+    The NBA side does not. 13 NBA writers still use SQLite-only `INSERT OR REPLACE` or
+    `INSERT OR IGNORE` (list them with `git grep -lE "INSERT OR (REPLACE|IGNORE)" -- '*nba*.py'
+    ':!tests/*'`), so NBA does not run on MySQL. Port one with a test on the `matrix_database`
+    fixture in `tests/conftest.py`, then add that test to the CI MySQL step.
 17. [RESOLVED] SQLite WAL — `utils/db.py` sets `journal_mode=WAL` and `synchronous=NORMAL`;
     `make doctor` fails on a non-WAL database (`tests/test_db_pragmas.py`). No pool by design: the
     worker is the single writer.
@@ -429,10 +470,10 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 25. [RESOLVED] CI gate on per-position MAE — `check_position_mae` in
     `scripts/evaluate_nfl_projections.py`, exposed as the `mae-gate` subcommand and `make mae-gate`.
     Two ways to set the ceilings, and both survive in the merged code.
-    **Absolute (default)**: QB 65.0, RB 26.0, WR 29.0, TE 27.0 — each ~10% above that position's
-    worst single-week MAE in the 2025 walk-forward baseline (QB 59.5, RB 24.0, WR 26.0, TE 24.6
-    from `reports/nfl_backtest_2025_baseline_rows.csv`), so a normal bad week passes and a broken
-    model trips the gate. The original guessed ceilings (QB 18/RB 12/WR 12/TE 9) predated any
+    **Absolute (default)**: QB 64.0, RB 26.0, WR 29.0, TE 26.0 — each ~10% above that position's
+    worst single-week MAE in the 2025 walk-forward with context factors off (QB 58.2, RB 23.4,
+    WR 26.2, TE 23.9 from `reports/nfl_backtest_2025_current_off_rows.csv`, re-derived
+    2026-10-02), so a normal bad week passes and a broken model trips the gate. The original guessed ceilings (QB 18/RB 12/WR 12/TE 9) predated any
     measurement and would have failed every position on real data; they are gone.
     **Regression mode (optional)**: `make mae-gate SEASON=2026 WEEK=1 BASELINE=<walk-forward
     report> [TOLERANCE_PCT=10]` derives each ceiling from that baseline's per-position MAE plus the
@@ -451,16 +492,24 @@ A 5-agent audit identified blockers and high-impact fixes for the 2026 season. U
 30. [RESOLVED] `materialized_value_view` ranking index — composite `(season, week, edge_percentage)` on `idx_materialized_value_view_lookup`, created on both the SQLite and MySQL branches of `_ensure_indexes`. It supersedes the former `(season, week)` index.
 
 ### Season-start checks (added 2026-09-02)
-31. **Context factors are unvalidated but switched on by the cron.** `utils/context_factors.py`
-    (game script, matchup history, usage trend; composite clipped to [0.85, 1.15]) was committed
-    with its flag defaulting OFF "until a walk-forward backtest validates it" — but `make week-auto`
-    sets `NFL_FEATURE_CONTEXT_FACTORS=1` unconditionally. No backtest has measured it. Run, on the
-    machine that has the private model:
-    `make nfl-backtest SEASON=2025 CONTEXT_FACTORS=off OUTPUT=logs/metrics/bt-2025-off.json` and
-    the same with `CONTEXT_FACTORS=on LABEL=ctx OUTPUT=logs/metrics/bt-2025-on.json`, then
-    `uv run python -m scripts.run_nfl_backtest compare logs/metrics/bt-2025-off.json
-    logs/metrics/bt-2025-on.json`. If MAE does not improve, drop the `NFL_FEATURE_CONTEXT_FACTORS=1`
-    from `week-auto`. The `--off` report is also the `BASELINE` for item 25's gate.
+31. [RESOLVED 2026-10-02, context factors stay off] `utils/context_factors.py` (game script,
+    matchup history, usage trend; composite clipped to [0.85, 1.15]) was switched on by
+    `week-auto` with no backtest behind it. The 2025 walk-forward, 18 weeks and 12,417 rows each
+    way, says it hurts. With it on, passing_yards MAE went 66.28 to 67.83, receiving_yards 21.02 to
+    21.25, and rushing_yards 21.67 to 21.94. Receptions and anytime touchdown did not move.
+    `scripts/week_auto.py` no longer sets the flag. Reports (local only; `reports/` is gitignored):
+    `reports/nfl_backtest_2025_current_off.json`, `reports/nfl_backtest_2025_current_on.json`, and
+    `reports/nfl_backtest_2025_context_factors_compare.json`. The off report is the `BASELINE` for
+    item 25's gate.
 32. **The private wiring for context factors is not in `docs/DEPLOYMENT_MANIFEST.md`'s verified
     set.** What the tracked code expects of `weekly.py` is recorded there now; verify it on the
     production checkout before week 1.
+33. [RESOLVED 2026-10-03] The risk and agent stages read last run's card. `POST_PREPARE_STAGES`
+    in `scripts/production_runner.py` ran `risk_assessment` and `agents` before `materialize`, so
+    both judged the published card from the previous run (on 2026 week 1 the agents voted on the
+    16:43 card at 17:12:46). They now run after `materialize` and read that attempt's rows in
+    `pipeline_card_staging` through `pipeline_jobs.cards.load_card`. The worker still publishes
+    only after every stage passes, so a risk or agent failure keeps the card off the dashboard.
+    A full agent run now replaces the week's `agent_decisions`, so a bet that left the card loses
+    its verdict; a `--player-id` run touches only that player. Still open: nothing writes the NFL
+    `risk_assessments` table, so the risk section of `api/explainability.py` is always empty.

@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from schema_migrations import MigrationManager
-from utils.db import read_dataframe
+from utils.db import execute, read_dataframe
 
 
 @pytest.fixture()
@@ -259,3 +259,28 @@ class TestNbaRiskPersistence:
 
         count = _persist_risk_assessments(pd.DataFrame(), "2026-02-11")
         assert count == 0
+
+
+class TestNbaRunRiskCheck:
+    def test_a_bet_priced_at_several_books_is_assessed_once(self, db):
+        # Each book's copy used to flag the others as a same-team stack and
+        # count as its own row in the risk summary.
+        from nba_risk_manager import run_risk_check
+
+        for book, edge in (("draftkings", 0.12), ("fanduel", 0.15)):
+            execute(
+                "INSERT INTO nba_materialized_value_view "
+                "(season, game_date, player_id, player_name, team, event_id, market, "
+                "sportsbook, line, over_price, under_price, mu, sigma, p_win, "
+                "edge_percentage, expected_roi, kelly_fraction, confidence, generated_at) "
+                "VALUES (2025, '2026-02-11', 1234, 'Test Player', 'LAL', 'evt1', 'pts', "
+                "?, 25.5, -110, 110, 28.0, 3.0, 0.65, ?, 0.10, 0.01, 0.85, "
+                "'2026-02-11T00:00:00')",
+                params=(book, edge),
+            )
+
+        assessed = run_risk_check("2026-02-11")
+
+        assert list(zip(assessed["sportsbook"], assessed["correlation_group"])) == [
+            ("fanduel", None)
+        ]

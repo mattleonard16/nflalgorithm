@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from config import config
-from utils.db import read_dataframe
+from utils.best_line import best_line_per_bet
 from utils.risk_utils import (
     append_warning as _append_warning,
     monte_carlo_drawdown,
@@ -188,7 +188,10 @@ def normalize_portfolio_stakes(
     bankroll: float,
     max_total_fraction: float = 1.0,
 ) -> pd.DataFrame:
-    """Scale stakes so total stake <= bankroll * max_total_fraction.
+    """Scale stakes so the best-line stakes total <= bankroll * max_total_fraction.
+
+    Each bet counts once, at the row ``utils.best_line.best_line_per_bet`` keeps,
+    and the scale factor applies to every book's row.
 
     Per-bet Kelly capping bounds each bet individually, but a large card can
     still sum past the bankroll. When it does, every ``stake`` (and the
@@ -221,7 +224,9 @@ def normalize_portfolio_stakes(
             f"portfolio cap; offending values: {stakes[invalid].tolist()}"
         )
 
-    total = float(stakes.sum())
+    # The card holds one row per sportsbook, but a bet is placed once, at its
+    # best line. Summing every book's row scaled week 1 to 230.81 of 1000.
+    total = float(best_line_per_bet(df.assign(stake=stakes))["stake"].sum())
     limit = bankroll * max_total_fraction
     if total <= 0 or total <= limit:
         return df.copy()
@@ -272,14 +277,22 @@ def assess_risk(df: pd.DataFrame, bankroll: Optional[float] = None) -> pd.DataFr
 
 # ── CLI entry point ───────────────────────────────────────────────────
 
-def run_risk_check(season: int, week: int) -> pd.DataFrame:
-    """Load materialized value view and print risk report."""
-    query = """
-    SELECT * FROM materialized_value_view
-    WHERE season = ? AND week = ?
+def run_risk_check(
+    season: int,
+    week: int,
+    *,
+    run_id: str | None = None,
+    attempt: int | None = None,
+) -> pd.DataFrame:
+    """Load the card and print risk report.
+
+    A durable run passes its run_id and attempt to assess the card it just
+    staged; without them this reads the published card.
     """
+    from pipeline_jobs.cards import load_card
+
     try:
-        df = read_dataframe(query, params=(season, week))
+        df = load_card(season, week, run_id=run_id, attempt=attempt)
     except Exception:
         print(f"No data for season={season} week={week}")
         return pd.DataFrame()
@@ -288,7 +301,8 @@ def run_risk_check(season: int, week: int) -> pd.DataFrame:
         print(f"No value bets for season={season} week={week}")
         return df
 
-    assessed = assess_risk(df)
+    # One row per bet, not per book: see agents/risk_agent.py.
+    assessed = assess_risk(best_line_per_bet(df))
     _print_risk_report(assessed)
     return assessed
 

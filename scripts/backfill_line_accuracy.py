@@ -18,7 +18,9 @@ import numpy as np
 import pandas as pd
 
 from config import config
+from utils.clv import resolve_closing_lines
 from utils.db import read_dataframe, write_dataframe
+from utils.live_odds import kickoffs_from_games
 from utils.nfl_markets import DATABASE_STAT_COLUMNS, melt_actuals
 
 logging.basicConfig(level=logging.INFO)
@@ -47,68 +49,93 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_closing_lines(seasons: List[int]) -> pd.DataFrame:
-    """Load the latest (closing) odds snapshot per player/market/sportsbook/week."""
+_LINE_KEY = ["season", "week", "player_id", "market", "sportsbook"]
+
+
+def _load_odds_snapshots(seasons: List[int]) -> pd.DataFrame:
     placeholders = ",".join("?" for _ in seasons)
     query = f"""
-    SELECT
-        o.season, o.week, o.player_id, o.market, o.sportsbook,
-        o.line, o.price, o.as_of
-    FROM weekly_odds o
-    INNER JOIN (
-        SELECT season, week, player_id, market, sportsbook,
-               MAX(as_of) AS max_as_of
-        FROM weekly_odds
-        WHERE season IN ({placeholders})
-        GROUP BY season, week, player_id, market, sportsbook
-    ) latest
-        ON o.season = latest.season
-        AND o.week = latest.week
-        AND o.player_id = latest.player_id
-        AND o.market = latest.market
-        AND o.sportsbook = latest.sportsbook
-        AND o.as_of = latest.max_as_of
-    WHERE o.season IN ({placeholders})
-    ORDER BY o.season, o.week, o.player_id
+    SELECT season, week, event_id, player_id, market, sportsbook,
+           line, price, as_of
+    FROM weekly_odds
+    WHERE season IN ({placeholders})
     """
-    params = tuple(seasons) + tuple(seasons)
+    return read_dataframe(query, params=tuple(seasons))
+
+
+def _load_kickoffs(seasons: List[int]) -> pd.DataFrame:
+    """Kickoff per game, or an empty frame when no schedule is available.
+
+    An empty frame makes ``resolve_closing_lines`` fall back to the latest
+    snapshot, which is the pre-kickoff-cut behavior; a missing schedule must
+    not drop the whole backfill.
+    """
+    placeholders = ",".join("?" for _ in seasons)
     try:
-        return read_dataframe(query, params=params)
+        games = read_dataframe(
+            f"SELECT game_id, kickoff_utc FROM games WHERE season IN ({placeholders})",
+            params=tuple(seasons),
+        )
+    except Exception as e:
+        logger.warning("No kickoff schedule, closing lines are not kickoff-cut: %s", e)
+        return pd.DataFrame(columns=["event_id", "kickoff_utc"])
+    return kickoffs_from_games(games)
+
+
+def load_closing_lines(seasons: List[int]) -> pd.DataFrame:
+    """Load the last pre-kickoff odds snapshot per player/market/sportsbook/week.
+
+    Delegates to ``resolve_closing_lines`` so the closing definition matches CLV:
+    a post-kickoff in-game quote is never the close.
+    """
+    try:
+        odds = _load_odds_snapshots(seasons)
+        if odds.empty:
+            return pd.DataFrame()
+        closing = resolve_closing_lines(odds, _load_kickoffs(seasons))
     except Exception as e:
         logger.error("Failed to load closing lines: %s", e)
         return pd.DataFrame()
+    if closing.empty:
+        return pd.DataFrame()
+
+    # SNAPSHOT_KEY is per event; this report keys by season/week, so attach them.
+    weeks = odds[["event_id", "season", "week"]].drop_duplicates("event_id")
+    closing = closing.merge(weeks, on="event_id", how="left")
+    closing["_ts"] = pd.to_datetime(closing["closed_at"], utc=True, format="mixed")
+    closing = closing.sort_values("_ts").drop_duplicates(_LINE_KEY, keep="last")
+    closing = closing.rename(
+        columns={"close_line": "line", "close_price": "price", "closed_at": "as_of"}
+    )
+    return (
+        closing[[*_LINE_KEY, "line", "price", "as_of"]]
+        .sort_values(["season", "week", "player_id"])
+        .reset_index(drop=True)
+    )
 
 
 def load_opening_lines(seasons: List[int]) -> pd.DataFrame:
-    """Load the earliest (opening) odds snapshot per player/market/sportsbook/week."""
-    placeholders = ",".join("?" for _ in seasons)
-    query = f"""
-    SELECT
-        o.season, o.week, o.player_id, o.market, o.sportsbook,
-        o.line AS open_line, o.as_of AS open_as_of
-    FROM weekly_odds o
-    INNER JOIN (
-        SELECT season, week, player_id, market, sportsbook,
-               MIN(as_of) AS min_as_of
-        FROM weekly_odds
-        WHERE season IN ({placeholders})
-        GROUP BY season, week, player_id, market, sportsbook
-    ) earliest
-        ON o.season = earliest.season
-        AND o.week = earliest.week
-        AND o.player_id = earliest.player_id
-        AND o.market = earliest.market
-        AND o.sportsbook = earliest.sportsbook
-        AND o.as_of = earliest.min_as_of
-    WHERE o.season IN ({placeholders})
-    ORDER BY o.season, o.week, o.player_id
+    """Load the earliest (opening) odds snapshot per player/market/sportsbook/week.
+
+    Ordered by parsed timestamp: as_of text is not chronological across
+    differing UTC offsets or fractional-second widths.
     """
-    params = tuple(seasons) + tuple(seasons)
     try:
-        return read_dataframe(query, params=params)
+        odds = _load_odds_snapshots(seasons)
+        if odds.empty:
+            return pd.DataFrame()
+        odds["_ts"] = pd.to_datetime(odds["as_of"], utc=True, format="mixed")
     except Exception as e:
         logger.error("Failed to load opening lines: %s", e)
         return pd.DataFrame()
+    earliest = odds.sort_values("_ts").drop_duplicates(_LINE_KEY, keep="first")
+    return (
+        earliest.rename(columns={"line": "open_line", "as_of": "open_as_of"})[
+            [*_LINE_KEY, "open_line", "open_as_of"]
+        ]
+        .sort_values(["season", "week", "player_id"])
+        .reset_index(drop=True)
+    )
 
 
 def load_actual_stats(seasons: List[int]) -> pd.DataFrame:

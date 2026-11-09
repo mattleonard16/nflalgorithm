@@ -29,7 +29,7 @@ def client(db):
     from fastapi.testclient import TestClient
 
     from api.pipeline_router import require_pipeline_operator, require_pipeline_reader
-    from api.server import app
+    from api.application import app
 
     app.dependency_overrides[require_pipeline_reader] = lambda: "test-reader"
     app.dependency_overrides[require_pipeline_operator] = lambda: "test-operator"
@@ -127,6 +127,21 @@ class TestExportBundle:
         data = json.loads(resp.text)
         assert data["pipeline_run"] is not None
         assert data["pipeline_run"]["run_id"] == "test-run-001"
+
+    def test_bundle_stakes_a_bet_at_two_books_once(self, client, db):
+        _seed_bets(db)
+        execute("""
+            INSERT INTO materialized_value_view
+                (season, week, player_id, event_id, team, market, sportsbook,
+                 line, price, mu, sigma, p_win, edge_percentage, expected_roi,
+                 kelly_fraction, stake, generated_at)
+            VALUES (2025, 22, 'P001', 'evt1', 'KC', 'passing_yards', 'fanduel',
+                    281.5, -110, 310.0, 30.0, 0.64, 0.11, 0.09, 0.02, 20.0, datetime('now'))
+            """)
+
+        data = json.loads(client.get("/api/export/bundle?season=2025&week=22").text)
+
+        assert data["total_stake"] == 20.0
 
     def test_bundle_empty_week(self, client, db):
         resp = client.get("/api/export/bundle?season=2024&week=1")

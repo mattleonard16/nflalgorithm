@@ -20,6 +20,15 @@ git verifies them and nothing here needs to.
 
 ---
 
+## A missing private module no longer crashes
+
+Since 2026-10-03 a clone without `weekly.py` or `value_betting_engine.py` runs the tracked public
+baselines (`models/position_specific/baseline.py`, `utils/value_ranking.py`) instead of failing.
+That suits contributors and is wrong for production. **Every deployment must set
+`NFL_REQUIRE_PRIVATE_MODELS=1`**, which turns a missing private file back into a failed run.
+`render.yaml` sets it. To check a run used the real model, read `model_versions` in the
+`prepare_week` summary: `public_baseline_ewma_v1` means the private model was not loaded.
+
 ## Why this matters
 
 Most fixes below are **split across the git boundary**. The tracked half is committed; the wiring
@@ -30,12 +39,15 @@ the private half is missing, so start there.
 | Fix | Tracked (in git) | Local-only (NOT in git) | Effect if the private half is missing |
 |---|---|---|---|
 | Kelly cap default | `config/runtime.py` default `True` | `config.py:193` `_flag("NFL_FEATURE_KELLY_CAP", True)` | `config.py` wins at runtime. An older copy defaults **False**, so per-bet Kelly capping is **off** and full-Kelly fractions (measured up to 0.743) size the bets. |
-| Portfolio stake cap | `risk_manager.normalize_portfolio_stakes`, called from `materialized_value_view.py:105` | — (fully tracked) | None. This one is safe. |
+| Portfolio stake cap | `risk_manager.normalize_portfolio_stakes`, called from `materialized_value_view.materialize_week`; counts each bet once at its best line | none (fully tracked) | None. This one is safe. |
 | Position-keyed sigma | `utils/nfl_sigma.py` | `weekly.py:977` passes `position=position` | Falls back to the `(market, None)` legacy floors. Dispersion silently reverts to the old miscalibrated values (WR/TE rushing ~2.5x too wide). |
 | Live-odds stale filter | `utils/live_odds.py` | `value_betting_engine.rank_weekly_value` | Ranking takes SQL `MAX(as_of)` and can price an in-game quote. |
 | Market-mean blend | `utils/market_blend.py`, `config/runtime.py` (`betting.market_blend_weight`) | `value_betting_engine.rank_weekly_value` | Prices off the raw model `mu`, so a projection far from the line reads as a large edge. Measured on the 2026 W1 slate: 118 flagged bets at 19.3% average edge instead of 68 at 14.1%. |
 | Kickoff-aware production CLV | `utils/clv.py`, `utils/live_odds.py` | `scripts/record_outcomes.py` `compute_and_save_clv` | Closing line is `MAX(as_of)`, including post-kickoff scrapes. |
 | Early-season 70/30 role prior | `utils/season_priors.py` | `weekly.py` `_engineer_rolling_features` and `get_nfl_feature_cols` | Week 1 expected_* stays last-6 EWM; last_season_*_pg features are missing so a restored private weekly.py ignores the new helper. |
+| Late-week refresh | `scripts/prepare_nfl_week.py` passes `exclude_teams` | `weekly.predict_week` and `_write_predictions` | Loud, not silent. Every `prepare_week` call fails with `TypeError: predict_week() got an unexpected keyword argument 'exclude_teams'`, so no week gets projections. |
+| Out players get no projection | `utils/slate_eligibility.ruled_out`; `injury_report_week` on `nfl_player_context_snapshots` | `weekly._build_roster_week_data` selects `injury_report_week` and drops rows where `ruled_out(row, week)` holds | A player ruled Out on this week's report keeps a projection, because the history `max()` restores the volume that ingest zeroed. His bets still price and publish. |
+| Backup QBs get no projection | `utils/slate_eligibility.backup_qb` | `weekly._build_roster_week_data` drops rows where `backup_qb(row)` holds, right after the ruled-out drop | Every depth-2 and depth-3 QB is projected like a starter. On the 2025 replay those rows ran +61 passing yards high, and a book line on one reads as a large fake edge on the over. |
 
 ## Required state of each private module
 
@@ -65,6 +77,15 @@ must print `True` with no env var set.
   If this write is missing, the column is all-NULL, `apply_volatility_widening` reports every row
   unscored, and sigma widening silently does nothing. That is safer than the old behavior it
   replaced, but the feature is inert.
+
+- **Skips teams whose game has started.** Added 2026-09-24, applied to this checkout.
+  `predict_week(season, week, *, roster_backed=False, exclude_teams=frozenset())` drops rows
+  whose `team` is in `exclude_teams` right after the frame is built, and passes the same set to
+  `_write_predictions(..., keep_teams=exclude_teams)`. That function's DELETE appends
+  `AND team NOT IN (...)` when the set is non-empty, so the stored pregame rows for those teams
+  survive the rerun. `prepare_week` computes the set from `games.kickoff_utc`. Covered by
+  `TestPartialWeekRefresh` in `tests/test_nfl_weekly_model.py`, which runs only where this file
+  exists.
 
 Verify: `command grep -n "position=position" models/position_specific/weekly.py` returns the sigma
 call site, and after a predict run:
@@ -150,8 +171,9 @@ Verify: `command grep -n "kickoffs_from_games" scripts/record_outcomes.py` retur
 ### Context factors (`NFL_FEATURE_CONTEXT_FACTORS`) — added 2026-09-02, NOT yet verified on a production checkout
 
 Tracked: `utils/context_factors.py`, `config/runtime.py` (`features.context_factors_enabled`, default
-OFF). The Wednesday cron (`make week-auto`) sets `NFL_FEATURE_CONTEXT_FACTORS=1`, so the private
-half must exist for that to do anything:
+OFF). Since 2026-10-02 the Wednesday cron no longer sets `NFL_FEATURE_CONTEXT_FACTORS=1`, because
+the 2025 walk-forward measured higher yardage MAE with it on. The private half below must still
+exist for a backtest with the flag on to measure anything:
 
 - `config.py` mirrors the flag:
   `context_factors_enabled=_flag("NFL_FEATURE_CONTEXT_FACTORS", False)`.

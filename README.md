@@ -46,12 +46,18 @@ default and `ODDS_API_KEY` only matters for live odds.
 
 ### Weekly Workflow
 
+Use the next week that has not kicked off. `week-predict` refuses a week whose games are all
+played, so it never overwrites the projections that were made before them.
+
 ```bash
-make week-predict SEASON=2026 WEEK=2       # train on prior weeks, project this one
-make week-materialize SEASON=2026 WEEK=2   # build the value card
-make week-grade SEASON=2026 WEEK=2         # after the games: grade bets, record CLV
-make mae-gate SEASON=2026 WEEK=2           # fail if a position regressed past its ceiling
+make week-predict SEASON=2026 WEEK=5       # project the coming week from games before it
+make week-materialize SEASON=2026 WEEK=5   # build the value card (needs ODDS_API_KEY for lines)
+make week-grade SEASON=2026 WEEK=5         # after the games: grade bets, record CLV
+make mae-gate SEASON=2026 WEEK=5           # fail if a position regressed past its ceiling
 ```
+
+To score the model on a past season, use the walk-forward backtest instead:
+`make nfl-backtest SEASON=2025`.
 
 These are the local path. Production runs through a durable worker instead. See
 [docs/OPERATIONS.md](docs/OPERATIONS.md).
@@ -76,7 +82,7 @@ nflalgorithm/
 ├── api/                 # FastAPI service
 ├── frontend/            # Next.js dashboard
 ├── dashboard/           # Legacy Streamlit UI
-├── tests/               # 2,248 tests
+├── tests/               # pytest suite, runs in CI without the private files
 ├── docs/                # Architecture, operations, model card, troubleshooting
 ├── prop_integration.py  # 3-tier player matching
 └── materialized_value_view.py  # Dashboard data layer
@@ -84,8 +90,11 @@ nflalgorithm/
 
 Four modules are gitignored and supplied by the deployment: `data_pipeline.py`,
 `value_betting_engine.py`, `models/position_specific/weekly.py`, and an optional `config.py`
-override. Almost everything else works without them, and CI runs the full tracked suite.
-[CONTRIBUTING.md](CONTRIBUTING.md) explains what is affected.
+override. A public clone runs tracked baselines in their place: a recent-games projector in
+`models/position_specific/baseline.py` and textbook pricing in `utils/value_ranking.py`. So the
+whole workflow runs on a clone, just with a weaker model. Baseline rows carry
+`model_version = public_baseline_ewma_v1`, so they are never mistaken for the real model's.
+[CONTRIBUTING.md](CONTRIBUTING.md) explains how to measure a change against it.
 
 Math that CI must verify lives in tracked `utils/`, specifically so the private modules can call
 it while the tests still run on a clean clone.
@@ -123,50 +132,59 @@ Details and the measurements behind each choice are in [docs/MODEL_CARD.md](docs
 ### 2026 Week 1 (first graded week)
 
 All 16 games final. Every number here is read back out of `bet_outcomes` and `clv_weekly` after
-the fact, not simulated.
+the fact, not simulated. Each bet counts once, at the book with the best edge. The card lists the
+same bet at up to five books, and an earlier version of this table counted every book as its own
+bet (453 rows for 104 bets).
 
 | Metric | Result |
 |--------|--------|
-| Bets placed | 453 (447 graded, 6 pushes) |
-| Record | 238-209-6 |
-| Profit | +0.76 units |
-| ROI | +0.17% |
-| Average CLV | -11.5 basis points |
-| Coverage | 87 players across 16 games |
+| Bets placed | 104 (102 graded, 2 pushes) |
+| Record | 54-48-2 |
+| Profit | -0.33 units |
+| ROI | -0.3% |
+| Average CLV | -63 basis points |
+| Coverage | 88 players across 15 of the 16 games |
 
-Break-even. The negative CLV says the card was priced slightly worse than where the market
-closed, so the small profit came from outcomes rather than from beating the line.
+Break-even. Of the 101 bets with a closing quote, the market moved against 26 and toward 10. The
+other 65 never moved, so the average CLV rests on a quarter of the card.
 
 | Market | Bets | Win rate | ROI |
 |--------|------|----------|-----|
-| passing_yards | 69 | 72.5% | +35.9% |
-| receiving_yards | 242 | 50.4% | -5.4% |
-| rushing_yards | 132 | 47.0% | -11.6% |
-| receptions | 4 | 100.0% | +110.0% |
+| passing_yards | 17 | 64.7% | +21.3% |
+| receiving_yards | 55 | 50.0% | -6.2% |
+| rushing_yards | 31 | 50.0% | -5.8% |
+| receptions | 1 | 100.0% | +116.0% |
 
 Split by the edge the engine computed at placement:
 
 | Edge bucket | Bets | Win rate | ROI |
 |-------------|------|----------|-----|
-| 8-12% | 128 | 57.8% | +8.6% |
-| 12-16% | 144 | 57.6% | +8.5% |
-| 16-20% | 54 | 53.7% | +1.9% |
-| 20-25% | 58 | 46.6% | -12.6% |
-| 25%+ | 63 | 39.7% | -25.7% |
+| 8-12% | 23 | 56.5% | +5.7% |
+| 12-16% | 34 | 54.5% | +2.5% |
+| 16-20% | 18 | 61.1% | +16.6% |
+| 20-25% | 14 | 50.0% | -5.9% |
+| 25%+ | 15 | 35.7% | -33.0% |
 
-The ordering runs backwards from what the ranking assumes. A very large computed edge on a prop
-line more often means the projection is wrong than that the book is. The confidence tiers show
-the same split: HIGH took 211 bets for -15.1% ROI, MEDIUM took 236 for +13.8%. This is one week
-and 447 graded bets, so it is a flag to re-check after week 2, not yet a reason to move a
-threshold.
+The biggest edges did worst. A very large computed edge on a prop line more often means the
+projection is wrong than that the book is. The confidence tiers lean the same way: HIGH took 55
+bets for -5.5% ROI, MEDIUM took 49 for +5.5%. This is one week and 102 graded bets, too few to
+move a threshold on. Re-check once more weeks are graded.
 
 ### Projection Accuracy
 
 From the walk-forward backtest (`make nfl-backtest SEASON=2025`), which retrains the model each
-week on strictly earlier data: 5,117 predictions, overall MAE 26.88 yards, bias +2.81.
-Per-position worst single week was QB 59.5, RB 24.0, WR 26.0, TE 24.6, and `make mae-gate` fails
-the build about 10% above each. One-sigma coverage is 68.2% after the recalibration in
-`utils/nfl_sigma.py`.
+week on strictly earlier data, yardage markets only:
+
+| Model | Predictions | MAE (yards) | Bias |
+|-------|-------------|-------------|------|
+| Private model, current | 5,121 | 26.50 | +2.96 |
+| Public baseline (`baseline.py`) | 4,942 | 28.78 | +3.07 |
+
+The baseline is what a public clone runs. It is the number to beat.
+
+For the private model, the per-position worst single week was QB 58.2, RB 23.4, WR 26.2, TE 23.9,
+and `make mae-gate` fails the build about 10% above each. One-sigma coverage is 68.2% after the
+recalibration in `utils/nfl_sigma.py`.
 
 Season and week totals are in `weekly_performance`. Per-bet detail is in `bet_outcomes` and
 `clv_weekly`.
@@ -273,7 +291,7 @@ Never commit `.env`, database credentials or API keys.
 ## Testing
 
 ```bash
-make test          # 2,248 tests
+make test          # full pytest suite
 make lint          # mypy
 make format        # black + isort
 make validate SEASON=2025 WEEKS="1 2 3"   # score persisted pre-kickoff projections
@@ -292,8 +310,9 @@ markets, and the full NBA pipeline.
 
 Shipped but not yet validated on real data:
 
-- Game-script and usage-trend multipliers (`utils/context_factors.py`), live behind
-  `NFL_FEATURE_CONTEXT_FACTORS` with no backtest measuring them yet.
+- Game-script and usage-trend multipliers (`utils/context_factors.py`) behind
+  `NFL_FEATURE_CONTEXT_FACTORS`. The 2025 walk-forward measured them raising yardage MAE, so they
+  are off everywhere, the weekly job included.
 - Receptions and anytime touchdown, which no backtest has covered.
 - The market-mean blend in `utils/market_blend.py`, tested but not wired into the ranking path.
 

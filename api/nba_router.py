@@ -21,7 +21,10 @@ from pydantic import BaseModel
 from api.cache import nba_cache, make_cache_key
 from api.pipeline_router import require_pipeline_operator
 from api.nba_explainability import build_why_payload, build_why_payloads_batch
+from api.records import json_records
+from utils.best_line import best_line_per_bet
 from utils.db import fetchall, fetchone, read_dataframe
+from utils.grading import settled_roi_pct, settled_win_rate_pct
 
 log = logging.getLogger(__name__)
 
@@ -400,7 +403,7 @@ def nba_projections(
         team_matchup[g["away_team"]] = f"{g['away_team']} @ {g['home_team']}"
 
     projections = []
-    for _, row in df.iterrows():
+    for row in json_records(df):
         matchup = team_matchup.get(row["team"])
         projections.append(
             NbaProjection(
@@ -487,7 +490,7 @@ def nba_players(
             avg_fg3m=float(row["avg_fg3m"] or 0),
             avg_min=float(row["avg_min"] or 0),
         )
-        for _, row in df.iterrows()
+        for row in json_records(df)
     ]
 
     result = NbaPlayersResponse(players=players, season=season, total=len(players))
@@ -571,13 +574,8 @@ def _query_value_bets(
 def _apply_best_line_filter(df: Any, best_line_only: bool) -> Any:
     """Keep only the highest-edge line per player+market if requested."""
     if best_line_only and not df.empty and "player_id" in df.columns:
-        return (
-            df.sort_values("edge_percentage", ascending=False)
-            .groupby(["player_id", "market"], dropna=False)
-            .first()
-            .reset_index()
-            .sort_values("edge_percentage", ascending=False)
-        )
+        # The NBA card prices overs only, so a bet is a player and a market.
+        return best_line_per_bet(df, keys=("player_id", "market"))
     return df
 
 
@@ -605,7 +603,7 @@ def _build_bet_items(df: Any) -> list[NbaValueBetItem]:
             generated_at=str(row["generated_at"]) if row.get("generated_at") is not None else None,
             side=str(row["side"]) if row.get("side") is not None else None,
         )
-        for _, row in df.iterrows()
+        for row in json_records(df)
     ]
 
 
@@ -683,9 +681,8 @@ def nba_performance(
     total_losses = sum(d.losses for d in days)
     total_profit = sum(d.profit_units for d in days)
 
-    units_risked = total_wins + total_losses
-    overall_roi = (total_profit / units_risked * 100) if units_risked > 0 else 0.0
-    win_rate = (total_wins / (total_wins + total_losses) * 100) if (total_wins + total_losses) > 0 else 0.0
+    overall_roi = settled_roi_pct(total_wins, total_losses, total_profit)
+    win_rate = settled_win_rate_pct(total_wins, total_losses)
 
     result = NbaPerformanceResponse(
         total_bets=total_bets,
